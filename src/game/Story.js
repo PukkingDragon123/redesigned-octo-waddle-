@@ -145,6 +145,8 @@ export class Story {
         const { Ecosystem } = await m();
         this.eco = new Ecosystem(g);
         this.eco.roosts = [this.herd.elder, ...this.herd.adults.slice(0, 3)];
+        // adults lunging with open mouths really eat (the calf feeds through eat() below)
+        this.eco.feeders = this.herd.adults;
       }
     } catch (e) { console.warn('[skysong] ecosystem unavailable', e); this.eco = null; }
     try {
@@ -220,7 +222,8 @@ export class Story {
       Object.assign(w.drive, { charge: 0, sing: 0, hum: 0, fear: 0, feed: 0, mouth: 0, excite: 0 });
     }
     this.falcon?.setMode?.('hidden');
-    if (this.eco) { this.eco.threat = null; this.eco.songFocus = null; }
+    // a fresh sky: creatures are re-spawned for wherever the story resumes
+    if (this.eco) { this.eco.clear(); this.spawned.clear(); }
     this.weather.set(0, { lightning: 0 });
     this.weather.level = 0;
     g.wind.set(3, 0.3);
@@ -1053,6 +1056,7 @@ export class Story {
     for (const w of this.herd.adults) {
       if (mi >= G.uMovers.value.length) break;
       if (w.pos.distanceTo(cam) > 900) continue;
+      G.uMoverVel.value[mi].set(w.vel.x, w.vel.y, w.vel.z, 0);
       G.uMovers.value[mi++].set(w.pos.x, w.pos.y, w.pos.z, w.L * 0.45);
     }
     for (; mi < G.uMovers.value.length; mi++) G.uMovers.value[mi].w = 0;

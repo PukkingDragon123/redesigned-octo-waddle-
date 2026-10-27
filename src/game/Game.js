@@ -52,6 +52,8 @@ export class Game {
     this.ready = false;
     this.devUpdate = null;
     this.fadeRate = 0;
+    // automatic quality: measured once the world is built, until the player picks a quality
+    this.perf = { sum: 0, n: 0, cooldown: 3, calm: 0, ready: false };
     if (this.debug) {
       this.engine.post.grade.uFade.value = 0;
       this.veil?.remove();
@@ -68,6 +70,32 @@ export class Game {
     this.cloudSea.setQuality(q.cloudSteps);
     this.clouds.budget = Math.round(7000 * q.clouds);
     this.furQuality = q.fur;
+    this.story?.applyFurQuality?.();
+  }
+
+  /** Steps quality down while frames are slow (never in debug, never after a manual choice). */
+  governQuality(dtReal) {
+    const p = this.perf;
+    if (this.debug || !p.ready || !this.settings.autoQuality || document.hidden) return;
+    if ((p.cooldown -= dtReal) > 0) return;
+    p.sum += dtReal;
+    p.n++;
+    if (p.sum < 2.5) return;
+    const avg = p.sum / p.n;
+    p.sum = 0;
+    p.n = 0;
+    const order = ['high', 'medium', 'low'];
+    const i = order.indexOf(this.engine.qualityName);
+    if (avg > 1 / 40 && i >= 0 && i < order.length - 1) {
+      this.settings.quality = order[i + 1];
+      this.engine.setQuality(this.settings.quality);
+      this.applyQuality();
+      this.saveSettings();
+      p.cooldown = 3;
+      p.calm = 0;
+    } else if (avg < 1 / 50 && ++p.calm >= 4) {
+      p.ready = false; // settled
+    }
   }
 
   addSystem(s) {
@@ -142,6 +170,7 @@ export class Game {
   }
 
   update(dtReal) {
+    this.governQuality(dtReal);
     let dt = this.fixedDt || dtReal;
     dt *= this.timeScale;
     this.frame++;
@@ -176,7 +205,7 @@ export class Game {
 }
 
 function loadSettings() {
-  const def = { quality: 'high', music: 0.8, sound: 1.0, invertY: false, sensitivity: 1.0 };
+  const def = { quality: 'high', autoQuality: true, music: 0.8, sound: 1.0, invertY: false, sensitivity: 1.0 };
   try {
     const s = JSON.parse(localStorage.getItem('skysong.settings') || 'null');
     return Object.assign(def, s || {});

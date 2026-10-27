@@ -1,0 +1,21 @@
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: +(process.argv[2] || 420), height: +(process.argv[3] || 860) } });
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+await page.goto('http://127.0.0.1:5173/?debug&dt=0.05', { waitUntil: 'load' });
+await page.waitForFunction(() => window.__skysong && window.__skysong.story && window.__skysong.frame > 5, null, { timeout: 300000, polling: 500 });
+const r = await page.evaluate(() => {
+  const g = window.__skysong; const m = g.story.menu; const it = m.items.find((i) => i.action === 'new');
+  m.group.updateMatrixWorld(true);
+  const V = it.mesh.position.constructor;
+  const wp = it.mesh.getWorldPosition(new V());
+  const ndc = wp.clone().project(g.engine.camera);
+  m.ray.setFromCamera({ x: ndc.x, y: ndc.y }, g.engine.camera);
+  const hits = m.ray.intersectObjects(m.items.map((i) => i.mesh), false);
+  const ws = it.mesh.getWorldScale(new V());
+  return { ndc: [ndc.x, ndc.y, ndc.z], hits: hits.length, wp: wp.toArray(), ws: ws.toArray(), cam: g.engine.camera.position.toArray(), bs: it.mesh.geometry.boundingSphere && it.mesh.geometry.boundingSphere.radius, layersCam: g.engine.camera.layers.mask, rayLayers: m.ray.layers.mask, meshLayers: it.mesh.layers.mask };
+});
+console.log(JSON.stringify(r));
+await browser.close();

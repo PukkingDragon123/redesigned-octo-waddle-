@@ -26,8 +26,9 @@ npm run dev        # http://127.0.0.1:5173
 npm run build      # static build in dist/ (open with any static file server)
 ```
 
-A desktop browser with WebGL 2 is required (recent Chrome, Edge, Firefox or Safari). A
-dedicated GPU is recommended. Lower the quality in **Settings** if the sky feels heavy.
+A browser with WebGL 2 is required (recent Chrome, Edge, Firefox or Safari). A dedicated
+GPU is recommended. Quality steps down on its own if frames run slow; you can also pick it
+in **Settings**.
 
 ### Controls
 
@@ -42,6 +43,9 @@ dedicated GPU is recommended. Lower the quality in **Settings** if the sky feels
 | Hum (hold to sing) | F (or H, middle click) | X |
 | Sonic boom: hold to gather, release | R or right click | Y |
 | Pause | Esc | Start |
+
+On a touch screen: drag to look (you swim while touching), two fingers to hum, double-tap
+and hold to gather a sonic boom, flick sideways to roll, three-finger tap to pause.
 
 Controls are also listed under **Settings → Controls** in the floating title menu. That
 menu is the only place text ever appears.

@@ -104,6 +104,87 @@ export class Input {
     window.addEventListener('gamepadconnected', (e) => {
       this.gamepad = e.gamepad.index;
     });
+    this._initTouch(canvas);
+  }
+
+  /**
+   * Touch, with no on-screen controls: drag to look (and swim while touching), two fingers to
+   * hum, double-tap-and-hold to gather a sonic boom, a quick sideways flick to roll, a
+   * three-finger tap to pause, and a tap on the floating menu text to choose it. Gestures map
+   * onto the mouse buttons the game reads.
+   */
+  _initTouch(canvas) {
+    this.touches = new Map();
+    this.touchSwim = false;
+    this.rollFlick = 0;
+    let lastEnd = 0;
+    const setPointer = (t) => {
+      const r = canvas.getBoundingClientRect();
+      this.mouseX = ((t.clientX - r.left) / r.width) * 2 - 1;
+      this.mouseY = -(((t.clientY - r.top) / r.height) * 2 - 1);
+      this.mouseMovedThisFrame = true;
+    };
+    const press = (bit) => { if (!(this.mouseButtons & bit)) { this.mouseButtons |= bit; this.mousePressed |= bit; } };
+    const release = (bit) => { if (this.mouseButtons & bit) { this.mouseButtons &= ~bit; this.mouseReleased |= bit; } };
+    const sync = () => {
+      const n = this.touches.size;
+      this.touchSwim = this.lockWanted && n >= 1;
+      if (n >= 2) press(4); else release(4);
+    };
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      for (const t of e.changedTouches) {
+        const boom = this.touches.size === 0 && now - lastEnd < 280;
+        this.touches.set(t.identifier, { x: t.clientX, y: t.clientY, x0: t.clientX, y0: t.clientY, t0: now, boom });
+        if (boom && this.lockWanted) press(2);
+        setPointer(t);
+      }
+      if (this.touches.size === 3 && this.lockWanted) this.touchPause = true;
+      this.anyPressed = true;
+      this.usingGamepad = false;
+      this.lastActivity = now;
+      sync();
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const first = this.touches.keys().next().value;
+      for (const t of e.changedTouches) {
+        const tr = this.touches.get(t.identifier);
+        if (!tr) continue;
+        if (t.identifier === first && this.lockWanted) {
+          this.mouseDX += (t.clientX - tr.x) * 1.4;
+          this.mouseDY += (t.clientY - tr.y) * 1.4;
+        }
+        tr.x = t.clientX;
+        tr.y = t.clientY;
+        if (!this.lockWanted) setPointer(t);
+      }
+      this.lastActivity = performance.now();
+    }, { passive: false });
+    const end = (e) => {
+      e.preventDefault();
+      const now = performance.now();
+      for (const t of e.changedTouches) {
+        const tr = this.touches.get(t.identifier);
+        if (!tr) continue;
+        this.touches.delete(t.identifier);
+        const dx = t.clientX - tr.x0, dy = t.clientY - tr.y0;
+        const quick = now - tr.t0 < 250;
+        if (tr.boom) release(2);
+        if (!this.lockWanted && quick && Math.hypot(dx, dy) < 24) {
+          // a tap in the menu: point and click
+          setPointer(t);
+          this.mousePressed |= 1;
+        } else if (this.lockWanted && quick && this.touches.size === 0 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 2) {
+          this.rollFlick = Math.sign(dx);
+        }
+        if (this.touches.size === 0 && quick) lastEnd = now;
+      }
+      sync();
+    };
+    canvas.addEventListener('touchend', end, { passive: false });
+    canvas.addEventListener('touchcancel', end, { passive: false });
   }
 
   capturesKey(code) {
@@ -123,7 +204,10 @@ export class Input {
 
   setGameplayMode(on) {
     this.lockWanted = on;
-    if (!on) this.releaseLock();
+    if (!on) {
+      this.releaseLock();
+      this.touchSwim = false;
+    }
   }
 
   update() {
@@ -165,6 +249,8 @@ export class Input {
     this.mouseDY = 0;
     this.anyPressed = false;
     this.mouseMovedThisFrame = false;
+    this.rollFlick = 0;
+    this.touchPause = false;
   }
 
   _k(action) { return KEYMAP[action] || []; }
@@ -178,7 +264,7 @@ export class Input {
   // ---- Gameplay actions -------------------------------------------------
   get swim() {
     if (!this.enabled) return 0;
-    let v = this.key('swim') || (this.mouseButtons & 1 && this.locked) ? 1 : 0;
+    let v = this.key('swim') || (this.mouseButtons & 1 && this.locked) || this.touchSwim ? 1 : 0;
     v = Math.max(v, this.gpButtons[GP.RT]);
     return v;
   }
@@ -213,15 +299,15 @@ export class Input {
   get stickLookX() { return this.enabled ? this.gpAxes[2] : 0; }
   get stickLookY() { return this.enabled ? this.gpAxes[3] * (this.settings.invertY ? -1 : 1) : 0; }
 
-  get rollLeftPressed() { return this.enabled && (this.keyPressed('rollLeft') || this.gpPressed(GP.LB)); }
-  get rollRightPressed() { return this.enabled && (this.keyPressed('rollRight') || this.gpPressed(GP.RB)); }
+  get rollLeftPressed() { return this.enabled && (this.keyPressed('rollLeft') || this.gpPressed(GP.LB) || this.rollFlick < 0); }
+  get rollRightPressed() { return this.enabled && (this.keyPressed('rollRight') || this.gpPressed(GP.RB) || this.rollFlick > 0); }
   get hum() { return this.enabled && (this.key('hum') || this.gp(GP.X) || !!(this.mouseButtons & 4)); }
   get humPressed() { return this.enabled && (this.keyPressed('hum') || this.gpPressed(GP.X) || !!(this.mousePressed & 4)); }
   get humReleased() { return this.keyReleased('hum') || this.gpReleased(GP.X) || !!(this.mouseReleased & 4); }
   get boom() { return this.enabled && (this.key('boom') || this.gp(GP.Y) || !!(this.mouseButtons & 2)); }
   get boomPressed() { return this.enabled && (this.keyPressed('boom') || this.gpPressed(GP.Y) || !!(this.mousePressed & 2)); }
   get boomReleased() { return this.keyReleased('boom') || this.gpReleased(GP.Y) || !!(this.mouseReleased & 2); }
-  get pausePressed() { return this.keyPressed('pause') || this.gpPressed(GP.START); }
+  get pausePressed() { return this.keyPressed('pause') || this.gpPressed(GP.START) || this.touchPause; }
 
   // ---- Menu actions ------------------------------------------------------
   get menuUp() { return this.keyPressed('menuUp') || this.gpPressed(GP.UP) || (this.gpAxes[1] < -0.6 && this._stickEdge('up')); }

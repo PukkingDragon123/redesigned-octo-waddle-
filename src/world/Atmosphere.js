@@ -140,16 +140,16 @@ export const PRESETS = {
     vignette: 0.45, vigColor: C('#6a6488'), bloom: 0.08, threshold: 1.15, rays: 0.6,
   }),
   oasis: preset({
-    sunElev: 26, sunAz: -14, sun: C('#fff0d0', 2.6),
-    zenith: C('#4995dc'), horizon: C('#d4efe8'),
-    ambient: C('#acd4e6', 0.85), bounce: C('#f4eedb', 0.8), shadowTint: C('#dfeaf7'),
-    fog: C('#d2ebe4'), scatter: C('#ffeec4', 1.2),
+    sunElev: 19, sunAz: -12, sun: C('#ffe8c2', 2.55),
+    zenith: C('#3f8bd8'), horizon: C('#e2f3de'),
+    ambient: C('#acd4e6', 0.85), bounce: C('#f6ecd6', 0.82), shadowTint: C('#e2e4f8'),
+    fog: C('#d6ece0'), scatter: C('#ffe4ad', 1.45),
     cloudLit: C('#fffaf0', 1.08), cloudShadow: C('#99b2d0', 0.92),
     bankLit: C('#fff8ee'), bankShadow: C('#a6bed8'),
     fogDist: 0.00009, fogHeight: 0.012,
     planet: 0.75, cirrus: 0.6, bank: 0.17,
     lift: V(0.01, 0.015, 0.02), gain: V(1.02, 1.01, 0.98), sat: 1.1, contrast: 1.02,
-    vignette: 0.34, vigColor: C('#a7b9a8'), bloom: 0.08, threshold: 1.2, rays: 0.45,
+    vignette: 0.34, vigColor: C('#a7b9a8'), bloom: 0.09, threshold: 1.18, rays: 0.6,
   }),
 };
 

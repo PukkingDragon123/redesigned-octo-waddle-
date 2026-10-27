@@ -97,6 +97,8 @@ export class Story {
     this.world.build((p) => { this.buildProgress = p; }).then(() => {
       this.worldReady = true;
       this.prepareGathering();
+      // start judging the frame rate once the background building has settled
+      setTimeout(() => { g.perf.ready = true; }, 2500);
     });
     // first user gesture wakes the audio
     const wake = () => {
@@ -284,7 +286,7 @@ export class Story {
       if (g.engine.qualityName !== g.settings.quality) {
         g.engine.setQuality(g.settings.quality);
         g.applyQuality();
-        for (const w of this.herd.whales) w.furQuality = g.furQuality;
+        this.applyFurQuality();
       }
       return;
     }
@@ -871,6 +873,12 @@ export class Story {
     step();
   }
 
+  applyFurQuality() {
+    const g = this.game;
+    for (const w of this.herd?.whales || []) w.furQuality = g.furQuality;
+    for (const w of this.gathering || []) w.furQuality = g.furQuality * 0.5;
+  }
+
   showGathering(v) {
     for (const w of this.gathering || []) w.group.visible = v;
     this.gatheringOn = v;
@@ -1025,6 +1033,7 @@ export class Story {
     }
     this.updateGathering(dt);
     this.waterfallMist(dt);
+    this.oasisPetals(dt);
     this.weather.update(dt);
     this.booms.update(dt);
     this.falcon?.update?.(dt);
@@ -1184,6 +1193,25 @@ export class Story {
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});
     // cloud sea wakes when skimming
     g.cloudSea.uniforms.uTrailOn.value = calf.pos.y < 130 ? 1 : 0;
+  }
+
+  /** Blossom petals from the Oasis trees, drifting on the breeze around the calf. */
+  oasisPetals(dt) {
+    const ch = this.path.chapters[this.chapterIndex];
+    if (!ch || ch.id !== 'oasis' || this.state === 'menu') return;
+    const g = this.game, calf = this.herd.calf;
+    this.petalT = (this.petalT || 0) + dt;
+    const wind = g.wind.base;
+    while (this.petalT > 0.06) {
+      this.petalT -= 0.06;
+      const p = calf.pos.clone().add(new Vector3((Math.random() - 0.5) * 90, (Math.random() - 0.2) * 45, (Math.random() - 0.5) * 90));
+      const pink = Math.random();
+      g.mist.emit({
+        pos: p, vel: new Vector3(wind.x * 0.6 + (Math.random() - 0.5) * 1.5, -0.4 - Math.random() * 0.6, wind.z * 0.6 + (Math.random() - 0.5) * 1.5),
+        life: 7 + Math.random() * 5, size: 0.22 + Math.random() * 0.12, sizeEnd: 0.2,
+        color: [1.0, lerp(0.72, 0.93, pink), lerp(0.8, 0.93, pink)], alpha: 0.85, drag: 0.15, kind: 0, fadeIn: 1.2,
+      });
+    }
   }
 
   waterfallMist(dt) {

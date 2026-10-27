@@ -196,12 +196,21 @@ export class Menu {
       entries = [['Resume', 'resume'], ['Settings', 'settings'], ['Return to the Title', 'title']];
     } else if (page === 'settings') {
       entries = [
-        [`Quality — ${s.quality[0].toUpperCase() + s.quality.slice(1)}`, 'quality'],
+        [`Quality — ${s.quality[0].toUpperCase() + s.quality.slice(1)}${s.autoQuality ? ' (auto)' : ''}`, 'quality'],
         [`Music — ${pct(s.music)}`, 'music'],
         [`Sound — ${pct(s.sound)}`, 'sound'],
         [`Invert Look — ${s.invertY ? 'On' : 'Off'}`, 'invert'],
         [`Look Speed — ${s.sensitivity.toFixed(1)}`, 'sens'],
         ['Controls', 'controls'],
+        ['Back', 'back'],
+      ];
+    } else if (page === 'controls' && navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches) {
+      entries = [
+        ['Drag — look, and swim where you look', null],
+        ['Two fingers — hum  (hold to sing)', null],
+        ['Double-tap and hold — gather a sonic boom, release', null],
+        ['Flick sideways — barrel roll', null],
+        ['Three fingers — pause', null],
         ['Back', 'back'],
       ];
     } else if (page === 'controls') {
@@ -261,7 +270,7 @@ export class Menu {
     if (a === 'settings') return this.build('settings');
     if (a === 'controls') return this.build('controls');
     if (a === 'back') return this.build(this.returnPage || 'main');
-    if (a === 'quality') { const q = ['high', 'medium', 'low']; s.quality = q[(q.indexOf(s.quality) + 1) % 3]; return refresh(); }
+    if (a === 'quality') { const q = ['high', 'medium', 'low']; s.quality = q[(q.indexOf(s.quality) + 1) % 3]; s.autoQuality = false; return refresh(); }
     if (a === 'music') { s.music = Math.round(((s.music + 0.2) % 1.2) * 10) / 10; return refresh(); }
     if (a === 'sound') { s.sound = Math.round(((s.sound + 0.2) % 1.2) * 10) / 10; return refresh(); }
     if (a === 'invert') { s.invertY = !s.invertY; return refresh(); }
@@ -288,11 +297,15 @@ export class Menu {
     const right = new Vector3().crossVectors(fwd, new Vector3(0, 1, 0)).normalize();
     const halfH = this.dist * Math.tan((cam.fov * Math.PI) / 360);
     const halfW = halfH * cam.aspect;
-    const fit = Math.min(1, (halfW * 1.45) / this.title.width, (halfH * 1.7) / 26);
+    const fit = Math.min(1, (halfW * 1.68) / this.title.width, (halfH * 1.7) / 26);
     this.group.scale.setScalar(fit);
     const across = -halfW * 0.86 + this.title.width * 0.5 * fit;
     const target = cam.position.clone().addScaledVector(fwd, this.dist).addScaledVector(right, across).add(new Vector3(0, -this.dist * 0.04, 0));
-    if (this.anchor.lengthSq() === 0) this.anchor.copy(target);
+    // snap on the first frame and after camera cuts, glide otherwise
+    if (this.anchor.lengthSq() === 0 || this.anchor.distanceTo(target) > this.dist * 0.5) {
+      this.anchor.copy(target);
+      this.anchorQ.copy(cam.quaternion);
+    }
     this.anchor.lerp(target, 1 - Math.exp(-dt * 2.2));
     this.group.position.copy(this.anchor);
     this.anchorQ.slerp(cam.quaternion, 1 - Math.exp(-dt * 2.2));

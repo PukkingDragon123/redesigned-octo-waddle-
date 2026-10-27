@@ -10,7 +10,7 @@
 //   eco.addRaySchool(center, 7);
 //   eco.addJellies(center, 60, 10);
 //   eco.addFlock(center, 60);
-//   eco.eat(calfMouthPos, 0.8, dt);           // from the calf every frame while feeding
+//   eco.eat(calfMouthPos, 0.8, dt, calf);     // from the calf every frame while feeding
 //   eco.scatter(boomCenter, radius, strength); // sonic booms
 //   eco.songFocus = herd.songCenter;          // rays circle, krill spiral
 //   eco.threat = falcon.pos;                  // everything flees, birds scatter
@@ -60,6 +60,7 @@ export class Ecosystem {
 
     this._transient = []; // short-lived predators: mouths, shocks
     this._mouthOf = new WeakMap();
+    this._mouthByOwner = new WeakMap();
     this._mouths = [];
     this._fronts = [];
     this._recentScatter = [];
@@ -127,29 +128,43 @@ export class Ecosystem {
   /**
    * Krill inside the mouth are eaten (hidden, respawned into their swarm later) with a small
    * sparkle. The mouth also scares nearby krill (they flee, but slower than a whale).
+   * Pass `owner` (e.g. the whale) so nearby mouths never swap their frame-to-frame records.
    * Returns the number eaten by this call.
    */
-  eat(mouthPos, mouthRadius = 0.8, dt = 1 / 60) {
+  eat(mouthPos, mouthRadius = 0.8, dt = 1 / 60, owner = null) {
     if (!this.enabled) return 0;
     const t = this.game.time;
-    // match this mouth to last frame's (works whether or not the caller reuses its Vector3)
     let rec = null;
-    for (const m of this._mouths) {
-      if (t - m.t < 0.3 && m.t !== t && m.pos.distanceToSquared(mouthPos) < 36) { rec = m; break; }
-      if (m.t === t && m.pos.distanceToSquared(mouthPos) < 1e-6) { rec = m; break; }
+    if (owner) rec = this._mouthByOwner.get(owner) || null;
+    else {
+      // match this mouth to last frame's nearest (works whether or not the caller reuses its Vector3)
+      let best = 36;
+      for (const m of this._mouths) {
+        const d2 = m.pos.distanceToSquared(mouthPos);
+        if (m.t === t) {
+          if (d2 < 1e-6) { rec = m; break; }
+        } else if (t - m.t < 0.3 && d2 < best) { rec = m; best = d2; }
+      }
+    }
+    if (!rec) {
+      rec = { pos: new Vector3(), vel: new Vector3(), prevSeg: new Vector3(), t: -Infinity, pred: null };
+      if (owner) this._mouthByOwner.set(owner, rec);
+      else {
+        if (this._mouths.length > 8) this._mouths.shift();
+        this._mouths.push(rec);
+      }
     }
     let prev = null;
-    if (rec) {
-      const el = t - rec.t;
-      if (el > 1e-4) {
-        rec.vel.subVectors(mouthPos, rec.pos).divideScalar(el);
-        prev = rec.prevSeg.copy(rec.pos);
-      } else prev = rec.prevSeg;
-    } else {
-      rec = { pos: new Vector3(), vel: new Vector3(), prevSeg: new Vector3(), t, pred: null };
-      if (this._mouths.length > 8) this._mouths.shift();
-      this._mouths.push(rec);
-    }
+    const el = t - rec.t;
+    if (el >= 0.3) {
+      // new, or not seen for a while: no sweep from a stale position, no speed
+      rec.vel.set(0, 0, 0);
+      rec.prevSeg.copy(mouthPos);
+    } else if (el > 1e-4) {
+      rec.vel.subVectors(mouthPos, rec.pos).divideScalar(el);
+      if (rec.vel.lengthSq() > 3600) rec.vel.setLength(60);
+      prev = rec.prevSeg.copy(rec.pos);
+    } else prev = rec.prevSeg;
     rec.pos.copy(mouthPos);
     rec.t = t;
     const n = this.krill.eat(mouthPos, prev, mouthRadius);
@@ -190,9 +205,11 @@ export class Ecosystem {
     this.plankton.clear();
     this._transient.length = 0;
     this._mouths.length = 0;
+    this._mouthByOwner = new WeakMap();
     this._fronts.length = 0;
     this.songFocus = null;
     this.threat = null;
+    this._threatT = -1;
   }
 
   /** Remove groups whose home is farther than `radius` from `center` (long migrations). */
@@ -355,7 +372,7 @@ export class Ecosystem {
       const rr = sw.extent + r + 20;
       if (sw.center.distanceToSquared(pos) < rr * rr) { near = true; break; }
     }
-    if (near) this.eat(pos, r, dt);
+    if (near) this.eat(pos, r, dt, f);
   }
 
   _addTransient(q) {

@@ -214,6 +214,7 @@ void main() {
 
 const SPRITE_VERT = /* glsl */ `
 ${UNIFORMS}
+${SHADOW}
 ${LIGHTING}
 ${ECO_GLSL}
 ${ECO_VERT_GLSL}
@@ -266,11 +267,14 @@ void main() {
   // a tumbling carapace normal: glints travel through the ribbon as krill turn
   float ph = uTime * (1.1 + 1.9 * fract(aKSeed.x * 7.13)) + aKSeed.x * 40.0;
   vec3 n = normalize(vec3(sin(ph) * 0.75, 0.5 + 0.35 * sin(ph * 0.7 + 1.0), cos(ph * 1.3) * 0.75));
+  // shadowed like the near meshes, so krill keep their brightness across the LOD band
+  float sh = sampleShadow(C, uSunDir);
   Surface s = makeSurface(albedo, n, C);
+  s.shadow = sh;
   s.wrap = 0.42; s.rim = 0.25; s.trans = 1.0;
   vec3 lit = stylizedLight(s);
   vec3 V = normalize(uCamPos - C);
-  float glint = pow(max(dot(reflect(-uSunDir, n), V), 0.0), 36.0);
+  float glint = pow(max(dot(reflect(-uSunDir, n), V), 0.0), 36.0) * sh;
   float fog = fogAmount(C);
   // a swarm behind / inside cloud is veiled by it (clouds do not write depth)
   float veil = uKVeil[int(clamp(floor(aKSeed.w), 0.0, 31.0))];
@@ -653,6 +657,8 @@ export class KrillSystem {
         swirlT = smoothstep(150 + sw.extent, 50 + sw.extent, d);
         singing = true;
         tgt.copy(F);
+        // kept so the spirals unwind in place after the song ends (songFocus goes null)
+        (sw.songF || (sw.songF = new Vector3())).copy(F);
         sw.songR0 = ctx.songRadius * 0.9 + 4;
         sw.songR1 = sw.songR0 + Math.max(12, sw.R * 1.2);
       }
@@ -722,7 +728,7 @@ export class KrillSystem {
     const flowS = sw.flow / (TAU * sw.R * 1.25);
     const thick = sw.thick;
     const swirl = sw.swirl;
-    const F = ctx.songFocus;
+    const F = sw.songF || null;
     const fx = F ? F.x : 0, fy = F ? F.y : 0, fz = F ? F.z : 0;
     const sR0 = sw.songR0, sR1 = sw.songR1;
     const wob = 0.35 + sw.R * 0.02;
@@ -763,7 +769,7 @@ export class KrillSystem {
       ty += (pc * wb + ps * wa) * wob * 0.5 + cy;
       tz += (ps * wa + pc * wb) * wob + cz;
       let song = 0;
-      if (swirl > 0.002) {
+      if (swirl > 0.002 && F) {
         const rr = sR0 + (sR1 - sR0) * SPIR[i * 2];
         const om = (sw.flow * 0.7) / rr;
         const ang = SPIR[i * 2 + 1] + rr * 0.12 - time * om;
@@ -921,7 +927,8 @@ export class KrillSystem {
       sw.rate = rate;
       sw.acc += dt;
       // staggered by swarm index so reduced-rate swarms spread evenly over frames
-      if ((this.frame + si) % rate !== 0 && sw.acc < 0.25) continue;
+      if (!sw.forceSim && (this.frame + si) % rate !== 0 && sw.acc < 0.25) continue;
+      sw.forceSim = false;
       const sdt = Math.min(sw.acc, 0.1);
       sw.acc = 0;
       this._simSwarm(sw, sdt, ctx, d < meshDist ? nearD2 : 0);
@@ -978,6 +985,7 @@ export class KrillSystem {
       const rr = sw.extent + radius + Math.sqrt(sl2);
       if (sw.center.distanceToSquared(cur) > rr * rr) continue;
       const r = sw.rng;
+      let here = 0;
       for (let i = sw.start, end = sw.start + sw.count; i < end; i++) {
         if (EAT[i] > 0 || SC[i] < 0.3) continue;
         const i3 = i * 3;
@@ -990,7 +998,7 @@ export class KrillSystem {
         EAT[i] = lerp(7, 18, r());
         SC[i] = 0;
         this.aVel.array[i * 4 + 3] = 0;
-        eaten++;
+        here++;
         if (glow && sparkles < maxSparkle && (opts.sparkleChance ?? 1) > Math.random()) {
           sparkles++;
           const night = G.uNight.value;
@@ -1004,9 +1012,10 @@ export class KrillSystem {
           });
         }
       }
-      if (eaten) {
+      if (here) {
         markRange(this.aVel, sw.start * 4, sw.count * 4);
-        sw.alive = Math.max(0, sw.alive - eaten);
+        sw.alive = Math.max(0, sw.alive - here);
+        eaten += here;
       }
     }
     return eaten;
@@ -1032,7 +1041,7 @@ export class KrillSystem {
         FL[i] = Math.min(0.999, FL[i] + 0.6 + strength * 0.3);
         hit = true;
       }
-      if (hit) sw.acc = Math.max(sw.acc, 0.25);
+      if (hit) sw.forceSim = true;
     }
   }
 

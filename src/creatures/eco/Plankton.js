@@ -245,10 +245,10 @@ export class PlanktonSystem {
 
   prune(center, r2) {
     const n0 = this.patches.length;
+    // pruned clusters stay in _done so sync() does not re-seed them (clear() resets it)
     this.patches = this.patches.filter((p) => {
       const c = p.cluster.center;
       const keep = c.distanceToSquared(center) <= r2;
-      if (!keep) this._done.delete(p.cluster);
       return keep;
     });
     if (this.patches.length !== n0) this._rebuild();

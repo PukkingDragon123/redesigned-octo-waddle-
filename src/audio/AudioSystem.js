@@ -12,6 +12,7 @@
 //         └► musicWet ─► duckW ─► musicVolW ─► reverb                         │
 //   stingers ─► stingDry / stingWet (join after the duck: never ducked)       ├─► master
 //   voices / sfx / ambience ─► world (sound vol) ─► worldLP (clouds) ─────────┤
+//   thunder, lightning ─► weather gate (open in a storm) ─► sfx / worldWet    │
 //   sends ─► worldWet ─► reverb: 5 s IR as head + delayed-tail convolvers ────┤
 //   whale calls ─► echo ─► sky echo (ping-pong feedback delay) ───────────────┘
 //   master ─► 32 Hz low-cut ─► high shelf ─► compressor ─► limiter ─► soft clip (-1.1 dBFS)
@@ -34,6 +35,18 @@ const WORLD_TRIM = 1.0;
 const volCurve = (v) => {
   const x = clamp(finite(+v, 1));
   return x * x;
+};
+
+/** Voice stealing: should engine `a` go before `b`? Released, then lowest prio, farthest, oldest. */
+const stealFirst = (a, b, now) => {
+  const ha = a.humming && now < a.humEnd;
+  const hb = b.humming && now < b.humEnd;
+  if (ha !== hb) return hb;
+  if (a.prio !== b.prio) return a.prio < b.prio;
+  const da = a.io ? a.io.lastD : 0;
+  const db = b.io ? b.io.lastD : 0;
+  if (da !== db) return da > db;
+  return a.lastActive < b.lastActive;
 };
 
 export class AudioSystem {
@@ -82,12 +95,17 @@ export class AudioSystem {
     try {
       if (!this.ctx && !this._createContext()) return false;
       const ctx = this.ctx;
+      // a hidden tab stays suspended: _onVis resumes the context when the page is shown again
+      const hidden = () => !!this._onVis && document.hidden;
       // resume synchronously inside the gesture (Safari needs that), then build
       if (!this.offline && ctx.state !== 'running' && ctx.state !== 'closed') {
-        try {
-          const p = ctx.resume();
-          if (p && p.catch) p.catch(() => {});
-        } catch (e) { /* ignore */ }
+        if (hidden()) this._hiddenSuspend = true;
+        else {
+          try {
+            const p = ctx.resume();
+            if (p && p.catch) p.catch(() => {});
+          } catch (e) { /* ignore */ }
+        }
       }
       if (!this._starting) {
         this._starting = this._init().catch((e) => {
@@ -97,7 +115,8 @@ export class AudioSystem {
       }
       await this._starting;
       if (!this.offline && ctx.state === 'suspended') {
-        await Promise.race([ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 400))]);
+        if (hidden()) this._hiddenSuspend = true;
+        else await Promise.race([ctx.resume().catch(() => {}), new Promise((r) => setTimeout(r, 400))]);
       }
       return this.ready;
     } catch (e) {
@@ -122,7 +141,8 @@ export class AudioSystem {
         this._onVis = () => {
           try {
             if (document.hidden) {
-              if (this.ctx.state === 'running') {
+              // not only when 'running': a resume() still pending would win and play in the background
+              if (this.ctx.state !== 'closed') {
                 this._hiddenSuspend = true;
                 this.ctx.suspend().catch(() => {});
               }
@@ -249,6 +269,12 @@ export class AudioSystem {
     B.worldVolW = g(sv);
     B.worldWet.connect(B.worldVolW);
     B.worldVolW.connect(B.verbIn);
+    // weather gate (thunder, lightning): the ambience closes it when the storm is over, so
+    // thunder still on its way (delayed by distance) does not roll in over the title screen
+    B.weather = g(1);
+    B.weatherWet = g(1);
+    B.weather.connect(B.sfx);
+    B.weatherWet.connect(B.worldWet);
     // sky echo: ping-pong feedback delay, darker on every repeat
     B.echo = g(1);
     B.echoVol = g(sv);
@@ -548,13 +574,10 @@ export class AudioSystem {
   _admitVoiceEngine(v) {
     this._engines.add(v);
     if (this._engines.size <= MAX_VOICE_ENGINES) return;
-    // steal the quietest-looking engine: not humming, least recently active
+    const now = this.ctx.currentTime;
     let victim = null;
-    for (const e of this._engines) {
-      if (e === v) continue;
-      if (!victim || (victim.humming && !e.humming) || (e.humming === victim.humming && e.lastActive < victim.lastActive)) victim = e;
-    }
-    if (victim) victim._killEngine(this.ctx.currentTime, 0.03);
+    for (const e of this._engines) if (e !== v && (!victim || stealFirst(e, victim, now))) victim = e;
+    if (victim) victim._killEngine(now, 0.03);
   }
 
   _releaseVoiceEngine(v) {

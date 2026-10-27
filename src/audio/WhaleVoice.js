@@ -15,6 +15,14 @@ const VOW = { oo: [300, 700], oh: [430, 820], ah: [650, 1080], ee: [330, 1900], 
 
 let driveCache = null;
 
+// Glide a param, or (force) jump it: an idle chain's params stay frozen where it last sounded.
+const move = (param, v, now, tc, force) => {
+  if (force) {
+    cancelFrom(param, now);
+    setAt(param, v, now);
+  } else glide(param, v, now, tc);
+};
+
 export class WhaleVoice {
   constructor(sys, profile = {}) {
     this.sys = sys;
@@ -39,6 +47,8 @@ export class WhaleVoice {
     this.charge = null;
     this.humming = false;
     this.humEnd = 0;
+    this.prio = 1; // voice stealing: lower goes first
+    this._callEnd = 0;
     this.curMidi = base;
     this.lastActive = -1e9;
     this.disposed = false;
@@ -71,6 +81,8 @@ export class WhaleVoice {
       let m = finite(midi, this.p.base);
       const key = sys._keyNow();
       if (opts.snap !== false) m = snapToScale(m, key.root, key.scale);
+      // the game hums the player and the mother at gain 1, everyone else softer
+      this.prio = finite(opts.prio, clamp(finite(opts.gain, 1), 0, 2));
       const e = this._engine(t);
       if (!e) return;
       const k = this.p.formant;
@@ -129,7 +141,8 @@ export class WhaleVoice {
 
   release(fadeSec = 0.4) {
     try {
-      if (!this.eng || !this.sys.ready) {
+      // not `ready`: on a suspended or interrupted context the fade plays out on resume
+      if (!this.eng || !this.sys.ctx) {
         this.humming = false;
         return;
       }
@@ -156,6 +169,7 @@ export class WhaleVoice {
       const def = this._callDef(String(kind));
       if (!def) return;
       const now = sys.ctx.currentTime;
+      if (!this._attached(now)) this._place(now, true);
       this._playCall(def, now + 0.02);
       this.lastActive = now;
     } catch (err) {
@@ -264,11 +278,7 @@ export class WhaleVoice {
     if (force || Math.abs(x - io.px) + Math.abs(y - io.py) + Math.abs(z - io.pz) > 0.02) {
       io.px = x; io.py = y; io.pz = z;
       if (p.positionX) {
-        if (force) {
-          setAt(p.positionX, x, now); setAt(p.positionY, y, now); setAt(p.positionZ, z, now);
-        } else {
-          glide(p.positionX, x, now, 0.03); glide(p.positionY, y, now, 0.03); glide(p.positionZ, z, now, 0.03);
-        }
+        move(p.positionX, x, now, 0.03, force); move(p.positionY, y, now, 0.03, force); move(p.positionZ, z, now, 0.03, force);
       } else if (p.setPosition) p.setPosition(x, y, z);
     }
     const dx = x - L.x;
@@ -277,12 +287,17 @@ export class WhaleVoice {
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (force || Math.abs(d - io.lastD) > Math.max(0.5, io.lastD * 0.04)) {
       io.lastD = d;
-      glide(io.air.frequency, clamp(20000 / (1 + d / 80), 500, 20000), now, 0.08);
+      move(io.air.frequency, clamp(20000 / (1 + d / 80), 500, 20000), now, 0.08, force);
       const ref = p.refDistance;
       const dry = ref / Math.max(ref, d);
-      glide(io.verb.gain, this.verbBase * Math.sqrt(dry), now, 0.1);
-      glide(io.echo.gain, this.echoBase * Math.sqrt(dry), now, 0.1);
+      move(io.verb.gain, this.verbBase * Math.sqrt(dry), now, 0.1, force);
+      move(io.echo.gain, this.echoBase * Math.sqrt(dry), now, 0.1, force);
     }
+  }
+
+  /** True while a source feeds the io chain (only then are its params processed). */
+  _attached(now) {
+    return !!(this.eng || this.charge || now < this._callEnd);
   }
 
   _engine(t) {
@@ -290,6 +305,8 @@ export class WhaleVoice {
     const io = this._io();
     const sys = this.sys;
     if (!io || !sys.bank) return null;
+    const now = sys.ctx.currentTime;
+    if (!this._attached(now)) this._place(now, true);
     sys._admitVoiceEngine(this);
     const ctx = sys.ctx;
     const W = getWaves(ctx);
@@ -402,6 +419,7 @@ export class WhaleVoice {
     const io = this._io();
     const sys = this.sys;
     if (!io || !sys.bank) return;
+    if (!this._attached(now)) this._place(now, true);
     const ctx = sys.ctx;
     const W = getWaves(ctx);
     const G = (v) => {
@@ -453,7 +471,8 @@ export class WhaleVoice {
   update(now) {
     if (!this.io) return;
     if (this.humming && now > this.humEnd) this.humming = false;
-    this._place(now, false);
+    // idle: leave the params alone (gliding them would only queue events); placed on attach
+    if (this._attached(now)) this._place(now, false);
     if (this.charge && this.charge.stopping && now > this.charge.killAt) this._killCharge(now);
     if (this.eng && !this.humming && now - Math.max(this.lastActive, this.humEnd) > 3) this._killEngine(now);
   }
@@ -636,6 +655,7 @@ export class WhaleVoice {
       }
     });
     const end = t + T + 0.06;
+    this._callEnd = Math.max(this._callEnd, end);
     for (const n of [osc, lfo, sub, nsrc]) {
       if (!n) continue;
       if (n === nsrc) {

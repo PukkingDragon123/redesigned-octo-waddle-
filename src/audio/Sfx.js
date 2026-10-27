@@ -1,7 +1,8 @@
 // One-shot sound effects, synthesised per trigger from short-lived node graphs. Optional
 // world positions are spatialised (equal-power panner + distance + air absorption);
-// thunder is delayed by its distance at 343 m/s. Musical effects (sparkle, chime) are
-// tuned to the current chord.
+// thunder is delayed by its distance at 343 m/s (here only: callers pass the strike as it
+// happens). Thunder and lightning go through the weather gate, which is open only in a
+// storm. Musical effects (sparkle, chime) are tuned to the current chord.
 import { clamp, lerp, glide, setAt, rampAt, expAt, disconnect, stopAt, startAt, finite, driveCurve, makeRng } from './util.js';
 import { chordTones } from './theory.js';
 import { getWaves } from './instruments.js';
@@ -60,11 +61,14 @@ export class Sfx {
 
   /**
    * Output node for an effect. Positional effects get a panner with distance attenuation
-   * and an air-absorption lowpass; `nodes` collects everything for cleanup.
+   * and an air-absorption lowpass; `nodes` collects everything for cleanup. `o.weather`
+   * routes it through the weather gate.
    */
   _out(t, pos, nodes, o = {}) {
     const ctx = this.ctx;
     const bus = this.sys.bus;
+    const toDry = o.weather ? bus.weather : bus.sfx;
+    const toWet = o.weather ? bus.weatherWet : bus.worldWet;
     const input = ctx.createGain();
     nodes.push(input);
     let last = input;
@@ -86,7 +90,7 @@ export class Sfx {
       } else p.setPosition(pos.x, pos.y, pos.z);
       input.connect(air);
       air.connect(p);
-      p.connect(bus.sfx);
+      p.connect(toDry);
       nodes.push(air, p);
       last = p;
       if (o.wet) {
@@ -94,16 +98,16 @@ export class Sfx {
         const w = ctx.createGain();
         w.gain.value = o.wet * Math.sqrt((o.ref || 20) / Math.max(o.ref || 20, d));
         air.connect(w);
-        w.connect(bus.worldWet);
+        w.connect(toWet);
         nodes.push(w);
       }
     } else {
-      input.connect(bus.sfx);
+      input.connect(toDry);
       if (o.wet) {
         const w = ctx.createGain();
         w.gain.value = o.wet;
         input.connect(w);
-        w.connect(bus.worldWet);
+        w.connect(toWet);
         nodes.push(w);
       }
     }

@@ -15,11 +15,12 @@ uniform vec3 uBoxCenter;
 uniform float uBox;
 uniform float uFall;
 uniform float uRain;
+uniform vec3 uRainOff; // wind-carried offset, integrated on the CPU
 varying float vA;
 varying vec2 vUv;
 void main() {
   vec3 vel = vec3(uWind.x * 0.8, -uFall * aDrop.w, uWind.z * 0.8);
-  vec3 p = aDrop.xyz + vel * uTime * 0.07;
+  vec3 p = aDrop.xyz + uRainOff + vec3(0.0, vel.y * uTime * 0.07, 0.0);
   p = mod(p - uBoxCenter + uBox * 0.5, uBox) - uBox * 0.5 + uBoxCenter;
   // stretch the drop along its velocity, facing the camera
   vec3 dir = normalize(vel);
@@ -93,6 +94,7 @@ export class Weather {
     geo.instanceCount = N;
     this.rainU = Object.assign({}, G, {
       uBoxCenter: { value: new Vector3() }, uBox: { value: box }, uFall: { value: 34 }, uRain: { value: 0 },
+      uRainOff: { value: new Vector3() },
     });
     this.rainMesh = new Mesh(geo, new ShaderMaterial({
       vertexShader: RAIN_VERT, fragmentShader: RAIN_FRAG, uniforms: this.rainU,
@@ -192,6 +194,10 @@ export class Weather {
     this.rainU.uRain.value = this.rain;
     this.rainMesh.visible = this.rain > 0.01;
     this.rainU.uBoxCenter.value.copy(g.engine.camera.position);
+    // drops drift with the live wind (integrated, so gusts do not jolt the whole curtain)
+    const off = this.rainU.uRainOff.value, box = this.rainU.uBox.value, w = g.wind.base;
+    off.x = (off.x + w.x * 0.056 * dt) % box;
+    off.z = (off.z + w.z * 0.056 * dt) % box;
     G.uWet.value = damp(G.uWet.value, this.rain, 0.3, dt);
     // lightning
     if (this.lightningRate > 0 && L > 0.5 && this.r() < this.lightningRate * dt * L) this.strike();

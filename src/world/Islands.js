@@ -211,17 +211,22 @@ export function islandDistance(isl, p) {
   const s = isl.scale || 1;
   const C = isl.collider;
   const R = C.R * s, H = C.H * s, D = C.D * s, top = C.top * s;
-  let rad;
+  let rad, cx = 0, cz = 0;
   if (ly > 0) {
-    const k = ly / Math.max(top, 1);
-    if (k >= 1) return ly - top;
-    rad = R * Math.sqrt(1 - k * k);
+    const h = Math.hypot(lx, lz);
+    if (h >= R) return Math.hypot(h - R, ly); // beside/above the rim: distance to the rim edge
+    const q = h / R;
+    return ly - top * Math.sqrt(1 - q * q); // over the meadow: height above the dome (negative inside)
   } else if (ly > -H) {
     rad = R;
   } else {
+    // underside cone, its axis leaning toward the offset tip
     const u = (-H - ly) / D;
-    if (u >= 1) return Math.hypot(lx, lz, ly + H + D) ;
+    const w = Math.min(u, 1) ** 2;
+    cx = C.tip.x * s * w;
+    cz = C.tip.z * s * w;
+    if (u >= 1) return Math.hypot(lx - cx, lz - cz, ly + H + D);
     rad = R * Math.pow(1 - u, 1.25);
   }
-  return Math.hypot(lx, lz) - rad;
+  return Math.hypot(lx - cx, lz - cz) - rad;
 }

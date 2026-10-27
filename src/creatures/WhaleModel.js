@@ -4,7 +4,7 @@
 import {
   BufferGeometry, Float32BufferAttribute, Uint16BufferAttribute, Uint32BufferAttribute,
   Bone, Skeleton, SkinnedMesh, Mesh, Group, ShaderMaterial, Color, Vector3, Vector4, Matrix4,
-  Quaternion, SphereGeometry, DoubleSide,
+  Quaternion, Sphere, SphereGeometry, DoubleSide,
 } from 'three';
 import { G } from '../render/Globals.js';
 import {
@@ -13,7 +13,7 @@ import {
 } from './whaleShaders.js';
 import { smoothstep, clamp, lerp, rng } from '../core/math.js';
 
-const T_ORIGIN = 0.55;
+export const T_ORIGIN = 0.55;
 
 // ---- Profiles (fractions of body length) ------------------------------------------------
 const PROFILES = {
@@ -405,7 +405,8 @@ export class WhaleModel {
       // skin weights
       let ws = this.chainWeights(t);
       if (split === 'lower' && t > P.hinge - 1e-6) {
-        const wj = smoothstep(P.hinge, P.hinge + 0.06, t);
+        // a wide ramp that starts from the cheek weight at the hinge, so the open jaw doesn't fold the skin
+        const wj = Math.max(smoothstep(P.hinge, P.hinge + 0.12, t), 0.25 * smoothstep(-0.3, -0.8, dorsal));
         ws = ws.map(([b, w]) => [b, w * (1 - wj)]);
         ws.push([bi.jaw, wj]);
       } else if (split === 'lowerPre') {
@@ -480,7 +481,7 @@ export class WhaleModel {
           inner.push(1);
           let ws = this.chainWeights(t);
           if (!isPalate) {
-            const wj = smoothstep(P.hinge, P.hinge + 0.06, t);
+            const wj = smoothstep(P.hinge, P.hinge + 0.12, t); // matches the lip corner's ramp
             ws = ws.map(([b, w]) => [b, w * (1 - wj)]);
             ws.push([bi.jaw, wj]);
           }
@@ -1001,6 +1002,8 @@ export class WhaleModel {
     const ident = new Matrix4();
     for (const m of [this.body, this.fur, this.fins.R, this.fins.L, this.rear.R, this.rear.L, this.flukes.R, this.flukes.L]) {
       m.bind(this.skeleton, ident);
+      // preset bounds (radius L holds the fins): three would otherwise skin every vertex on the CPU at first draw
+      m.boundingSphere = new Sphere(new Vector3(), this.L);
     }
     this.meshes = [this.body, this.fins.R, this.fins.L, this.rear.R, this.rear.L, this.flukes.R, this.flukes.L];
   }

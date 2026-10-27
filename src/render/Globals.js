@@ -30,6 +30,9 @@ export const G = {
   // Weather
   uWind: { value: new Vector3(2, 0, 1) },
   uGust: { value: 0 },
+  // integrated by Wind.js, so the meadow waves and lake ripples speed up with the wind smoothly
+  uWavePhase: { value: 0 },
+  uRipple: { value: new Vector2() },
   uWet: { value: 0 },
   uFlash: { value: 0 },
   uFlashPos: { value: new Vector3(0, 300, 0) },

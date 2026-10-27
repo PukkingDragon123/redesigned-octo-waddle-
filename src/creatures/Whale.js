@@ -1,6 +1,6 @@
 // A skywhale entity: model + animator + flight physics. Used by the player calf and the herd.
 import { Vector3, Quaternion, Euler } from 'three';
-import { WhaleModel } from './WhaleModel.js';
+import { WhaleModel, T_ORIGIN } from './WhaleModel.js';
 import { WhaleAnimator } from './WhaleAnimator.js';
 import { clamp, damp, wrapAngle, lerp, smoothstep, dirFromYawPitch, TAU, easeInOutSine } from '../core/math.js';
 
@@ -145,6 +145,15 @@ export class Whale {
     this.up.set(0, 1, 0).applyQuaternion(this.quat);
     this.group.position.copy(this.pos);
     this.group.quaternion.copy(this.quat);
+  }
+
+  /** Collision proxy: writes the body-axis point nearest p to out and returns the body's radius there. */
+  nearestOnBody(p, out) {
+    const s = clamp(out.copy(p).sub(this.pos).dot(this.fwd), -0.5 * this.L, 0.42 * this.L);
+    out.copy(this.pos).addScaledVector(this.fwd, s);
+    const pr = this.model.prof(T_ORIGIN + s / this.L);
+    out.addScaledVector(this.up, pr.cy);
+    return Math.max(pr.hw, pr.top, pr.bot);
   }
 
   /** Animate (call after step). */

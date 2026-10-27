@@ -164,7 +164,7 @@ export class WhaleAnimator {
     const sk = ph + 0.32 * Math.sin(ph);
     const flapPos = -Math.cos(sk); // -1 bottom .. 1 top
     const flapVel = Math.sin(sk) * (1 + 0.32 * Math.cos(ph)); // >0 rising
-    const downstroke = flapVel < 0 ? 1 : 0;
+    const downstroke = 0.5 - 0.5 * Math.sin(sk); // smooth 0..1 (sin(sk) has flapVel's sign), no snap at reversal
 
     // body bob: the whole body rises on the downstroke
     this.bodyBob = -flapPos * P.bob * (0.3 + this.amp / P.flapA) * (1 - this.sleep);
@@ -333,15 +333,14 @@ export class WhaleAnimator {
     mix4(this.tired * 0.5, 0.2, -0.55, -0.2, 0.1);
     mix4(this.fear, 0.85, -0.9, -0.3, 0.05);
     mix4(this.sleep, -0.06, -0.12, -0.05, 0.2);
-    // blink closes toward the lower lid line
-    const mid = (up + lo) * 0.5 + 0.08;
-    up = lerp(up, mid, bl);
-    lo = lerp(lo, mid - 0.02, bl);
     const L = this.lids;
     L.up = damp(L.up, up, 14, dt);
     L.lo = damp(L.lo, lo, 14, dt);
     L.upC = damp(L.upC, upC, 10, dt);
     L.loC = damp(L.loC, loC, 10, dt);
+    // blink closes toward the lower lid line; applied after the damping, which would swallow the short pulse
+    const mid = (L.up + L.lo) * 0.5 + 0.08;
+    const lidUp = lerp(L.up, mid, bl), lidLo = lerp(L.lo, mid - 0.02, bl);
 
     // pupils: big & round when happy (cute), pinpoint when frightened
     const pT = this.basePupil * (1 + this.happy * 0.15 + this.sing * 0.1 - this.fear * 0.45 + this.excite * 0.1);
@@ -374,7 +373,7 @@ export class WhaleAnimator {
       gz.normalize();
       const eu = eye.u;
       eu.uGaze.value.lerp(gz, 1 - Math.exp(-18 * dt)).normalize();
-      eu.uLids.value.set(L.up, L.lo, L.upC, L.loC);
+      eu.uLids.value.set(lidUp, lidLo, L.upC, L.loC);
       eu.uPupil.value = this.pupil;
     }
   }

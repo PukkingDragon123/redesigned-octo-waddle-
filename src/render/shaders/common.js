@@ -24,6 +24,8 @@ uniform vec3 uMoonDir;
 uniform vec3 uMoonColor;
 uniform vec3 uWind;
 uniform float uGust;
+uniform float uWavePhase;
+uniform vec2 uRipple;
 uniform float uWet;
 uniform float uFlash;
 uniform vec3 uFlashPos;

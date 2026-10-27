@@ -17,13 +17,16 @@ varying vec3 vWorldPos;
 varying vec2 vFall;
 varying vec3 vNormal;
 varying float vDist;
+varying float vViewZ;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
   vFall = aFall;
   vNormal = normalize(mat3(modelMatrix) * normal);
   vDist = aFall.x;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  vec4 mv = viewMatrix * wp;
+  vViewZ = -mv.z;
+  gl_Position = projectionMatrix * mv;
 }
 `;
 
@@ -40,6 +43,7 @@ varying vec3 vWorldPos;
 varying vec2 vFall;
 varying vec3 vNormal;
 varying float vDist;
+varying float vViewZ;
 void main() {
   float along = vFall.x;
   float across = vFall.y;
@@ -66,9 +70,13 @@ void main() {
   col = applyFog(col, vWorldPos);
   vec2 suv = gl_FragCoord.xy / uResolution;
   float sceneZ = sceneDepthAt(suv);
-  float z = length(vWorldPos - uCamPos);
-  a *= clamp((sceneZ - z * 0.98) / 3.0, 0.0, 1.0);
+  a *= clamp((sceneZ - vViewZ) / 3.0, 0.0, 1.0);
   a *= 0.92;
+#ifdef FALL_DEPTH
+  if (a < 0.35) discard;
+  gl_FragColor = vec4(0.0);
+  return;
+#endif
   if (a < 0.004) discard;
   gl_FragColor = vec4(col * a, a);
 }
@@ -94,6 +102,19 @@ function fallMaterial(len, width) {
     premultipliedAlpha: true,
   });
   return m;
+}
+
+function fallDepthMaterial(colorMat) {
+  return new ShaderMaterial({
+    vertexShader: FALL_VERT,
+    fragmentShader: FALL_FRAG,
+    uniforms: colorMat.uniforms,
+    defines: { FALL_DEPTH: '' },
+    colorWrite: false,
+    depthWrite: true,
+    transparent: true,
+    side: DoubleSide,
+  });
 }
 
 /**
@@ -135,8 +156,14 @@ export function buildWaterfall(lip, out, width, drop, seed = 1) {
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const mesh = new Mesh(geo, fallMaterial(drop, width));
-  mesh.renderOrder = 15;
+  // before the cloud puffs (10) so clouds in front blend over it; the depth-only twin (drawn
+  // first) hides puffs behind the dense part of the fall
+  mesh.renderOrder = 9;
   mesh.name = 'waterfall';
+  const twin = new Mesh(geo, fallDepthMaterial(mesh.material));
+  twin.renderOrder = 7;
+  twin.name = 'waterfall-depth';
+  mesh.add(twin);
   mesh.userData.lip = lip.clone();
   mesh.userData.out = out.clone();
   mesh.userData.width = width;
@@ -166,8 +193,7 @@ uniform vec3 uDeep;
 varying vec3 vWorldPos;
 void main() {
   vec2 p = vWorldPos.xz;
-  vec2 w = uWind.xz * 0.02;
-  float n1 = texture2D(uNoise, p / 38.0 + w * uTime * 0.2 + uTime * vec2(0.004, 0.003)).r;
+  float n1 = texture2D(uNoise, p / 38.0 + uRipple + uTime * vec2(0.004, 0.003)).r;
   float n2 = texture2D(uNoise, p / 14.0 - uTime * vec2(0.006, -0.004)).b;
   vec3 N = normalize(vec3((n1 - 0.5) * 0.18 + (n2 - 0.5) * 0.12, 1.0, (n2 - 0.5) * 0.18 - (n1 - 0.5) * 0.1));
   vec3 V = normalize(uCamPos - vWorldPos);
@@ -219,7 +245,7 @@ export function buildLake(center, radiusFn, segments = 64) {
       uDeep: { value: new Color('#2f8c88') },
     }),
     transparent: true,
-    depthWrite: false,
+    depthWrite: true,
     blending: CustomBlending,
     blendSrc: OneFactor,
     blendDst: OneMinusSrcAlphaFactor,
@@ -227,7 +253,7 @@ export function buildLake(center, radiusFn, segments = 64) {
   });
   const mesh = new Mesh(geo, mat);
   mesh.position.copy(center);
-  mesh.renderOrder = 12;
+  mesh.renderOrder = 8; // before the cloud puffs (10); writes depth so puffs behind it are hidden
   mesh.name = 'lake';
   return mesh;
 }

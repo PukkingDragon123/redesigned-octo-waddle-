@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0f1e" />
+    <title>SKYSONG</title>
+    <meta name="description" content="A cinematic 3D fantasy adventure: fly as a baby sky whale following your mother and the great herd across a magical sky to the legendary Oasis." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #0b0f1e;
+        --veil: #0b0f1e;
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        overscroll-behavior: none;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      canvas#c {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        outline: none;
+        cursor: default;
+      }
+      body.playing canvas#c { cursor: none; }
+      /* A single soft veil for the very first frames: a fade, not an interface. */
+      #veil {
+        position: fixed;
+        inset: 0;
+        background: var(--veil);
+        opacity: 1;
+        transition: opacity 2.6s ease;
+        pointer-events: none;
+      }
+      #veil.gone { opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" tabindex="0"></canvas>
+    <div id="veil"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

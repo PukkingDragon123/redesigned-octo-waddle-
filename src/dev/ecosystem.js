@@ -48,9 +48,8 @@ export default async function (game) {
   const school = eco.addRaySchool(new Vector3(40, 160, -120), 7, { seed: 4 });
   const jellies = eco.addJellies(new Vector3(-90, 160, -165), 38, 10, { seed: 2 });
   const flock = eco.addFlock(new Vector3(-10, 168, -10), 60, { seed: 8, restAfter: shot === 'birds' ? 3 : 14 });
-  if (whale) {
-    eco.roosts.push({ pos: whale.pos, up: whale.up, fwd: whale.fwd, L: whale.L });
-  }
+  // the whale itself, as in the game, so perches follow its back, fur and body bob
+  if (whale) eco.roosts.push(whale);
   if (p.has('song')) eco.songFocus = whale ? whale.pos : new Vector3(0, 150, -60);
   if (p.has('leap')) { school.leapT = 0; school.feedT = 1e9; }
   if (p.has('nofeed')) school.feedT = 1e9;

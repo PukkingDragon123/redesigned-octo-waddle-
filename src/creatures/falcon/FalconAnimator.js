@@ -10,7 +10,7 @@ import { FG } from './FalconModel.js';
 
 const KEYS = [
   // fore wings: shoulder, elbow, wrist
-  'wElev', 'wSweep', 'wTwist', 'eElev', 'eFlex', 'eTwist', 'hElev', 'hFlex', 'hTwist',
+  'wElev', 'wSweep', 'wTwist', 'eElev', 'eFlex', 'eTwist', 'hElev', 'hFlex', 'hTwist', 'nElev', 'nFlex',
   // flight feathers
   'pSpread', 'pTwist', 'pBend', 'sBend', 'alula', 'ruffle',
   // hind wings
@@ -54,7 +54,7 @@ export const POSES = {
   }),
   // C: wings half out and cupped (tips down), the first phase of the pull-out
   cup: mk({
-    wElev: 0.5, wSweep: 0.1, wTwist: 0.2, eElev: -0.35, eFlex: 0.6, hElev: -0.6, hFlex: 0.75, hTwist: -0.1,
+    wElev: 0.5, wSweep: 0.1, wTwist: 0.2, eElev: -0.35, eFlex: 0.6, hElev: -0.45, hFlex: 0.75, hTwist: -0.1, nElev: -0.3,
     pSpread: 0.25, pTwist: 0.05, pBend: -0.04, gElev: 0.25, gSweep: -0.35, gFlex: 0.6, gFlex2: 0.8, gSpread: 0.3,
     tSpread: 0.2, crest: 0.2, flap: 0,
   }),
@@ -67,7 +67,7 @@ export const POSES = {
   // talon strike: body flared up, wings thrown high as air brakes, tail fanned down,
   // legs thrust forward with the toes spread wide, head up and locked on
   strike: mk({
-    wElev: 0.7, wSweep: 0.3, wTwist: 0.72, eElev: 0.05, eFlex: 0.55, eTwist: 0.1, hElev: -0.12, hFlex: 0.5, hTwist: 0.3,
+    wElev: 0.7, wSweep: 0.3, wTwist: 0.72, eElev: 0.05, eFlex: 0.55, eTwist: 0.1, hElev: -0.12, hFlex: 0.5, hTwist: 0.3, nElev: -0.12, nFlex: 0.08,
     pSpread: 1.0, pTwist: 0.75, pBend: -0.1, sBend: -0.06, alula: 1, ruffle: 0.55,
     gElev: 0.55, gSweep: 0.3, gTwist: 0.6, gFlex: 0.15, gFlex2: 0.15, gSpread: 1, gBend: -0.06,
     tPitch: -0.5, tSpread: 1, tBend: -0.05,
@@ -76,7 +76,7 @@ export const POSES = {
   }),
   // knocked out of the air: wings half open (the flail layer animates them), legs dangling
   tumble: mk({
-    wElev: 0.3, wSweep: 0.0, wTwist: 0.1, eFlex: 0.55, hFlex: 0.8, pSpread: 0.8, ruffle: 1,
+    wElev: 0.3, wSweep: 0.0, wTwist: 0.1, eFlex: 0.55, hFlex: 0.8, nElev: -0.15, pSpread: 0.8, ruffle: 1,
     gElev: 0.2, gFlex: 0.6, gFlex2: 0.8, gSpread: 0.6, tSpread: 0.8,
     hipX: 0.3, kneeX: -0.5, ankleX: 0.9, footX: 0.3, grip: 0.35, toeSpread: 0.5, legSplay: 0.2,
     crest: 0, jaw: 0.35, flap: 0,
@@ -192,6 +192,8 @@ export class FalconAnimator {
     v[I.hFlex] += A * 0.95 * Math.max(0, -Math.sin(sk - 0.55));
     v[I.hElev] += A * 0.34 * Math.cos(sk - 1.2);
     v[I.hTwist] += A * -0.22 * Math.sin(sk - 0.6);
+    v[I.nElev] += A * 0.2 * Math.cos(sk - 1.6);
+    v[I.nFlex] += A * 0.18 * Math.max(0, -Math.sin(sk - 0.8));
     v[I.pSpread] += A * (0.5 * up - 0.4 * dn);
     v[I.pTwist] += A * 0.9 * Math.max(0, -Math.sin(sk - 0.3));
     v[I.pBend] += A * 0.16 * sn;
@@ -240,6 +242,7 @@ export class FalconAnimator {
         W[I.hFlex] += flail * (0.5 + 0.6 * Math.sin(t * 9.4 - o));
         W[I.hElev] += flail * 0.5 * Math.sin(t * 10.3 + o);
         W[I.gElev] += flail * 0.6 * Math.sin(t * 8.1 + o * 1.3);
+        W[I.nElev] += flail * 0.35 * Math.sin(t * 11.2 + o * 0.7);
         W[I.pSpread] += flail * 0.3 * Math.sin(t * 13.0 + o);
       }
     }
@@ -277,7 +280,6 @@ export class FalconAnimator {
       b['foot' + S].rotation.set(W[I.footX], 0, 0);
     }
     // toes: curl from the grip, front toes splay with toeSpread
-    const grip = s.grip ?? v[I.grip];
     const toes = m.uBody.uToe.value;
     for (let i = 0; i < 8; i++) {
       const k = i % 4;
@@ -290,7 +292,6 @@ export class FalconAnimator {
       toes[i].x = curl;
       toes[i].y = sp;
     }
-    void grip;
 
     // ---- head & neck: track the target, stay level in banks, screech shake ---------------------------
     let lyT = 0, lpT = 0;
@@ -360,7 +361,8 @@ export class FalconAnimator {
     const ts = clamp(v[I.tSpread] + Math.abs(turn) * 0.3 + scr * 0.2, 0, 1.2);
     GA[FG.TAIL].set(ts, 0, this.sTailRoll.x * 0.3, v[I.tBend]);
     GB[FG.TAIL].set(flutterP * 0.7, 0, v[I.ruffle] * 0.3, 11);
-    GA[FG.STREAM].set(ts, 0, 0, this.sStream.x + 0.02);
+    // streamers: shared sideways swing in turns (fold slot) plus a lazy wander
+    GA[FG.STREAM].set(ts, this.sStreamYaw.x + 0.035 * Math.sin(t * 1.3), 0, this.sStream.x + 0.02);
     GB[FG.STREAM].set(0.012 + air * 0.035, 0, 0, 4.5 + air * 4);
     GA[FG.TAILCOV].set(ts * 0.5, 0, 0, 0);
     GB[FG.TAILCOV].set(0, 0, v[I.ruffle] * 0.6, 0);
@@ -376,6 +378,7 @@ export class FalconAnimator {
     b['sh' + S].rotation.set(-W[I.wTwist], -sd * W[I.wSweep], sd * W[I.wElev], 'ZYX');
     b['el' + S].rotation.set(-W[I.eTwist], -sd * W[I.eFlex], sd * W[I.eElev], 'ZYX');
     b['wr' + S].rotation.set(-W[I.hTwist], sd * W[I.hFlex], sd * W[I.hElev], 'ZYX');
+    b['hd' + S].rotation.set(0, sd * W[I.nFlex], sd * W[I.nElev], 'ZYX');
     b['hw1' + S].rotation.set(-W[I.gTwist], -sd * W[I.gSweep], sd * W[I.gElev], 'ZYX');
     b['hw2' + S].rotation.set(0, -sd * W[I.gFlex], sd * W[I.gElev2], 'ZYX');
     b['hw3' + S].rotation.set(-W[I.gTwist] * 0.5, sd * W[I.gFlex2], sd * W[I.gElev] * 0.3, 'ZYX');

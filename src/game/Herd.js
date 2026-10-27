@@ -108,9 +108,11 @@ export class Herd {
     for (const o of this.whales) {
       if (o === w) continue;
       const d = w.pos.distanceTo(o.pos);
-      const min = (w.radius + o.radius) * 1.8 + 2;
+      // the mother lets her own calf come close (touching is resolved by the bump/nuzzle code)
+      const ownCalf = o.role === 'player' && w === this.mother;
+      const min = ownCalf ? (w.radius + o.radius) * 1.15 + 1 : (w.radius + o.radius) * 1.8 + 2;
       if (d < min && d > 0.01) {
-        _v2.copy(w.pos).sub(o.pos).multiplyScalar(((min - d) / d) * (o.role === 'player' ? 2.2 : 1.2) * 3);
+        _v2.copy(w.pos).sub(o.pos).multiplyScalar(((min - d) / d) * (o.role === 'player' && !ownCalf ? 2.2 : 1.2) * 3);
         to.add(_v2);
       }
     }
@@ -309,9 +311,10 @@ export class Herd {
       const inside = calf.pos.distanceTo(this.protectCenter) < 30;
       target = this.protectCenter.clone().add(new Vector3(-6, 2, 0));
       if (inside) target.lerp(calf.pos, 0.3);
-      this.steer(m, target, 9, dt, { arrive: 12, minSpeed: 0 });
+      const away = this.steer(m, target, 9, dt, { arrive: 12, minSpeed: 0 });
+      // once she holds her place in the shelter she turns to face her calf
       _v.copy(calf.pos).sub(m.pos);
-      if (_v.length() > 6) m.ctl.targetYaw = Math.atan2(_v.x, _v.z);
+      if (away < 14 && _v.length() > 6) m.ctl.targetYaw = Math.atan2(_v.x, _v.z);
       m.drive.lookAt = calf.pos;
       m.drive.fear = damp(m.drive.fear, inside ? 0.3 : 0.7, 1, dt);
       if (!inside && care.callT <= 0) { this.voiceHooks?.(m, 'warn'); care.callT = 3.5; }

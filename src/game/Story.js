@@ -156,10 +156,21 @@ export class Story {
         this.falcon = new Falcon(g);
         this.falcon.setMode?.('hidden');
         const F = this.falcon;
+        // adults on the attack line block its dives: calves are safest hidden between them
+        F.obstacles = this.herd.adults;
         F.on?.('strikeHit', () => { this.falconResult = 'hit'; });
-        F.on?.('strikeMiss', () => { this.falconResult = 'miss'; });
-        F.on?.('screech', () => this.audio.sfx?.('falconScreech', { position: F.pos, gain: 1 }));
-        F.on?.('flap', () => this.audio.sfx?.('falconWing', { position: F.pos, gain: 0.8 }));
+        F.on?.('strikeMiss', (e) => {
+          this.falconResult = 'miss';
+          if (e && e.blocked && e.by) this.falconBlockedBy = e.by;
+        });
+        F.on?.('screech', (e) => {
+          // while hidden it is a far-off cry somewhere ahead of the herd
+          const far = e && e.distant;
+          const at = far ? this.herd.calf.pos.clone().add(new Vector3(-900, 300, -1400)) : F.pos;
+          this.audio.sfx?.('falconScreech', { position: at, gain: far ? 0.5 : 1 });
+        });
+        F.on?.('flap', (e) => this.audio.sfx?.('falconWing', { position: F.pos, gain: 0.45 + 0.35 * clamp(e?.strength ?? 1, 0, 1) }));
+        F.on?.('shadowOver', () => { this.falconShadowT = g.time; });
       }
     } catch (e) { console.warn('[skysong] falcon unavailable', e); this.falcon = null; }
   }
@@ -222,6 +233,9 @@ export class Story {
       Object.assign(w.drive, { charge: 0, sing: 0, hum: 0, fear: 0, feed: 0, mouth: 0, excite: 0 });
     }
     this.falcon?.setMode?.('hidden');
+    this.falconBlockedBy = null;
+    this.falconShadowT = null;
+    g.engine.shadows.radius = 170;
     // a fresh sky: creatures are re-spawned for wherever the story resumes
     if (this.eco) { this.eco.clear(); this.spawned.clear(); }
     this.weather.set(0, { lightning: 0 });
@@ -675,59 +689,89 @@ export class Story {
     herd.mode = 'travel';
     herd.targetSpeed = 8;
     g.wind.set(4, 0.3);
+    if (F) F.target = calf;
     yield 8;
     // something is wrong: a far cry, the herd tenses
-    this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(-900, 300, -1400)), gain: 0.5 });
+    if (F) F.screech();
+    else this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(-900, 300, -1400)), gain: 0.5 });
     for (const w of herd.adults) w.drive.fear = 0.35;
     this.audio.setIntensity?.(0.3);
     yield 6;
     if (this.eco) this.eco.threat = calf.pos.clone().add(new Vector3(0, 200, -500));
-    yield 5;
-    // a vast shadow sweeps over the herd from above the cloud ceiling
+    yield 3;
+    // a vast shadow sweeps over the herd: the hunter passes high between the herd and the sun
+    this.falconShadowT = null;
     if (F) {
-      const a = calf.pos.clone().add(new Vector3(-500, 230, 300));
-      const b = calf.pos.clone().add(new Vector3(600, 230, -500));
-      F.setMode?.('shadowPass', { from: a, to: b });
-    }
-    yield 7;
-    this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(300, 250, -300)), gain: 0.9 });
+      g.engine.shadows.radius = 420; // wide enough for its shadow to cross the herd and the sea
+      F.setMode('shadowPass', { crossIn: 5.5, altitude: 90, speed: 36, then: 'hidden', exitDistance: 380 });
+      yield* until(() => this.falconShadowT !== null, 9);
+    } else yield 6;
+    // everyone flinches and looks up
+    for (const w of herd.adults) { w.drive.fear = 0.8; w.anim.flinch?.(0.5); }
+    calf.anim.flinch(0.8);
+    calf.drive.fear = 0.7;
+    this.lookUpUntil = g.time + 4;
+    g.cameraRig.addShake(0.15);
+    yield 4;
+    g.engine.shadows.radius = 170;
     this.voiceCall(mom, 'warn');
     for (const c of herd.calves) this.voiceCall(c, 'coo');
     yield 2;
-    // the herd closes around its calves
+    // the herd closes around its calves: a living shelter the calf must fly into
     herd.mode = 'protect';
     this.audio.setMood?.('chase', { fade: 3 });
     this.audio.setIntensity?.(0.5);
-    // a living shelter: the adults form a shell; the calf must fly in between them
     herd.protectCenter = this.path.offsetAt(herd.s + 40, 0, 6);
     herd.targetSpeed = 2;
     this.protecting = true;
     const safe = () => calf.pos.distanceTo(herd.protectCenter) < 30;
+    if (F) {
+      // it shows itself, circles high over the herd, then stalks out of the sun
+      F.screech();
+      F.setMode('circle', { center: herd.protectCenter, radius: 240, altitude: herd.protectCenter.y + 190 });
+      herd.threat = F.pos;
+      if (this.eco) this.eco.threat = F.pos;
+      yield 8;
+      F.setMode('stalk', { behind: 90, above: 160 });
+      yield 5;
+    }
     for (let wave = 0; wave < 3; wave++) {
-      yield* until(() => safe(), wave === 0 ? 6 : 3);
+      yield* until(() => safe(), wave === 0 ? 4 : 3);
       if (F) {
-        if (this.eco) this.eco.threat = F.pos;
-        herd.threat = F.pos;
-        F.target = calf;
-        F.setMode?.('dive');
+        F.screech();
+        F.setMode('dive', {});
         this.falconResult = null;
+        this.falconBlockedBy = null;
         let boomed = false;
         let t = 0;
         while (this.falconResult === null && t < 20) {
-          // the adults answer together when the hunter closes on a sheltered calf
-          if (!boomed && safe() && F.pos.distanceTo(herd.protectCenter) < 95) {
+          // the adults answer together as the hunter closes on a sheltered calf
+          if (!boomed && safe() && F.mode !== 'knockback' && F.pos.distanceTo(calf.pos) < 95) {
             boomed = true;
             this.herdBoom(0.8 + wave * 0.15);
           }
           t += yield 0;
         }
         if (this.falconResult === 'hit') yield* this.rescue();
+        else if (this.falconBlockedBy) {
+          // the adult in its path roars it away
+          const w = this.falconBlockedBy;
+          this.falconBlockedBy = null;
+          yield 0.6;
+          w.anim.blast(1.1);
+          this.voiceCall(w, 'roar');
+          this.booms.spawn(w.pos.clone().addScaledVector(w.fwd, w.L * 0.5), { power: 1, radius: 90, source: w });
+          F.knockback(w.pos, 1.2);
+        }
+        // it climbs away to circle and stalk again
+        yield 5;
+        if (wave < 2) F.setMode('stalk', { behind: 90, above: 160 });
       } else {
         yield 6;
         this.herdBoom(0.9);
       }
       this.audio.setIntensity?.(0.55 + wave * 0.15);
-      yield 7;
+      yield 4;
     }
     // the final stand: every adult gathers its voice; the calf joins in
     for (const w of herd.adults) w.drive.charge = 0;
@@ -740,9 +784,9 @@ export class Story {
     this.herdBoom(1.6, true);
     for (const w of herd.adults) w.drive.charge = 0;
     if (F) {
-      F.knockback?.(herd.protectCenter || calf.pos, 2);
+      F.knockback(herd.protectCenter || calf.pos, 2);
       yield 2.5;
-      F.setMode?.('retreat');
+      F.setMode('retreat', { from: herd.protectCenter || calf.pos });
     }
     herd.threat = null;
     this.protecting = false;
@@ -1191,7 +1235,9 @@ export class Story {
     if (playing || this.state === 'ending') {
       const opts = {};
       if (herd.mode === 'gather' && herd.songCenter) { opts.lookBias = herd.songCenter; opts.lookBiasW = 0.25; opts.extraDist = 4; opts.busy = true; }
-      if (herd.mode === 'protect' && this.falcon && this.falcon.pos) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.extraDist = 3; opts.busy = true; }
+      const fv = this.falcon && this.falcon.mode !== 'hidden' && this.falcon.group?.visible;
+      if (herd.mode === 'protect' && fv) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.extraDist = 3; opts.busy = true; }
+      if (fv && this.lookUpUntil && g.time < this.lookUpUntil) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.3; opts.busy = true; }
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
     }
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});

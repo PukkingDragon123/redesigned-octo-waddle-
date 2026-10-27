@@ -7,8 +7,9 @@
 //         attack (default: the full choreography, live) | dive (live stoop -> strike -> pull-out)
 //   shot  side | front | below | chase | top | quarter | sun | talons | head | profile | herd | shadow | sea | wide | auto (default)
 //   phase=<rad>  freeze the wingbeat phase (pose=flap)   dist=<k>  camera distance scale
-//   cross=<s>, alt=<m>  (pose=shadow) when the shadow crosses the herd and how high the falcon flies
-//   shadowr=<m>  shadow-map radius (default 170): ~450 shows the falcon's shadow on the cloud sea
+//   cross=<s>, alt=<m>  (pose=shadow) when the shadow crosses the calf and how high the falcon flies
+//   kt=<s>       (pose=knockback) how long before the end of the warp the boom hits
+//   shadowr=<m>  shadow-map radius override (default 170)
 //   back         put the camera on the shadow side (backlit)   evade  the calf dodges the strike
 //   noherd       falcon only                                 nofx   no particles
 //   noprotect    the adults do not close ranks around the calf when the falcon dives
@@ -109,7 +110,7 @@ export default async function (game) {
   window.__falcon = falcon;
   const log = [];
   window.__falconLog = log;
-  for (const ev of ['screech', 'flap', 'strikeHit', 'strikeMiss', 'retreated', 'modeChange', 'knockback', 'passDone', 'stoop']) {
+  for (const ev of ['screech', 'flap', 'strikeHit', 'strikeMiss', 'retreated', 'modeChange', 'knockback', 'passDone', 'stoop', 'shadowOver']) {
     falcon.on(ev, (d) => {
       log.push({ t: +game.time.toFixed(2), ev, mode: d.mode, minDist: d.minDist !== undefined ? +(+d.minDist).toFixed(2) : undefined });
       if (log.length > 200) log.shift();
@@ -156,11 +157,7 @@ export default async function (game) {
   if (pose === 'circle') falcon.setMode('circle', { center: herdCenter, radius: 230, altitude: herdCenter.y + 190 });
   else if (pose === 'shadow') {
     // the shadow sweeps the herd at t = cross (default 6 s): look with &warp=6
-    const cross = +(p.get('cross') || 6), L = 400, speed = 33;
-    falcon.setMode('shadowPass', {
-      over: herdCenter.clone().addScaledVector(herdVel, cross), altitude: +(p.get('alt') || 90), length: L, speed,
-      startOffset: speed * cross - L / 2,
-    });
+    falcon.setMode('shadowPass', { crossIn: +(p.get('cross') || 6), altitude: +(p.get('alt') || 90), speed: 33 });
   } else if (pose === 'stalk') falcon.setMode('stalk', { behind: 90, above: 55 });
   else if (pose === 'knockback') {
     falcon.setMode('circle', { center: herdCenter, radius: 90, altitude: herdCenter.y + 60, startAngle: 2.2 });
@@ -172,10 +169,7 @@ export default async function (game) {
   } else if (pose === 'attack') {
     // the climactic encounter, in story order (see the report for the director's version)
     at(1.0, () => falcon.screech()); // a distant cry: hidden, audio only
-    at(3.0, () => falcon.setMode('shadowPass', {
-      over: herdCenter.clone().addScaledVector(herdVel, 6.1), altitude: 70, length: 440, speed: 36,
-      then: 'hidden', exitDistance: 150,
-    }));
+    at(3.0, () => falcon.setMode('shadowPass', { crossIn: 5.5, altitude: 70, speed: 36, then: 'hidden', exitDistance: 380 }));
     at(18, () => falcon.screech());
     at(20, () => falcon.setMode('circle', { center: herdCenter, radius: 240, altitude: herdCenter.y + 190 }));
     at(30, () => falcon.setMode('stalk', { behind: 90, above: 160 }));
@@ -216,7 +210,8 @@ export default async function (game) {
     fov = 50;
     switch (name) {
       case 'side':
-        outPos.copy(F).addScaledVector(R, 95 * k * ss).add(V(0, 8, 0)).addScaledVector(fw, 6);
+        // a slightly forward three-quarter side view
+        outPos.copy(F).addScaledVector(R, 92 * k * ss).add(V(0, 10 * k, 0)).addScaledVector(fw, 34 * k);
         outLook.copy(F).addScaledVector(fw, 3);
         break;
       case 'front':
@@ -270,8 +265,8 @@ export default async function (game) {
         fov = 34;
         break;
       case 'herd':
-        // the calf's point of view: looking up at the hunter
-        outPos.copy(calf.pos).addScaledVector(fwdH, -26).add(V(0, 3, 0)).addScaledVector(rightH, 8);
+        // the calf's point of view: just beside it on the open side of the herd, looking up at the hunter
+        outPos.copy(calf.pos).addScaledVector(rightH, 9).addScaledVector(fwdH, 7).add(V(0, -3, 0));
         outLook.copy(F);
         fov = 60;
         break;

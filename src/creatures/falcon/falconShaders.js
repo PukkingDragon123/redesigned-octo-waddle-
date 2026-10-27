@@ -436,7 +436,7 @@ void main() {
   float var = 0.95 + 0.1 * fract(seed * 7.13);
   float m = y * len; // metres from the root
   vec3 col;
-  float trans = 0.75, rimA = 0.55, specA = 0.05;
+  float trans = 0.32, rimA = 0.55, specA = 0.05;
   if (kind > 4.5 && kind < 5.5) {
     // crimson sound-sensing plume: deep base, bright fan tip with a pale rim and a
     // concentric "ear" ring that catches the light
@@ -497,8 +497,11 @@ void main() {
     if (kind > 0.5 && kind < 1.5) col = mix(col, uFTopDark * 1.4, smoothstep(0.85, 1.0, y) * 0.5);
     if (kind > 2.5 && kind < 3.5) col = mix(col, uFTopDark * 1.5, smoothstep(0.72, 0.78, y) * (1.0 - smoothstep(0.9, 0.95, y)) * 0.7);
     col = mix(col, col * 0.85, rach * 0.5);
-    trans = 0.95;
+    trans = 0.42;
   }
+  // light passes through the thin trailing vanes and edges, not the overlapped feather bases:
+  // against the sun the bird stays a dark, readable silhouette with glowing fringes
+  trans *= mix(0.45, 1.6, smoothstep(0.45, 1.0, edge)) * smoothstep(0.0, 0.5, y);
   Surface s = makeSurface(col, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
   // feathers are darker where they overlap at the root

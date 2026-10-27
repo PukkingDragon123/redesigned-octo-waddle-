@@ -65,12 +65,12 @@ export class SonicBooms {
     const b = { center: center.clone(), t: 0, radius, speed, power, shell, hitFalcon: false, source: opts.source };
     this.active.push(b);
     // mist burst
-    const n = Math.round(20 + radius * 0.6);
+    const n = Math.round(Math.min(20 + radius * 0.6, 140));
     for (let k = 0; k < n; k++) {
       const d = new Vector3(Math.random() - 0.5, (Math.random() - 0.5) * 0.7, Math.random() - 0.5).normalize();
       g.mist.emit({
         pos: center.clone().addScaledVector(d, radius * 0.05), vel: d.multiplyScalar(speed * lerp(0.25, 0.6, Math.random())),
-        life: lerp(1.2, 2.6, Math.random()), size: radius * 0.06 + 1, sizeEnd: radius * 0.18 + 3, alpha: 0.5, drag: 1.6, kind: 0,
+        life: lerp(1.2, 2.6, Math.random()), size: Math.min(radius * 0.06 + 1, 12), sizeEnd: Math.min(radius * 0.18 + 3, 28), alpha: 0.5, drag: 1.6, kind: 0,
       });
     }
     // camera shake by proximity

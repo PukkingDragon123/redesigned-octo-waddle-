@@ -192,8 +192,10 @@ export class FalconModel {
       const el = sh.clone().add(V(s * 6.5, 0, -0.3));
       const wr = el.clone().add(V(s * 9.0, 0, 0.25));
       const tip = wr.clone().add(V(s * 6.0, 0, -0.35));
-      mk('sh' + S, sh, 'chest'); mk('el' + S, el, 'sh' + S); mk('wr' + S, wr, 'el' + S);
-      this.wing[S] = { s, sh, el, wr, tip, d: [0, sh.distanceTo(el), sh.distanceTo(el) + el.distanceTo(wr), sh.distanceTo(el) + el.distanceTo(wr) + wr.distanceTo(tip)] };
+      const hd = wr.clone().lerp(tip, 0.45);
+      mk('sh' + S, sh, 'chest'); mk('el' + S, el, 'sh' + S); mk('wr' + S, wr, 'el' + S); mk('hd' + S, hd, 'wr' + S);
+      const d = [0, sh.distanceTo(el), sh.distanceTo(el) + el.distanceTo(wr), sh.distanceTo(el) + el.distanceTo(wr) + wr.distanceTo(tip)];
+      this.wing[S] = { s, sh, el, wr, hd, tip, d, dh: d[2] + 0.45 * (d[3] - d[2]) };
       const h1 = V(s * 1.35, 0.8, -4.5);
       const h2 = h1.clone().add(V(s * 3.8, 0, -0.45));
       const h3 = h2.clone().add(V(s * 3.4, 0, -0.3));
@@ -546,6 +548,7 @@ export class FalconModel {
     };
     const nU = opts.nU, nL = opts.nL;
     const boneChain = [[bi[opts.bones[0] + S], D[0]], [bi[opts.bones[1] + S], D[1]], [bi[opts.bones[2] + S], D[2]]];
+    if (opts.bones[3]) boneChain.push([bi[opts.bones[3] + S], W.dh]);
     const rows = [];
     const c = new Vector3();
     for (let i = 0; i < nU; i++) {
@@ -582,7 +585,7 @@ export class FalconModel {
   _buildArms() {
     for (const S of ['L', 'R']) {
       this._armLoft(this.wing[S], S, {
-        nU: 34, nL: 18, bones: ['sh', 'el', 'wr'], parent: 'chest', rootBlend: 1.8, tipRound: 1.4,
+        nU: 34, nL: 18, bones: ['sh', 'el', 'wr', 'hd'], parent: 'chest', rootBlend: 1.8, tipRound: 1.4,
         chord: [4.4, 3.9, 3.3, 2.6, 1.2], thick: [1.3, 0.85, 0.62, 0.45, 0.16], lead: [0.9, 0.6, 0.5, 0.42, 0.2],
       }, 8);
       this._armLoft(this.hind[S], S, {
@@ -748,6 +751,11 @@ export class FalconModel {
       const dirAt = (ang) => V(s * Math.sin(ang), 0, -Math.cos(ang));
       const hand = (f) => W.wr.clone().lerp(W.tip, f);
       const arm = (f) => W.el.clone().lerp(W.wr, f);
+      // feathers on the hand follow the wrist on its inner part and the hand bone further out
+      const handWs = (f) => {
+        const w = smoothstep(0.3, 0.6, f);
+        return [[bi['wr' + S], 1 - w], [bi['hd' + S], w]].filter((e) => e[1] > 1e-4);
+      };
       // primaries P1 (inner) .. P10 (outer) fan from the hand
       const PL = [8.2, 8.6, 9.1, 9.6, 10.1, 10.6, 11.1, 11.5, 11.6, 11.0];
       const PW = [0.9, 0.9, 0.88, 0.85, 0.82, 0.78, 0.72, 0.66, 0.6, 0.55];
@@ -757,11 +765,12 @@ export class FalconModel {
         const f = i / 9;
         const ang = lerp(0.2, 1.32, Math.pow(f, 1.05));
         pAng.push(ang);
-        const root = hand(0.08 + 0.92 * Math.pow(f, 0.9)).add(V(0, -0.05, -0.25 + 0.1 * f));
+        const fh = 0.08 + 0.92 * Math.pow(f, 0.9);
+        const root = hand(fh).add(V(0, -0.05, -0.25 + 0.1 * f));
         add({
           root, dir: dirAt(ang), n: up, len: PL[i], w: PW[i], kind: K.PRIMARY, group: gP, side: s,
           fan: -s * (0.08 + 0.42 * f), fold: -s * (1.5 - ang), twist: -s * (0.25 + 0.75 * f), notch: PN[i],
-          stack: 0.035 * (9 - i), ws: [[bi['wr' + S], 1]],
+          stack: 0.035 * (9 - i), ws: handWs(fh),
         });
       }
       // secondaries along the forearm
@@ -824,7 +833,7 @@ export class FalconModel {
         add({
           root: hand(0.05 + 0.8 * f).add(V(0, 0.28, 0.1)), dir: dirAt(lerp(0.25, 1.2, f)), n: up, len: 3.6 - 0.8 * f,
           w: 0.62, kind: K.COVERT, group: gC, side: s, fold: -s * (1.5 - lerp(0.25, 1.2, f)) * 0.95, raise: 0.5,
-          stack: 0.3 + 0.02 * (9 - i), ws: [[bi['wr' + S], 1]], curve: 0.12,
+          stack: 0.3 + 0.02 * (9 - i), ws: handWs(0.05 + 0.8 * f), curve: 0.12,
         });
       }
       // alula: the bastard wing at the wrist, raised as a slat when braking
@@ -899,7 +908,7 @@ export class FalconModel {
     for (const s of [1, -1]) {
       add({
         root: T.clone().add(V(s * 0.14, 0.16, -0.1)), dir: V(s * 0.025, 0.0, -1).normalize(), n: up, len: 15.5, w: 0.62,
-        kind: K.STREAMER, group: FG.STREAM, side: s, fan: -s * 0.22, stack: 0.32, ws: [[bi.tail2, 1]], curve: 0.06, tilt: 0,
+        kind: K.STREAMER, group: FG.STREAM, side: s, fan: -s * 0.22, fold: 1, stack: 0.32, ws: [[bi.tail2, 1]], curve: 0.06, tilt: 0,
       });
     }
     // upper tail coverts

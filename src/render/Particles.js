@@ -80,7 +80,8 @@ void main() {
   vec2 suv = gl_FragCoord.xy / uResolution;
   float sceneZ = sceneDepthAt(suv);
   a *= clamp((sceneZ - vViewZ) / max(vSize * 0.8, 0.3), 0.0, 1.0);
-  a *= smoothstep(0.3, 1.2, vViewZ);
+  // fade puffs the camera is inside of, so a burst never veils the whole view
+  a *= smoothstep(0.3, 1.2, vViewZ) * smoothstep(vSize * 0.35, vSize * 1.5, vViewZ);
   if (a < 0.002) discard;
   if (uAdditive > 0.5) {
     col *= mix(1.0, 0.0, vFog);

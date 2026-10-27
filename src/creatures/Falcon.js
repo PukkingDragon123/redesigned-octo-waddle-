@@ -18,7 +18,7 @@
 //
 // Modes: 'hidden' | 'circle' | 'shadowPass' | 'stalk' | 'dive' | 'strike' | 'pullout' | 'knockback' | 'retreat'
 // Events: 'screech', 'flap', 'strikeHit', 'strikeMiss', 'retreated', 'modeChange'
-//         (+ 'knockback', 'passDone', 'stoop' for audio/camera cues)
+//         (+ 'shadowOver', 'stoop', 'knockback', 'passDone' as audio/camera cues)
 import { Vector3, Quaternion, Matrix4 } from 'three';
 import { FalconModel } from './falcon/FalconModel.js';
 import { FalconAnimator } from './falcon/FalconAnimator.js';
@@ -53,6 +53,8 @@ const _d = new Vector3();
 const _e = new Vector3();
 const _q = new Quaternion();
 const _m = new Matrix4();
+const _f = new Vector3();
+const _g = new Vector3();
 const _gv = new Vector3(0, -GRAV, 0);
 const _gTmp = new Vector3();
 const UP = new Vector3(0, 1, 0);
@@ -173,18 +175,9 @@ export class Falcon {
         }
         break;
       }
-      case 'shadowPass': {
-        const line = this._passLine(P);
-        this._ai.A = line.from;
-        this._ai.B = line.to;
-        if (wasHidden || P.teleport !== false && this.pos.distanceTo(line.from) > 1500) {
-          _a.subVectors(line.to, line.from).normalize();
-          // startOffset > 0 starts further back along the line (more lead time before the crossing)
-          _b.copy(line.from).addScaledVector(_a, -(P.startOffset ?? 0));
-          this._place(_b, _a, P.speed ?? 31);
-        }
+      case 'shadowPass':
+        this._setupPass(P, wasHidden);
         break;
-      }
       case 'stalk':
         if (!T) { this.setMode('circle', P); return; }
         if (wasHidden) {
@@ -382,14 +375,30 @@ export class Falcon {
         break;
       }
       case 'shadowPass': {
-        const A = ai.A, B = ai.B;
-        _a.subVectors(B, A);
-        const len = _a.length();
-        _a.divideScalar(len || 1);
-        const proj = _b.subVectors(this.pos, A).dot(_a);
-        _c.copy(A).addScaledVector(_a, Math.max(proj, 0) + 110);
-        _c.y = lerp(A.y, B.y, clamp((proj + 110) / len, 0, 1));
-        _d.subVectors(_c, this.pos).normalize().multiplyScalar(P.speed ?? 31);
+        let along, endAt;
+        if (ai.literal) {
+          // fly the exact from -> to line
+          const A = ai.A, B = ai.B;
+          _a.subVectors(B, A);
+          const len = _a.length();
+          _a.divideScalar(len || 1);
+          along = _b.subVectors(this.pos, A).dot(_a);
+          _c.copy(A).addScaledVector(_a, Math.max(along, 0) + 110);
+          _c.y = lerp(A.y, B.y, clamp((along + 110) / len, 0, 1));
+          _d.subVectors(_c, this.pos).normalize().multiplyScalar(ai.speed);
+          endAt = len;
+        } else {
+          // a line along ai.hd through the sun-aligned point above the (moving) swept point, so
+          // the shadow crosses it on schedule; the falcon trims its speed to keep the timing
+          const tRem = Math.max(ai.tCross - this.modeT, 0);
+          const S = this._sunPoint(tRem, ai, _e);
+          along = _b.subVectors(this.pos, S).dot(ai.hd);
+          _c.copy(S).addScaledVector(ai.hd, along + 110);
+          let sp = ai.speed;
+          if (along < -20 && tRem > 0.3) sp = clamp(-along / tRem, ai.speed * 0.75, ai.speed * 1.35);
+          _d.subVectors(_c, this.pos).normalize().multiplyScalar(sp);
+          endAt = 0;
+        }
         c.acc.subVectors(_d, this.vel).multiplyScalar(0.7);
         c.updraft = SOAR_LIFT;
         c.poses.glide = 1;
@@ -397,11 +406,12 @@ export class Falcon {
         c.look = T ? T.pos : (P.over || null);
         c.crest = 0.3;
         c.focus = 0.7;
-        if (!ai.passDone && proj >= len) {
+        this._shadowCue();
+        if (!ai.passDone && along >= endAt + 30) {
           ai.passDone = true;
           this.emit('passDone', {});
         }
-        if (ai.passDone && proj >= len + (P.exitDistance ?? 900)) {
+        if (ai.passDone && along >= endAt + (P.exitDistance ?? 600)) {
           if (P.then) this.setMode(P.then, P.thenParams || {});
           else this.setMode('hidden');
           return this._cmd;
@@ -416,8 +426,16 @@ export class Falcon {
         _a.normalize();
         _b.set(_a.z, 0, -_a.x);
         const weave = Math.sin(this.time * 0.15) * (P.weave ?? 40);
-        _c.copy(T.pos).addScaledVector(_a, -(P.behind ?? 100)).addScaledVector(_b, weave);
-        _c.y += P.above ?? 120;
+        const above = P.above ?? 120;
+        const sun = G.uSunDir.value;
+        const sunH = above * Math.hypot(sun.x, sun.z) / Math.max(sun.y, 0.05);
+        if (P.inSun && sun.y > 0.1 && sunH < (P.maxSunOffset ?? 420)) {
+          // hold station between the sun and the calf: hidden in the glare, its shadow on the herd
+          _c.copy(T.pos).addScaledVector(sun, above / sun.y).addScaledVector(_b, weave * 0.5);
+        } else {
+          _c.copy(T.pos).addScaledVector(_a, -(P.behind ?? 100)).addScaledVector(_b, weave);
+          _c.y += above;
+        }
         _d.subVectors(_c, this.pos).multiplyScalar(0.28).add(T.vel);
         const sp = _d.length();
         if (sp < 16) _d.multiplyScalar(16 / Math.max(sp, 1e-3));
@@ -432,6 +450,12 @@ export class Falcon {
       }
       case 'dive': {
         if (!T) { this.setMode('circle'); return this._cmd; }
+        if (this.modeT > (P.maxTime ?? 16)) {
+          // never leave the director waiting: a dive that cannot find its line gives up
+          this.emit('strikeMiss', { minDist: Infinity, timeout: true, target: T });
+          this.setMode('pullout', {});
+          return this._cmd;
+        }
         const speed = this.vel.length();
         if (ai.phase === 'approach') {
           _a.set(T.pos.x - this.pos.x, 0, T.pos.z - this.pos.z);
@@ -712,7 +736,7 @@ export class Falcon {
     const obs = this.obstacles;
     const T = this.target;
     if (!obs || !obs.length || !T) return null;
-    const bl = new Vector3();
+    const bl = _f;
     _e.subVectors(T.pos, this.pos);
     const L = _e.length();
     if (L < 1e-3) return null;
@@ -732,6 +756,24 @@ export class Falcon {
   _blocked(o) {
     this.emit('strikeMiss', { minDist: Infinity, blocked: true, by: o, target: this.target });
     this.setMode('pullout', { blocked: true });
+  }
+
+  /** Emit 'shadowOver' once when the falcon's shadow sweeps across the target (story cue). */
+  _shadowCue() {
+    const T = this.target;
+    const ai = this._ai;
+    if ((!T && !ai.over) || ai.shadowFired) return;
+    const sun = G.uSunDir.value;
+    if (sun.y < 0.03) return;
+    // foot of the falcon's shadow at the swept point's altitude
+    const O = ai.over || T.pos;
+    const k = (this.pos.y - O.y) / sun.y;
+    if (k < 0) return;
+    const dx = this.pos.x - sun.x * k - O.x, dz = this.pos.z - sun.z * k - O.z;
+    if (dx * dx + dz * dz < (this.params.shadowRadius ?? 28) ** 2) {
+      ai.shadowFired = true;
+      this.emit('shadowOver', { target: T, over: ai.over, pos: this.pos.clone() });
+    }
   }
 
   _burst(dt, gapMin, gapMax, beats) {
@@ -760,23 +802,66 @@ export class Falcon {
     return out.normalize();
   }
 
-  /** Line for a shadow pass: explicit from/to, or computed so the shadow crosses `over`. */
-  _passLine(P) {
-    if (P.from && P.to) return { from: P.from.clone(), to: P.to.clone() };
-    const over = P.over || (this.target && this.target.pos) || this.pos;
+  /**
+   * Shadow pass set-up. By default the line is aligned to the sun so the shadow sweeps the
+   * swept point (params.over, else the moving target) `crossIn` seconds from now; from/to only
+   * give the heading (and the default timing and altitude). { literal: true } flies from -> to.
+   */
+  _setupPass(P, wasHidden) {
+    const ai = this._ai;
+    ai.speed = P.speed ?? 32;
+    if (P.literal && P.from && P.to) {
+      ai.literal = true;
+      ai.A = P.from.clone();
+      ai.B = P.to.clone();
+      if (wasHidden || P.teleport) this._place(ai.A, _a.subVectors(ai.B, ai.A), ai.speed);
+      return;
+    }
     const sun = G.uSunDir.value;
-    let h = P.altitude ?? 110;
-    const sy = Math.max(sun.y, 0.05);
-    // keep the falcon inside the shadow camera's depth range (Shadows.js: ~1200 m sunward)
-    h = Math.min(h, 1050 * sy);
-    const q = _a.copy(over).addScaledVector(sun, h / sy);
-    const hd = new Vector3();
-    if (P.heading !== undefined) hd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
-    else hd.set(-sun.z, 0, sun.x);
-    if (hd.lengthSq() < 1e-4) hd.set(1, 0, 0);
+    const T = this.target;
+    ai.over = P.over ? P.over.clone() : null;
+    const overPos = ai.over || (T && T.pos) || this.pos;
+    const hd = (ai.hd = new Vector3());
+    if (P.from && P.to) hd.subVectors(P.to, P.from);
+    else if (P.heading !== undefined) hd.set(Math.sin(P.heading), 0, Math.cos(P.heading));
+    else hd.set(-sun.z, 0, sun.x); // straight across the sun line
+    hd.y = 0;
+    if (hd.lengthSq() < 1e-6) hd.set(1, 0, 0);
     hd.normalize();
-    const L = P.length ?? 900;
-    return { from: q.clone().addScaledVector(hd, -L / 2), to: q.clone().addScaledVector(hd, L / 2) };
+    // height above the swept point: with a low sun the shadow line runs far out, so fly lower and
+    // closer (within maxRange) to stay in the shot and inside the shadow camera's depth range
+    let h = P.altitude ?? (P.from ? P.from.y - overPos.y : 110);
+    const sy = Math.max(sun.y, 0.05);
+    const sh = Math.hypot(sun.x, sun.z);
+    if (sh > 1e-3) h = Math.min(h, Math.max(P.minAltitude ?? 30, (P.maxRange ?? 360) * sy / sh));
+    ai.h = clamp(Math.min(h, 1050 * sy), 15, 1000);
+    let crossIn = P.crossIn;
+    if (crossIn === undefined) {
+      // keep the director's line timing (from -> closest approach), within a dramatic window
+      crossIn = P.from ? clamp(_a.subVectors(overPos, P.from).dot(hd) / ai.speed, 3, 6) : 6;
+    }
+    ai.tCross = crossIn;
+    const S = this._sunPoint(crossIn, ai, _b);
+    if (P.flip !== false) {
+      // never pop into view right beside the herd: if the start would be close to the swept point,
+      // fly the line the other way (out of the sun, shadow first, then overhead)
+      const back = ai.speed * crossIn;
+      const ox = S.x - overPos.x, oz = S.z - overPos.z;
+      const dPlus = Math.hypot(ox - hd.x * back, oz - hd.z * back);
+      const dMinus = Math.hypot(ox + hd.x * back, oz + hd.z * back);
+      if (dPlus < (P.minStart ?? 420) && dMinus > dPlus) hd.negate();
+    }
+    if (wasHidden || P.teleport) this._place(_c.copy(S).addScaledVector(hd, -ai.speed * crossIn), hd, ai.speed);
+  }
+
+  /** Where the falcon must be for its shadow to fall on the swept point `tAhead` seconds from now. */
+  _sunPoint(tAhead, ai, out) {
+    const sun = G.uSunDir.value;
+    const T = this.target;
+    if (ai.over) out.copy(ai.over);
+    else if (T) out.copy(T.pos).addScaledVector(T.vel, tAhead);
+    else out.copy(this.pos);
+    return out.addScaledVector(sun, ai.h / Math.max(sun.y, 0.05));
   }
 
   _place(p, dir, speed) {
@@ -1073,7 +1158,7 @@ export class Falcon {
     const mist = this.game.mist;
     if (!mist) return;
     const head = this.model.bones.head;
-    const origin = _d.set(0, 0, 3.5).applyMatrix4(head.matrixWorld).clone();
+    const origin = _f.set(0, 0, 3.5).applyMatrix4(head.matrixWorld);
     _e.set(0, 0, 1).transformDirection(head.matrixWorld);
     // ring in the plane facing the beak
     _a.crossVectors(_e, UP);
@@ -1086,7 +1171,7 @@ export class Falcon {
       const ang = (i / n) * Math.PI * 2;
       _c.copy(_a).multiplyScalar(Math.cos(ang)).addScaledVector(_b, Math.sin(ang)).addScaledVector(_e, 0.35).normalize();
       mist.emit({
-        pos: origin.clone().addScaledVector(_c, 3), vel: _c.clone().multiplyScalar(34).addScaledVector(this.vel, 0.8),
+        pos: _g.copy(origin).addScaledVector(_c, 3), vel: _d.copy(_c).multiplyScalar(34).addScaledVector(this.vel, 0.8),
         life: 0.9, size: 1.8, sizeEnd: 7, color: [1, 1, 1], alpha: 0.22, drag: 2.4, kind: 0, fadeIn: 0.03,
       });
     }

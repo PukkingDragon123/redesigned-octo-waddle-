@@ -4,7 +4,7 @@
 // Spatialised with an HRTF panner, distance attenuation and an air-absorption lowpass;
 // the reverb and sky-echo sends are taken before the panner so far voices sound wetter.
 import {
-  clamp, lerp, mtof, glide, setAt, rampAt, expAt, cancelFrom, disconnect, stopAt, startAt,
+  clamp, lerp, mtof, glide, setAt, rampAt, expAt, cancelFrom, holdAt, disconnect, stopAt, startAt,
   finite, smoothstep, driveCurve,
 } from './util.js';
 import { snapToScale, snapToChord, stepChord, stepScale } from './theory.js';
@@ -26,10 +26,10 @@ export class WhaleVoice {
     };
     this.size = clamp((72 - base) / 34); // 0 calf .. 1 elder
     this.calf = base >= 64;
-    this.trim = this.calf ? 0.25 : lerp(0.28, 0.36, this.size);
-    this.glideTc = this.calf ? 0.035 : lerp(0.06, 0.11, this.size);
-    this.verbBase = lerp(0.35, 0.55, this.size);
-    this.echoBase = lerp(0.12, 0.22, this.size);
+    this.trim = this.calf ? 0.21 : lerp(0.24, 0.3, this.size);
+    this.glideTc = this.calf ? 0.035 : lerp(0.07, 0.15, this.size);
+    this.verbBase = lerp(0.38, 0.85, this.size);
+    this.echoBase = lerp(0.13, 0.3, this.size);
     this.x = 0;
     this.y = 0;
     this.z = 0;
@@ -47,15 +47,17 @@ export class WhaleVoice {
   // ---- public API ------------------------------------------------------------------
 
   setPosition(v) {
-    if (!v) return;
-    const x = +v.x;
-    const y = +v.y;
-    const z = +v.z;
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
-    this.x = x;
-    this.y = y;
-    this.z = z;
-    this.hasPos = true;
+    try {
+      if (!v) return;
+      const x = +v.x;
+      const y = +v.y;
+      const z = +v.z;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+      this.x = x;
+      this.y = y;
+      this.z = z;
+      this.hasPos = true;
+    } catch (e) { /* ignore */ }
   }
 
   /** Sing `midi` (snapped to the key). Without a duration it sustains until release(). */
@@ -76,12 +78,16 @@ export class WhaleVoice {
       const gain = clamp(finite(opts.gain, 1), 0, 2) * this.trim;
       const vib = clamp(finite(opts.vibrato, lerp(30, 18, this.size)), 0, 120);
       const legato = this.humming && now < this.humEnd;
+      // the previous note's release tail is still audible: slide out of it, don't jump
+      const tail = !legato && now - this.humEnd < 0.6;
       for (const p of [e.amp.gain, e.pitch.offset, e.f1.frequency, e.f2.frequency, e.vibG.gain, e.ng.gain, e.nbp.frequency]) cancelFrom(p, t);
       if (opts.glideFrom != null && Number.isFinite(+opts.glideFrom)) {
         setAt(e.pitch.offset, mtof(+opts.glideFrom), t);
         glide(e.pitch.offset, f, t, this.glideTc * 1.4);
       } else if (legato) {
         glide(e.pitch.offset, f, t, this.glideTc);
+      } else if (tail) {
+        glide(e.pitch.offset, f, t, 0.03);
       } else {
         setAt(e.pitch.offset, f * Math.pow(2, -0.8 / 12), t); // a natural scoop into the note
         glide(e.pitch.offset, f, t, 0.045);
@@ -92,7 +98,7 @@ export class WhaleVoice {
         glide(e.amp.gain, gain, t + 0.08, att / 2);
       } else glide(e.amp.gain, gain, t, att / 2.5);
       const V0 = legato ? VOW.oh : VOW.oo;
-      if (!legato) {
+      if (!legato && !tail) {
         setAt(e.f1.frequency, V0[0] * k, t);
         setAt(e.f2.frequency, V0[1] * k, t);
       } else {
@@ -373,13 +379,22 @@ export class WhaleVoice {
     glide(e.vibG.gain, 0, t, fade);
   }
 
-  _killEngine(now) {
+  /** Tear the tone engine down; with `fade` it is first faded out (voice stealing). */
+  _killEngine(now, fade = 0) {
     const e = this.eng;
     if (!e) return;
     this.eng = null;
     this.humming = false;
-    for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc]) if (n) stopAt(n, now);
-    disconnect(e.pitch, e.osc, e.vib, e.vibG, e.mix, e.f1, e.f2, e.dry, e.g1, e.g2, e.gd, e.sub, e.subG, e.half, e.growl, e.growlD, e.nsrc, e.nbp, e.ng, e.amp);
+    const nodes = [e.pitch, e.osc, e.vib, e.vibG, e.mix, e.f1, e.f2, e.dry, e.g1, e.g2, e.gd, e.sub, e.subG, e.half, e.growl, e.growlD, e.nsrc, e.nbp, e.ng, e.amp];
+    if (fade > 0) {
+      holdAt(e.amp.gain, now);
+      rampAt(e.amp.gain, 0, now + fade);
+      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc]) if (n) stopAt(n, now + fade + 0.02);
+      e.osc.onended = () => disconnect(...nodes);
+    } else {
+      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc]) if (n) stopAt(n, now);
+      disconnect(...nodes);
+    }
     this.sys._releaseVoiceEngine(this);
   }
 

@@ -9,9 +9,6 @@ export const smoothstep = (e0, e1, x) => {
   return t * t * (3 - 2 * t);
 };
 export const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
-export const ftom = (f) => 69 + 12 * Math.log2(Math.max(1e-6, f) / 440);
-export const dbToGain = (db) => Math.pow(10, db / 20);
-export const gainToDb = (g) => 20 * Math.log10(Math.max(1e-12, Math.abs(g)));
 export const mod = (n, m) => ((n % m) + m) % m;
 export const finite = (x, d = 0) => (Number.isFinite(x) ? x : d);
 

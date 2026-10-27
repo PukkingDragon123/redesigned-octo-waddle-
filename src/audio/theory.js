@@ -277,7 +277,7 @@ export const CADENCE_MELODY = [
   [[74, 3], [73, 1]],
   [[71, 2], [69, 1], [67, 1]],
   [[69, 2], [73, 2]],
-  [[74, 4]],
-  [[74, 4]],
+  [[74, 8]], // held through the last bar
+  [[null, 4]],
 ];
 export const CADENCE_CHORDS = ['G', 'D/F#', 'Em7', 'Asus4:2 A:2', 'D', 'D'];

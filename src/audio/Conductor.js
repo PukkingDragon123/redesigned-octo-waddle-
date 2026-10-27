@@ -126,18 +126,18 @@ export class Conductor {
     };
     const sec = (o) => new Section(sys, o);
     this.sec = {
-      strings: sec({ wave: W.strings, voices: 5, unison: 2, spread: 9, width: 0.42, filter: 2300, attack: 0.9, release: 1.2, vib: [5.2, 9], send: 0.45, gain: 0.4, glide: 0.06, rebow: true }),
-      low: sec({ wave: W.strings, voices: 2, unison: 2, spread: 7, width: 0.18, pan: 0.18, filter: 900, attack: 0.7, release: 1.0, vib: [4.8, 6], send: 0.3, gain: 0.28, glide: 0.08 }),
+      strings: sec({ wave: W.strings, voices: 5, unison: 3, spread: 10, width: 0.42, filter: 3100, body: [340, 2.5], attack: 0.9, release: 1.2, vib: [5.2, 9], send: 0.45, gain: 0.4, glide: 0.06, rebow: true }),
+      low: sec({ wave: W.strings, voices: 2, unison: 2, spread: 7, width: 0.18, pan: 0.18, filter: 900, body: [220, 2], attack: 0.7, release: 1.0, vib: [4.8, 6], send: 0.3, gain: 0.28, glide: 0.08 }),
       trem: sec({ wave: W.strings, voices: 3, unison: 2, spread: 8, width: 0.3, filter: 1500, attack: 0.25, release: 0.6, tremolo: { rate: 11.5, depth: 0.85 }, send: 0.3, gain: 0.4, glide: 0.04 }),
       choir: sec({ wave: W.choir, voices: 4, unison: 2, spread: 11, width: 0.5, filter: 5200, formants: true, attack: 1.3, release: 1.6, vib: [4.6, 14], send: 0.6, gain: 0.5, glide: 0.09, breath: 0.035 }),
       brass: sec({ wave: W.brass, voices: 3, unison: 2, spread: 6, width: 0.3, pan: 0.1, filter: 800, filterSwell: 2600, attack: 0.6, release: 0.9, vib: [4.5, 4], send: 0.4, gain: 0.45, artBase: 0.45, glide: 0.07 }),
       drone: sec({ wave: W.drone, voices: 3, unison: 2, spread: 4, width: 0.3, filter: 1100, attack: 2.5, release: 2.5, send: 0.4, gain: 0.4 }),
     };
     this.lines = {
-      lead: new Line(sys, { wave: W.strings, unison: 3, spread: 8, filter: 3400, body: [420, 3], attack: 0.2, release: 0.5, vib: { rate: 5.4, depth: 16, delay: 0.3 }, portamento: 0.05, send: 0.5, gain: 0.3, pan: -0.08 }),
+      lead: new Line(sys, { wave: W.strings, unison: 3, spread: 8, filter: 4400, body: [420, 3], attack: 0.2, release: 0.5, vib: { rate: 5.4, depth: 16, delay: 0.3 }, portamento: 0.05, send: 0.5, gain: 0.3, pan: -0.08 }),
       flute: new Line(sys, { wave: W.flute, unison: 1, filter: 5200, attack: 0.08, release: 0.22, vib: { rate: 5, depth: 13, delay: 0.25 }, breath: 0.11, portamento: 0.03, send: 0.5, gain: 0.42, pan: 0.15 }),
     };
-    this.stingPad = new Section(sys, { wave: W.strings, voices: 5, unison: 2, spread: 10, width: 0.5, filter: 2800, attack: 0.3, release: 1.5, vib: [5, 8], send: 0.6, gain: 0.45, manual: true, glide: 0.05, dry: B.stingDry, wetBus: B.stingWet });
+    this.stingPad = new Section(sys, { wave: W.strings, voices: 5, unison: 2, spread: 10, width: 0.5, filter: 3400, attack: 0.3, release: 1.5, vib: [5, 8], send: 0.6, gain: 0.45, manual: true, glide: 0.05, dry: B.stingDry, wetBus: B.stingWet });
     for (const k of [...Object.keys(this.sec), ...Object.keys(this.lines)]) {
       this._lv[k] = 0;
       this._per[k] = 0;

@@ -26,7 +26,11 @@ function vary(bar, c, L) {
   for (let i = 0; i < bar.length; i++) {
     const [m, d] = bar[i];
     const next = bar[i + 1];
-    if (kind === 0 && next && d >= 1 && Math.abs(next[0] - m) >= 3 && Math.abs(next[0] - m) <= 4) {
+    if (m == null) {
+      out.push(bar[i]); // a rest or a tie stays as written
+      continue;
+    }
+    if (kind === 0 && next && next[0] != null && d >= 1 && Math.abs(next[0] - m) >= 3 && Math.abs(next[0] - m) <= 4) {
       // passing tone
       const pass = stepScale(m, c.key.root, c.key.scale, Math.sign(next[0] - m));
       out.push([m, d - 0.5], [pass, 0.5]);
@@ -293,10 +297,13 @@ export const PATTERNS = {
   swell(c, L) {
     const every = L.every || 4;
     if (L.inst) {
-      // a sample swell timed to peak on the downbeat after this phrase
+      // a sample swell timed to peak on the downbeat after this phrase (sped up to fit
+      // inside one bar at fast tempos)
       if (c.secBar % every !== every - 1) return [];
-      const at = Math.max(0, c.beats - (L.peak ?? 2.8) / c.beatDur);
-      return [{ at, kind: 'hit', inst: L.inst, midi: 60, vel: L.vel ?? 0.6 }];
+      const peak = L.peak ?? 2.8;
+      const bar = c.beats * c.beatDur;
+      if (peak <= bar) return [{ at: c.beats - peak / c.beatDur, kind: 'hit', inst: L.inst, midi: 60, vel: L.vel ?? 0.6 }];
+      return [{ at: 0, kind: 'hit', inst: L.inst, midi: 60 + 12 * Math.log2(peak / bar), vel: L.vel ?? 0.6 }];
     }
     if (c.secBar % every !== (L.phase || 0)) return [];
     return [{ at: 0, kind: 'swell', target: L.target, dur: (L.len ?? every * c.beats * 0.8), vel: L.vel ?? 1 }];

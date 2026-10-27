@@ -197,6 +197,18 @@ export class Section {
       lp.Q.value = o.q ?? 0.4;
       input.connect(lp);
       let last = lp;
+      if (o.body) {
+        // instrument body resonance (string section: the wooden "warmth" around 300-400 Hz)
+        const body = ctx.createBiquadFilter();
+        body.type = 'peaking';
+        body.frequency.value = o.body[0];
+        body.Q.value = 1.1;
+        body.gain.value = o.body[1];
+        last.connect(body);
+        last = body;
+        this._bodies = this._bodies || [];
+        this._bodies.push(body);
+      }
       let formants = null;
       if (o.formants) {
         const sum = ctx.createGain();
@@ -310,6 +322,8 @@ export class Section {
       disconnect(ch.input, ch.lp, ch.trem, ch.pan);
       if (ch.formants) for (const f of ch.formants) disconnect(f.bp, f.g);
     }
+    if (this._bodies) disconnect(...this._bodies);
+    this._bodies = null;
     this.voices = [];
     this.chains = [];
     this.lfos = [];
@@ -320,11 +334,15 @@ export class Section {
 
   _apply(notes, t, immediate) {
     const o = this.o;
+    const rel = o.release || 1;
     for (let i = 0; i < this.voices.length; i++) {
       const v = this.voices[i];
       const m = notes[i];
       if (m == null) {
-        if (v.note != null) glide(v.vg.gain, 0, t, (o.release || 1) / 3);
+        if (v.note != null) {
+          glide(v.vg.gain, 0, t, rel / 3);
+          v.offAt = t;
+        }
         v.note = null;
         continue;
       }
@@ -333,7 +351,9 @@ export class Section {
         for (const osc of v.oscs) setAt(osc.frequency, f, t);
         glide(v.vg.gain, 1, t, (o.attack || 0.5) / 3);
       } else if (v.note == null) {
-        for (const osc of v.oscs) glide(osc.frequency, f, t, 0.012);
+        // a voice coming back: jump straight to the note once its last one has died away
+        const ringing = t - (v.offAt ?? -Infinity) < rel * 1.5;
+        for (const osc of v.oscs) (ringing ? glide(osc.frequency, f, t, 0.012) : setAt(osc.frequency, f, t));
         glide(v.vg.gain, 1, t, (o.attack || 0.5) / 3);
       } else if (v.note !== m) {
         for (const osc of v.oscs) glide(osc.frequency, f, t, o.glide ?? 0.05);
@@ -405,9 +425,11 @@ export class Section {
   /** Manual envelope (stingers): sound notes with attack/hold/release at time t. */
   hit(notes, t, peak, attack, hold, release) {
     const now = this.ctx.currentTime;
-    if (!this.built) this._build(now);
     this.zeroSince = -1;
-    this.setNotes(notes, t);
+    if (!this.built) {
+      this.notes = (notes || []).slice(0, this.n);
+      this._build(Math.min(t, now + 0.01));
+    } else this.setNotes(notes, t);
     holdAt(this.out.gain, t);
     glide(this.out.gain, peak * (this.o.gain ?? 1), t, attack / 3);
     glide(this.out.gain, 0, t + attack + hold, release / 3);

@@ -126,7 +126,7 @@ export function* piano(out, sr, midi, rand) {
   const t60base = lerp(13, 2.2, Math.pow(x, 0.85));
   const strings = midi < 38 ? 2 : 3;
   const cents = lerp(0.8, 1.7, x);
-  const tilt = lerp(1.25, 1.6, x);
+  const tilt = lerp(1.15, 1.5, x);
   const decays = strings === 3 ? [0.32, 1.0, 0.78] : [0.36, 1.0];
   const amps = strings === 3 ? [0.44, 0.31, 0.25] : [0.55, 0.45];
   const strike = 1 / 7.6;
@@ -153,7 +153,7 @@ export function* piano(out, sr, midi, rand) {
     out[i] += lp * env * 0.22 + Math.sin(TAU * f0 * 0.5 * t) * env * 0.05;
   }
   yield;
-  lowpass(out, sr, lerp(4200, 7000, x));
+  lowpass(out, sr, lerp(5200, 8500, x));
   attackRamp(out, sr, 0.0018);
   fadeTail(out, sr, 0.35);
   normalize(out, 0.9);
@@ -212,7 +212,7 @@ export function* harp(out, sr, midi, rand, opts = {}) {
     }
     yield;
   }
-  lowpass(out, sr, opts.lp ? opts.lp(x) : lerp(2600, 7500, x));
+  lowpass(out, sr, opts.lp ? opts.lp(x) : lerp(3400, 8500, x));
   yield;
   if (opts.body) biquad(out, sr, 'peaking', opts.body, 1.2, 4);
   attackRamp(out, sr, 0.0015);
@@ -345,7 +345,7 @@ export function* stac(out, sr, midi, rand) {
 // ---- percussion -----------------------------------------------------------------------
 
 /** Taiko-like big drum: a pitched membrane with a pitch drop plus a soft skin slap. */
-export function* taiko(out, sr, rand, f0 = 112, f1 = 50) {
+export function* taiko(out, sr, rand, f0 = 120, f1 = 56) {
   let ph = 0;
   let ph2 = 0;
   let lp = 0;
@@ -357,8 +357,8 @@ export function* taiko(out, sr, rand, f0 = 112, f1 = 50) {
       ph += (TAU * f) / sr;
       ph2 += (TAU * f * 2.32) / sr;
       const env = Math.exp(-t / 0.42) * (1 - Math.exp(-t / 0.0015));
-      lp += 0.12 * (rand() * 2 - 1 - lp);
-      out[i] = Math.sin(ph) * env + Math.sin(ph2) * 0.22 * Math.exp(-t / 0.07) + lp * 0.5 * Math.exp(-t / 0.025);
+      lp += 0.2 * (rand() * 2 - 1 - lp);
+      out[i] = 0.85 * Math.sin(ph) * env + Math.sin(ph2) * 0.34 * Math.exp(-t / 0.09) + lp * 0.8 * Math.exp(-t / 0.03);
     }
     yield;
   }
@@ -415,7 +415,7 @@ export function* heart(out, sr, rand = Math.random) {
     ph2 += (TAU * (110 + 40 * Math.exp(-t / 0.02))) / sr;
     const env = Math.exp(-t / 0.075) * (1 - Math.exp(-t / 0.004));
     lp += 0.09 * (rand() * 2 - 1 - lp);
-    out[i] = Math.sin(ph) * env + Math.sin(ph2) * 0.45 * Math.exp(-t / 0.04) * (1 - Math.exp(-t / 0.003)) + lp * 0.5 * Math.exp(-t / 0.012);
+    out[i] = 0.75 * Math.sin(ph) * env + Math.sin(ph2) * 0.6 * Math.exp(-t / 0.04) * (1 - Math.exp(-t / 0.003)) + lp * 0.6 * Math.exp(-t / 0.012);
   }
   yield;
   lowpass(out, sr, 1400);

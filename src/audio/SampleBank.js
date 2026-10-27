@@ -1,13 +1,18 @@
-// Builds every pre-rendered instrument, noise loop and the reverb impulse response once
-// per sample rate, time-sliced so the main thread is never blocked for long. AudioBuffers
-// are context-independent, so an OfflineAudioContext at the same rate reuses the bank.
+// Builds every pre-rendered instrument, noise loop and the reverb impulse response,
+// time-sliced so the main thread is never blocked for long. AudioBuffers are
+// context-independent, so every context (including an OfflineAudioContext) shares them.
+//
+// Two parts:
+//   core: the instruments, stored at fixed reduced rates. It needs no AudioContext, so it
+//         can be synthesised early (preloadBank) before the first user gesture.
+//   env:  noise loops, rain and the reverb IR at the context's own rate (the convolver
+//         requires a matching rate). Built per sample rate once the context exists.
 import { makeRng, runSliced } from './util.js';
 import * as S from './synthesis.js';
 
 // Pitched instruments: sampled every `step` semitones and pitch-shifted in between.
 // They are rendered with gentle highs (lowpassed at 4-9 kHz), so they are stored at a
 // reduced rate (playback resamples them): about half the memory and synthesis time.
-// Noise, rain and the reverb IR stay at the context rate (the convolver requires it).
 const RANGES = {
   piano: { lo: 33, hi: 99, step: 3, rate: 24000 },
   harp: { lo: 35, hi: 99, step: 4, rate: 24000 },
@@ -20,39 +25,88 @@ const RANGES = {
 const DRUM_RATE = 24000;
 const CYMBAL_RATE = 32000;
 
-const cache = new Map();
+const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const envCache = new Map();
+let core = null; // { promise, stats }
 
 function makeBuffer(ctx, channels, length, sr) {
   try {
     return new AudioBuffer({ numberOfChannels: channels, length: Math.max(1, length), sampleRate: sr });
   } catch (e) {
+    if (!ctx) throw e;
     return ctx.createBuffer(channels, Math.max(1, length), sr);
   }
 }
 
-/** Promise of the bank for this context's sample rate (shared across contexts). */
+function canBuildWithoutContext() {
+  try {
+    return typeof AudioBuffer !== 'undefined' && !!new AudioBuffer({ length: 1, sampleRate: 24000 });
+  } catch (e) {
+    return false;
+  }
+}
+
+function track(gen) {
+  const stats = { maxSliceMs: 0, maxStepMs: 0, maxStepLabel: '', ms: 0 };
+  const t0 = now();
+  const promise = runSliced(gen, 8, stats).then((v) => {
+    stats.ms = now() - t0;
+    return v;
+  });
+  return { promise, stats };
+}
+
+/**
+ * Start synthesising the instruments now (no AudioContext needed). Safe to call often;
+ * returns the shared promise, or null where AudioBuffers need a context (old Safari).
+ */
+export function preloadBank(ctx = null) {
+  if (!core) {
+    if (!ctx && !canBuildWithoutContext()) return null;
+    core = track(buildCore(ctx));
+    core.promise.catch(() => {
+      core = null;
+    });
+  }
+  return core.promise;
+}
+
+/** Promise of the complete bank for this context's sample rate. */
 export function loadBank(ctx, stats = null) {
   const sr = ctx.sampleRate;
-  let p = cache.get(sr);
+  let p = envCache.get(sr);
   if (!p) {
-    const st = stats || {};
-    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-    p = runSliced(build(ctx, sr), 8, st).then((bank) => {
-      bank.buildMs = (typeof performance !== 'undefined' ? performance.now() : 0) - t0;
-      bank.maxSliceMs = st.maxSliceMs || 0;
-      bank.maxStepMs = st.maxStepMs || 0;
-      bank.maxStepLabel = st.maxStepLabel || '';
+    p = (async () => {
+      const t0 = now();
+      const inst = await preloadBank(ctx);
+      const env = track(buildEnv(ctx, sr));
+      const bank = await env.promise;
+      bank.inst = inst;
+      bank.buildMs = core.stats.ms + env.stats.ms;
+      bank.waitMs = now() - t0;
+      const worst = core.stats.maxStepMs > env.stats.maxStepMs ? core.stats : env.stats;
+      bank.maxSliceMs = Math.max(core.stats.maxSliceMs, env.stats.maxSliceMs);
+      bank.maxStepMs = worst.maxStepMs;
+      bank.maxStepLabel = worst.maxStepLabel;
       return bank;
-    });
-    cache.set(sr, p);
-    p.catch(() => cache.delete(sr));
+    })();
+    envCache.set(sr, p);
+    p.catch(() => envCache.delete(sr));
+  }
+  if (stats) {
+    p.then((b) => {
+      stats.buildMs = b.buildMs;
+      stats.maxSliceMs = b.maxSliceMs;
+      stats.maxStepMs = b.maxStepMs;
+      stats.maxStepLabel = b.maxStepLabel;
+    }).catch(() => {});
   }
   return p;
 }
 
-function* build(ctx, sr) {
+function* buildEnv(ctx, sr) {
   const rand = makeRng(20261027);
-  const bank = { sr, inst: {}, noise: {}, rain: null, ir: null };
+  const bank = { sr, inst: null, noise: {}, rain: null, ir: null };
   for (const type of ['white', 'pink', 'brown']) {
     yield `noise ${type}`;
     const b = makeBuffer(ctx, 1, Math.floor(sr * 3), sr);
@@ -71,9 +125,14 @@ function* build(ctx, sr) {
     yield* S.rain(b.getChannelData(0), b.getChannelData(1), sr, rand);
     bank.rain = b;
   }
+  return bank;
+}
+
+function* buildCore(ctx) {
+  const rand = makeRng(20261103);
+  const inst = {};
   for (const name of Object.keys(RANGES)) {
-    const { lo, hi, step } = RANGES[name];
-    const rate = Math.min(sr, RANGES[name].rate || sr);
+    const { lo, hi, step, rate } = RANGES[name];
     const notes = [];
     for (let m = lo; m <= hi; m += step) {
       yield `${name} ${m}`;
@@ -81,42 +140,47 @@ function* build(ctx, sr) {
       yield* S[name](b.getChannelData(0), rate, m, rand);
       notes.push({ midi: m, buffer: b });
     }
-    bank.inst[name] = notes;
+    inst[name] = notes;
   }
   // percussion, tagged with nominal pitches so the sampler can retune them
   yield 'percussion';
-  const one = (sec, gen, rate = Math.min(sr, DRUM_RATE)) => {
+  const one = (sec, gen, rate = DRUM_RATE) => {
     const b = makeBuffer(ctx, 1, Math.floor(sec * rate), rate);
     return { b, gen: gen(b.getChannelData(0), rate) };
   };
   const timp = [];
   for (const m of [38, 43, 48]) {
+    yield `timpani ${m}`;
     const { b, gen } = one(3.2, (d, r) => S.timpani(d, r, m, rand));
     yield* gen;
     timp.push({ midi: m, buffer: b });
   }
-  bank.inst.timpani = timp;
+  inst.timpani = timp;
   const taiko = [];
-  for (const [m, f0, f1] of [[31, 95, 42], [36, 112, 50], [43, 150, 72]]) {
+  for (const [m, f0, f1] of [[31, 100, 48], [36, 120, 56], [43, 155, 76]]) {
+    yield `taiko ${m}`;
     const { b, gen } = one(2.2, (d, r) => S.taiko(d, r, rand, f0, f1));
     yield* gen;
     taiko.push({ midi: m, buffer: b });
   }
-  bank.inst.taiko = taiko;
+  inst.taiko = taiko;
   {
+    yield 'heart';
     const { b, gen } = one(0.45, (d, r) => S.heart(d, r, rand));
     yield* gen;
-    bank.inst.heart = [{ midi: 30, buffer: b }];
+    inst.heart = [{ midi: 30, buffer: b }];
   }
   {
-    const { b, gen } = one(3.0, (d, r) => S.cymbalSwell(d, r, rand), Math.min(sr, CYMBAL_RATE));
+    yield 'cymbal swell';
+    const { b, gen } = one(3.0, (d, r) => S.cymbalSwell(d, r, rand), CYMBAL_RATE);
     yield* gen;
-    bank.inst.swell = [{ midi: 60, buffer: b }];
+    inst.swell = [{ midi: 60, buffer: b }];
   }
   {
-    const { b, gen } = one(3.5, (d, r) => S.crash(d, r, rand), Math.min(sr, CYMBAL_RATE));
+    yield 'crash';
+    const { b, gen } = one(3.5, (d, r) => S.crash(d, r, rand), CYMBAL_RATE);
     yield* gen;
-    bank.inst.crash = [{ midi: 60, buffer: b }];
+    inst.crash = [{ midi: 60, buffer: b }];
   }
-  return bank;
+  return inst;
 }

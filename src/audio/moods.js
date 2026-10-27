@@ -170,7 +170,7 @@ export const MOODS = {
     form: ['a', 'a', 'b', 'a'],
     layers: [
       { p: 'pad', target: 'strings', n: 4, lo: 45, hi: 64, gain: 0.24 },
-      { p: 'drone', target: 'drone', lo: 26, notes: [0, 12], gain: 0.22 },
+      { p: 'drone', target: 'drone', lo: 38, notes: [0, 12], gain: 0.2 },
       { p: 'sparkle', inst: 'celesta', lo: 74, hi: 96, prob: 0.09, vel: 0.5, dens: [0.7, 1.4] },
       { p: 'arp', inst: 'celesta', rate: 1, shape: 'up', lo: 69, hi: 90, vel: 0.28, prob: 0.6, on: [0.3, 0.6] },
       { p: 'gen', inst: 'piano', lo: 62, hi: 78, vel: 0.34, phrase: 1, restProb: 0.75, cells: [[2, 2], [4], [3, 1]], melodic: true, on: [0.2, 0.5] },
@@ -212,7 +212,7 @@ export const MOODS = {
     },
     form: ['a', 'b'],
     layers: [
-      { p: 'drone', target: 'drone', lo: 26, notes: [0, 12, 19], gain: 0.22 },
+      { p: 'drone', target: 'drone', lo: 38, notes: [0, 12, 19], gain: 0.2 },
       { p: 'pad', target: 'strings', n: 3, lo: 62, hi: 80, gain: 0.26 },
       { p: 'heart', inst: 'heart', vel: 0.42, fastAt: 0.5 },
       { p: 'bass', target: 'trem', lo: 38, hi: 50, single: true, gain: 0.22, on: [0.45, 0.85] },

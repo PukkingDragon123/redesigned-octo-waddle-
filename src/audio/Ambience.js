@@ -31,7 +31,7 @@ export class Ambience {
     if ('speed' in a) s.speed = clamp(finite(+a.speed, s.speed), 0, 400);
     if ('waterfall' in a) {
       const w = a.waterfall;
-      if (w && w.pos && Number.isFinite(+w.pos.x)) {
+      if (w && w.pos && Number.isFinite(+w.pos.x) && Number.isFinite(+w.pos.y) && Number.isFinite(+w.pos.z)) {
         this.wf.x = +w.pos.x;
         this.wf.y = +w.pos.y;
         this.wf.z = +w.pos.z;
@@ -156,8 +156,9 @@ export class Ambience {
       const src = this._loop('pink', 1.1);
       const hp = this._filter('highpass', 300, 0.6);
       const bp = this._filter('bandpass', 700, 0.5);
-      src.connect(hp); hp.connect(bp); bp.connect(out); out.connect(amb);
-      return { out, nodes: [out, src, hp, bp], srcs: [src], bp };
+      const lp = this._filter('lowpass', 4500, 0.5);
+      src.connect(hp); hp.connect(bp); bp.connect(lp); lp.connect(out); out.connect(amb);
+      return { out, nodes: [out, src, hp, bp, lp], srcs: [src], bp };
     });
     if (rl) glide(rl.bp.frequency, clamp(350 + sp * 38, 350, 3200), now, 0.2);
 

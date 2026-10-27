@@ -18,14 +18,14 @@ import { Conductor } from './Conductor.js';
 import { WhaleVoice } from './WhaleVoice.js';
 import { Sfx } from './Sfx.js';
 import { Ambience } from './Ambience.js';
-import { loadBank } from './SampleBank.js';
+import { loadBank, preloadBank } from './SampleBank.js';
 import { MOODS, MOOD_NAMES } from './moods.js';
 import { parseChord, SCALES, bassNote, chordTones } from './theory.js';
 import { clamp, glide, setAt, holdAt, finite, softClipCurve } from './util.js';
 
 const SFX_NAMES = ['boom', 'boomSmall', 'gulp', 'sparkle', 'bonk', 'wingbeat', 'whoosh', 'thunder', 'lightningCrack', 'falconScreech', 'falconWing', 'splash', 'chime'];
 const STINGERS = ['discover', 'boom', 'strike', 'harmony', 'resolve'];
-const MAX_VOICE_ENGINES = 14;
+const MAX_VOICE_ENGINES = 16;
 const DEFAULT_CHORD = parseChord('D');
 const MUSIC_TRIM = 0.55;
 const WORLD_TRIM = 1.0;
@@ -61,6 +61,13 @@ export class AudioSystem {
     this.stats = { updateMs: 0, maxUpdateMs: 0, buildMs: 0, maxSliceMs: 0, errors: 0 };
     this.lastError = null;
     this._warned = new Set();
+    // Synthesise the instruments early (time-sliced, no AudioContext needed) so the score
+    // can begin as soon as start() is called from the first user gesture.
+    if (this.opts.preload !== false && typeof setTimeout !== 'undefined') {
+      setTimeout(() => {
+        try { preloadBank(); } catch (e) { /* built later by start() */ }
+      }, 0);
+    }
   }
 
   /** True once the context is running and the instrument bank is built. */
@@ -148,10 +155,15 @@ export class AudioSystem {
     const B = (this.bus = {});
     // master chain
     B.master = g(1);
+    // no infrasonic rumble: synthesized drums and drones carry a lot of sub energy
+    B.lowcut = ctx.createBiquadFilter();
+    B.lowcut.type = 'highpass';
+    B.lowcut.frequency.value = 32;
+    B.lowcut.Q.value = 0.6;
     B.shelf = ctx.createBiquadFilter();
     B.shelf.type = 'highshelf';
-    B.shelf.frequency.value = 8500;
-    B.shelf.gain.value = -2.5;
+    B.shelf.frequency.value = 9000;
+    B.shelf.gain.value = -1;
     B.comp = ctx.createDynamicsCompressor();
     B.comp.threshold.value = -16;
     B.comp.knee.value = 10;
@@ -169,7 +181,8 @@ export class AudioSystem {
     B.clip = ctx.createWaveShaper();
     B.clip.curve = softClipCurve(4096, 0.62, 0.88, 2);
     B.clip.oversample = 'none';
-    B.master.connect(B.shelf);
+    B.master.connect(B.lowcut);
+    B.lowcut.connect(B.shelf);
     B.shelf.connect(B.comp);
     B.comp.connect(B.trim);
     B.trim.connect(B.limit);
@@ -195,9 +208,15 @@ export class AudioSystem {
     B.musicVol = g(mv);
     B.musicVolW = g(mv);
     B.musicLP = lp(20000);
+    // tame the bass build-up of the arrangement (and of its reverb) a little
+    B.musicShelf = ctx.createBiquadFilter();
+    B.musicShelf.type = 'lowshelf';
+    B.musicShelf.frequency.value = 110;
+    B.musicShelf.gain.value = -3;
     B.musicDry.connect(B.duck);
     B.duck.connect(B.musicVol);
-    B.musicVol.connect(B.musicLP);
+    B.musicVol.connect(B.musicShelf);
+    B.musicShelf.connect(B.musicLP);
     B.musicLP.connect(B.master);
     B.musicWet.connect(B.duckW);
     B.duckW.connect(B.musicVolW);
@@ -253,11 +272,11 @@ export class AudioSystem {
   }
 
   async _init() {
-    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-    const bank = await loadBank(this.ctx, this.stats);
+    const bank = await loadBank(this.ctx);
     this.bank = bank;
-    this.stats.buildMs = bank.buildMs ?? (performance.now() - t0);
-    this.stats.maxSliceMs = bank.maxSliceMs ?? this.stats.maxSliceMs;
+    this.stats.buildMs = bank.buildMs || 0;
+    this.stats.waitMs = bank.waitMs || 0;
+    this.stats.maxSliceMs = bank.maxSliceMs || 0;
     this.stats.maxStepMs = bank.maxStepMs || 0;
     this.stats.maxStepLabel = bank.maxStepLabel || '';
     try {
@@ -503,7 +522,7 @@ export class AudioSystem {
       if (e === v) continue;
       if (!victim || (victim.humming && !e.humming) || (e.humming === victim.humming && e.lastActive < victim.lastActive)) victim = e;
     }
-    if (victim) victim._killEngine(this.ctx.currentTime);
+    if (victim) victim._killEngine(this.ctx.currentTime, 0.03);
   }
 
   _releaseVoiceEngine(v) {

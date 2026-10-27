@@ -2,7 +2,7 @@
 // world positions are spatialised (equal-power panner + distance + air absorption);
 // thunder is delayed by its distance at 343 m/s. Musical effects (sparkle, chime) are
 // tuned to the current chord.
-import { clamp, lerp, mtof, glide, setAt, rampAt, expAt, disconnect, stopAt, startAt, finite, driveCurve, makeRng } from './util.js';
+import { clamp, lerp, glide, setAt, rampAt, expAt, disconnect, stopAt, startAt, finite, driveCurve, makeRng } from './util.js';
 import { chordTones } from './theory.js';
 import { getWaves } from './instruments.js';
 
@@ -40,7 +40,8 @@ export class Sfx {
     this.lastT[name] = now;
     const gain = clamp(finite(o.gain, 1), 0, 4);
     const pitch = clamp(finite(o.pitch, 1), 0.25, 4);
-    const pos = o.position && Number.isFinite(+o.position.x) ? o.position : null;
+    const P = o.position;
+    const pos = P && Number.isFinite(+P.x) && Number.isFinite(+P.y) && Number.isFinite(+P.z) ? { x: +P.x, y: +P.y, z: +P.z } : null;
     const end = fn.call(this, now + 0.01, gain, pitch, pos, o);
     if (Number.isFinite(end)) this.active.push(end);
     return true;
@@ -191,7 +192,7 @@ export class Sfx {
     const len = small ? 1.6 : 4.5;
     const end = t + len;
     const out = this._out(t, pos, nodes, { ref: small ? 25 : 60, airK: 400, wet: small ? 0.35 : 0.6 });
-    const amp = this._gain(gain * (small ? 0.45 : 0.8), nodes);
+    const amp = this._gain(gain * (small ? 0.42 : 0.68), nodes);
     amp.connect(out);
     // thump
     const th = this._osc('sine', 62 * pitch * (small ? 1.5 : 1), t, end, nodes);

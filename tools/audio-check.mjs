@@ -52,7 +52,9 @@ const boot = await page.evaluate(() => {
     ctxState: a.ctx.state,
     sampleRate: a.ctx.sampleRate,
     bankBuildMs: Math.round(a.stats.buildMs),
+    bankWaitAfterStartMs: Math.round(a.stats.waitMs || 0),
     longestSliceMs: Math.round(a.stats.maxSliceMs * 10) / 10,
+    slowestStep: `${a.stats.maxStepLabel} ${Math.round((a.stats.maxStepMs || 0) * 10) / 10} ms`,
     longTasksMs: window.__longtasks.map((t) => Math.round(t.dur)),
   };
 });
@@ -117,6 +119,65 @@ if (!args.includes('--skip-sfx')) {
   await run('sfx:boom@8m g1.2', () => window.__audioTest.renderSfx('boom', 6, { gain: 1.2, position: { x: 0, y: 150, z: -8 } }), null);
   await run('sfx:thunder@100m', () => window.__audioTest.renderSfx('thunder', 8, { gain: 1, position: { x: 50, y: 200, z: -80 } }), null);
 }
+
+console.log('\n-- API safety (before start, bad arguments, concurrent start) --');
+const safety = await page.evaluate(async () => {
+  const { AudioSystem } = await import('/src/audio/AudioSystem.js');
+  const errs = [];
+  const tryit = (name, f) => {
+    try { f(); } catch (e) { errs.push(`${name}: ${e.message}`); }
+  };
+  const a = new AudioSystem(window.__skysong);
+  const v = a.createVoice();
+  const battery = (tag) => {
+    tryit(`${tag} ready`, () => a.ready);
+    tryit(`${tag} update`, () => a.update(0.016));
+    tryit(`${tag} update NaN`, () => a.update(NaN));
+    tryit(`${tag} setVolumes`, () => a.setVolumes(0.7, 'x'));
+    tryit(`${tag} setMood`, () => a.setMood('flight'));
+    tryit(`${tag} setMood bad`, () => a.setMood('nope', null));
+    tryit(`${tag} setMood none`, () => a.setMood());
+    tryit(`${tag} setIntensity`, () => a.setIntensity('abc'));
+    tryit(`${tag} stinger`, () => a.stinger('discover'));
+    tryit(`${tag} stinger bad`, () => a.stinger(undefined));
+    tryit(`${tag} getKey`, () => {
+      const k = a.getKey();
+      if (!k || k.scale.length !== 7 || !Number.isFinite(k.beat) || !Number.isFinite(k.nextBeatTime) || !k.chord.length) throw new Error('bad key ' + JSON.stringify(k));
+    });
+    tryit(`${tag} createVoice weird`, () => a.createVoice({ base: 'x', formant: null }).hum(NaN));
+    tryit(`${tag} voice.setPosition`, () => v.setPosition(null));
+    tryit(`${tag} voice.setPosition NaN`, () => v.setPosition({ x: NaN, y: 1, z: 2 }));
+    tryit(`${tag} voice.hum`, () => v.hum(60, undefined, { glideFrom: 'x', gain: -3, vibrato: 1e9 }));
+    tryit(`${tag} voice.hum NaN`, () => v.hum(NaN, NaN, null));
+    tryit(`${tag} voice.release`, () => v.release(-1));
+    tryit(`${tag} voice.call`, () => v.call('chirp'));
+    tryit(`${tag} voice.call bad`, () => v.call({}));
+    tryit(`${tag} voice.setChargeLevel`, () => v.setChargeLevel(0.5));
+    tryit(`${tag} voice.setChargeLevel NaN`, () => v.setChargeLevel(NaN));
+    tryit(`${tag} sfx`, () => a.sfx('boom', { position: { x: 1, y: 2, z: 3 }, gain: 'loud', pitch: 0 }));
+    tryit(`${tag} sfx bad`, () => a.sfx('nope'));
+    tryit(`${tag} sfx null opts`, () => a.sfx('thunder', null));
+    tryit(`${tag} sfx NaN pos`, () => a.sfx('splash', { position: { x: NaN, y: 0, z: 0 } }));
+    tryit(`${tag} setAmbience`, () => a.setAmbience({ wind: 2, speed: -5, waterfall: { pos: null } }));
+    tryit(`${tag} setAmbience null`, () => a.setAmbience(null));
+    tryit(`${tag} duck`, () => a.duck('a', 'b'));
+  };
+  battery('before');
+  const [r1, r2] = await Promise.all([a.start(), a.start()]);
+  battery('after');
+  for (const n of AudioSystem.sfxNames) tryit(`sfx ${n}`, () => a.sfx(n, { position: { x: 3, y: 150, z: -10 } }));
+  for (const s of AudioSystem.stingers) tryit(`stinger ${s}`, () => a.stinger(s));
+  for (const m of AudioSystem.moods) tryit(`mood ${m}`, () => { a.setMood(m, { fade: 0 }); a.update(0.016); });
+  for (const k of ['chirp', 'coo', 'answer', 'warn', 'yawn', 'play', 'roar']) tryit(`call ${k}`, () => v.call(k));
+  for (let i = 0; i < 30; i++) tryit('update loop', () => a.update(1 / 60));
+  const res = { errs, start: [r1, r2], ready: a.ready, caught: a.stats.errors, lastError: a.lastError ? String(a.lastError) : null };
+  a.dispose();
+  return res;
+});
+console.log(JSON.stringify(safety));
+if (safety.errs.length) fails.push(`API threw: ${safety.errs.slice(0, 3).join(' | ')}`);
+if (!safety.ready) fails.push('second AudioSystem never became ready');
+if (safety.caught) fails.push(`API caught ${safety.caught} internal errors: ${safety.lastError}`);
 
 console.log('\n-- master chain & live context --');
 const gain = await page.evaluate(() => window.__audioTest.chainGain(-30));

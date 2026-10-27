@@ -327,7 +327,7 @@ export const MOODS = {
     form: ['soft', 'full', 'cadence', 'coda'],
     loopFrom: 3,
     layers: [
-      { p: 'melody', inst: 'piano', vel: 0.6, human: 0.02, secs: ['soft'], melodic: true },
+      // no melody in 'soft': the mother hums the theme there (Story.ending), a canon otherwise
       { p: 'melody', target: 'lead', octs: [0], vel: 0.68, secs: ['full', 'cadence'], melodic: true },
       { p: 'pad', target: 'strings', n: 4, lo: 54, hi: 76, gain: 0.34 },
       { p: 'bass', target: 'low', gain: 0.3, on: [0.2, 0.5] },

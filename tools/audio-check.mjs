@@ -108,16 +108,26 @@ if (!args.includes('--skip-sfx')) {
     lightningCrack: 150, falconScreech: 60, falconWing: 25, splash: 30, chime: 12,
   };
   console.log('\n-- sfx (gain 1 at typical distance) --');
+  // thunder and lightning pass the weather gate, open only in a storm: render them in a light
+  // one (below 0.35, where the ambience would start thunder of its own)
+  const WEATHER = ['thunder', 'lightningCrack'];
+  const renderSfx = ([n, sec, o, storm]) => {
+    const T = window.__audioTest;
+    if (!storm) return T.renderSfx(n, sec, o);
+    return T.render(sec, () => ({
+      at: [[0, (s) => s.setAmbience({ storm })], [0.1, (s) => s.sfx(n, { position: o.position, gain: o.gain ?? 1 })]],
+    }), o);
+  };
   const names = await page.evaluate(() => window.__audioTest.sfxNames);
   for (const n of names) {
     if (!wanted(n) && !wanted('sfx')) continue;
     const d = DIST[n] ?? 20;
     const pos = { x: d * 0.3, y: 150 + d * 0.1, z: -d * 0.95 };
-    await run(`sfx:${n}@${d}m`, ([n, wav, pos, sec]) => window.__audioTest.renderSfx(n, sec, { wav, position: pos }), [n, WAV, pos, n === 'thunder' ? 12 : 5]);
+    await run(`sfx:${n}@${d}m`, renderSfx, [n, n === 'thunder' ? 12 : 5, { wav: WAV, position: pos }, WEATHER.includes(n) ? 0.1 : 0]);
   }
   // loudest plausible calls: a close boom at the integration's gain, a close thunder
-  await run('sfx:boom@8m g1.2', () => window.__audioTest.renderSfx('boom', 6, { gain: 1.2, position: { x: 0, y: 150, z: -8 } }), null);
-  await run('sfx:thunder@100m', () => window.__audioTest.renderSfx('thunder', 8, { gain: 1, position: { x: 50, y: 200, z: -80 } }), null);
+  await run('sfx:boom@8m g1.2', renderSfx, ['boom', 6, { gain: 1.2, position: { x: 0, y: 150, z: -8 } }, 0]);
+  await run('sfx:thunder@100m', renderSfx, ['thunder', 8, { gain: 1, position: { x: 50, y: 200, z: -80 } }, 0.1]);
 }
 
 console.log('\n-- API safety (before start, bad arguments, concurrent start) --');

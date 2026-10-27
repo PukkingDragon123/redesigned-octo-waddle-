@@ -408,7 +408,6 @@ export class WorldBuilder {
       d = Math.min(d, islandDistance(isl, p));
     }
     for (const sc of this.sphereColliders) {
-      if (sc.soft) continue;
       d = Math.min(d, p.distanceTo(sc.p) - sc.r);
     }
     for (const c of this.capsules) d = Math.min(d, capsuleDist(p, c));

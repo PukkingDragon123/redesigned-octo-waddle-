@@ -110,13 +110,16 @@ export function buildArch({ center, span, along, radius = 150, thick = 26, width
     tops.push({ p: p.clone().addScaledVector(n, tu * 0.95), n: n.clone(), t });
     unders.push({ p: p.clone().addScaledVector(n, -tu * 0.9), n: n.clone(), t });
   }
-  // colliders: a chain of spheres along the arc
+  // colliders: a chain of spheres along the arc, sized to the thickness, with side spheres
+  // spreading them across the wider extent
   const colliders = [];
   for (let i = 0; i <= 30; i++) {
     const t = i / 30;
     const { p } = pathFn(t);
     const [tu, tb] = thickFn(t);
-    colliders.push({ p, r: Math.max(tu, tb) * 0.95 });
+    const rr = tu * 0.95;
+    colliders.push({ p, r: rr });
+    if (tb > tu) for (const sgn of [-1, 1]) colliders.push({ p: p.clone().addScaledVector(along, sgn * (tb - tu)), r: rr });
   }
   return { mesh, feet, tops, unders, colliders };
 }

@@ -24,6 +24,7 @@ export class WorldBuilder {
     this.lightningSpots = [];
     this.progress = 0;
     this.built = new Set();
+    this.done = new Set(); // chapters whose islands, vegetation and spawns are complete
     this._v = new Vector3();
   }
 
@@ -370,6 +371,8 @@ export class WorldBuilder {
       }
       for (let k = 0; k < 5; k++) {
         const c = at(lerp(s0 + 150, s1, (k + 0.5) / 5), (r() - 0.5) * 300, lerp(-20, 40, r()));
+        // keep the feeding grounds (and their krill) out of the floating lakes' rock
+        for (let i = 0; i < 4 && this.distance(c, 120) < 40; i++) c.add(this.collide(c, 40, new Vector3()));
         clouds.wisps(c, 110, 16, { seed: 2700 + k, moisture: 1, opacity: 0.3 });
         this.spawns.krill.push({ pos: c, count: 800, chapter: id });
       }
@@ -380,6 +383,7 @@ export class WorldBuilder {
     }
 
     veg.build(this.group(id), this.game.engine.shadows);
+    this.done.add(id);
   }
 
   // ---- runtime ----------------------------------------------------------------------------

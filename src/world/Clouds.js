@@ -357,7 +357,8 @@ export class Clouds {
     const d = this.data;
     const drift = this.uniforms.uDrift.value;
     for (const cl of this.clusters) {
-      if (cl.center.distanceToSquared(p) > (cl.radius + 80) ** 2) continue;
+      const cx = cl.center.x + drift.x - p.x, cy = cl.center.y + drift.y - p.y, cz = cl.center.z + drift.z - p.z;
+      if (cx * cx + cy * cy + cz * cz > (cl.radius + 80) ** 2) continue;
       for (let i = cl.start; i < cl.start + cl.count; i++) {
         const o = i * 12;
         const dx = d[o] + drift.x - p.x, dy = d[o + 1] + drift.y - p.y, dz = d[o + 2] + drift.z - p.z;

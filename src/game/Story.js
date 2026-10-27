@@ -97,6 +97,11 @@ export class Story {
     this.world.build((p) => { this.buildProgress = p; }).then(() => {
       this.worldReady = true;
       this.prepareGathering();
+      // chapters built after the title appeared get their creatures now
+      this.populateEcosystem(Math.max(0, this.chapterIndex));
+      // compile every remaining shader (falcon, creatures, shadow variants) while the title is up,
+      // so nothing stalls the first time it appears in the journey
+      setTimeout(() => g.engine.precompile([g.engine.scene, g.engine.sceneT]), 1200);
       // start judging the frame rate once the background building has settled
       setTimeout(() => { g.perf.ready = true; }, 2500);
     });
@@ -147,7 +152,7 @@ export class Story {
       if (m) {
         const { Ecosystem } = await m();
         this.eco = new Ecosystem(g);
-        this.eco.roosts = [this.herd.elder, ...this.herd.adults.slice(0, 3)];
+        this.eco.roosts = [this.herd.elder, ...this.herd.adults.filter((w) => w.role === 'adult').slice(0, 3)];
         // adults lunging with open mouths really eat (the calf feeds through eat() below)
         this.eco.feeders = this.herd.adults;
       }
@@ -240,7 +245,7 @@ export class Story {
     this.falconShadowT = null;
     g.engine.shadows.radius = 170;
     // a fresh sky: creatures are re-spawned for wherever the story resumes
-    if (this.eco) { this.eco.clear(); this.spawned.clear(); }
+    if (this.eco) { this.eco.clear(); this.eco.songRadius = 16; this.spawned.clear(); }
     this.weather.set(0, { lightning: 0 });
     this.weather.level = 0;
     g.wind.set(3, 0.3);
@@ -496,9 +501,12 @@ export class Story {
 
   populateEcosystem(i) {
     if (!this.eco) return;
+    // creatures of chapters left far behind are released
+    if (this.herd) this.eco.prune?.(this.path.pointAt(this.herd.s), 2500);
     const ids = [i, i + 1].map((k) => this.path.chapters[k]?.id).filter(Boolean);
     for (const id of ids) {
-      if (this.spawned.has(id)) continue;
+      // a chapter still being built has no spawns yet: it is picked up later, not marked done
+      if (this.spawned.has(id) || !this.world.done.has(id)) continue;
       this.spawned.add(id);
       const sp = this.world.spawns;
       for (const k of sp.krill.filter((s) => s.chapter === id)) this.eco.addKrillSwarm?.(k.pos, k.count);
@@ -853,7 +861,7 @@ export class Story {
     this.audio.stinger?.('boom');
     this.audio.duck?.(0.4, 1.2);
     if (this.falcon && this.falcon.pos.distanceTo(center) < (giant ? 400 : 120 * power)) this.falcon.knockback?.(center, giant ? 2 : power);
-    this.eco?.scatter?.(center, giant ? 400 : 150, 1.5);
+    this.eco?.scatter?.(center, giant ? 320 : 150, 1.5, giant ? 160 : undefined);
   }
 
   *chapter_wall() {
@@ -980,7 +988,8 @@ export class Story {
     calf.drive.happy = 1;
     G.uSongRipple.value.set(center.x, center.y, center.z, g.time);
     G.uSongAmp.value = 2.2;
-    if (this.eco) this.eco.songFocus = center;
+    // the song centres on the Mother Tree's trunk: creatures circle wide of the bark
+    if (this.eco) { this.eco.songFocus = center; this.eco.songRadius = 44; }
     this.audio.setIntensity?.(1);
     // a slow rising crane shot around the herd and the Mother Tree
     this.player.enabled = false;
@@ -1129,7 +1138,7 @@ export class Story {
         calf.ctl.targetYaw = mom.yaw;
       }
       if (this.state === 'ending') {
-        const spot = herd.songCenter ? herd.songCenter.clone().add(new Vector3(-8, -2, 30)) : calf.pos;
+        const spot = herd.songCenter ? herd.songCenter.clone().add(new Vector3(-8, -2, 46)) : calf.pos;
         herd.steer(calf, spot, 5, dt, { arrive: 20 });
       }
     }
@@ -1195,7 +1204,7 @@ export class Story {
       if (n && n.dist < 28 && sp > 2.5) feed = 1;
       const mouth = calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.48);
       if (calf.drive.mouth > 0.4) {
-        const eaten = this.eco.eat?.(mouth, calf.L * 0.35 + 0.6, dt) || 0;
+        const eaten = this.eco.eat?.(mouth, calf.L * 0.35 + 0.6, dt, calf) || 0;
         if (eaten > 0) {
           this.eaten += eaten;
           calf.energy = Math.min(1, calf.energy + eaten * 0.012);

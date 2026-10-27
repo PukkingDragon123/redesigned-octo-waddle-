@@ -95,6 +95,30 @@ export class Engine {
     G.uResolution.value.set(pw, ph);
   }
 
+  /**
+   * Compile every material under the given roots now, hidden objects included, plus the shadow-pass
+   * variant of every caster, so no shader compiles mid-journey when something first appears.
+   * Programs are keyed by render target, so compile against the HDR target the scene draws into.
+   */
+  precompile(roots) {
+    const r = this.renderer;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this.rt);
+    try {
+      for (const root of roots) r.compile(root, this.camera, root.isScene ? root : this.scene);
+      for (const c of this.shadows.casters) {
+        const m = c.mesh.material;
+        c.mesh.material = c.depthMat;
+        r.compile(c.mesh, this.shadows.cam, this.scene);
+        c.mesh.material = m;
+      }
+    } catch (e) {
+      console.warn('[skysong] precompile', e);
+    } finally {
+      r.setRenderTarget(prev);
+    }
+  }
+
   render() {
     const r = this.renderer;
     // count every pass of the frame, not just the last one

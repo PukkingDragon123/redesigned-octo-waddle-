@@ -7,6 +7,13 @@ export default defineConfig({
     outDir: 'dist',
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 4000,
+    rolldownOptions: {
+      output: {
+        // one self-contained bundle: simplest to host anywhere
+        codeSplitting: false,
+        entryFileNames: 'assets/skysong.js',
+      },
+    },
   },
   server: {
     host: '127.0.0.1',

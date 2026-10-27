@@ -164,8 +164,8 @@ void main() {
   if (vMask.z > 0.01) {
     float sp = fract(vLoft.x * 140.0 / 6.2831853);
     float line = smoothstep(0.16, 0.0, abs(sp - 0.5) - 0.02 - 0.12 * uGill);
-    vec3 inner = mix(uGillColor * 0.35, uGillColor, uGill);
-    albedo = mix(albedo, inner, line * vMask.z);
+    vec3 inner = mix(albedo * 0.72, uGillColor, uGill);
+    albedo = mix(albedo, inner, line * vMask.z * (0.55 + 0.45 * uGill));
     trans += line * vMask.z * 0.6;
   }
   // Buoyancy sacs: pale, translucent, with faint veins.

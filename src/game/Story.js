@@ -104,6 +104,7 @@ export class Story {
     };
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', wake);
+    window.addEventListener('blur', () => { if (this.state === 'play' && !g.debug) this.pause(); });
     const p = g.params;
     if (g.debug && p.has('auto')) {
       // headless testing: a simple autopilot that follows the herd and its mother
@@ -201,10 +202,40 @@ export class Story {
   }
 
   // ---- menu -------------------------------------------------------------------------------
+  /** Clear every transient story state (used when entering the menu or a chapter). */
+  resetWorldState() {
+    const g = this.game, herd = this.herd;
+    herd.motherScript = null;
+    herd.songCenter = null;
+    herd.protectCenter = null;
+    herd.threat = null;
+    herd.feedHook = null;
+    herd.formationTight = 0;
+    herd.stopPlay();
+    herd.care.mode = 'lead';
+    this.protecting = false;
+    for (const w of herd.whales) {
+      Object.assign(w.drive, { charge: 0, sing: 0, hum: 0, fear: 0, feed: 0, mouth: 0, excite: 0 });
+    }
+    this.falcon?.setMode?.('hidden');
+    if (this.eco) { this.eco.threat = null; this.eco.songFocus = null; }
+    this.weather.set(0, { lightning: 0 });
+    this.weather.level = 0;
+    g.wind.set(3, 0.3);
+    g.atmosphere.stormBoost = 0;
+    G.uSongAmp.value = 0;
+    g.timeScale = 1;
+    g.timeScaleTarget = 1;
+    this.showGathering(false);
+    this.player.charge = 0;
+    this.player.charging = false;
+  }
+
   enterMenu() {
     const g = this.game;
     this.state = 'menu';
     this.script.cancel();
+    this.resetWorldState();
     this.player.enabled = false;
     g.input.setGameplayMode(false);
     document.body.classList.remove('playing');
@@ -341,10 +372,14 @@ export class Story {
     const T = 9;
     while (t < T) {
       const k = easeInOut(clamp(t / T, 0, 1));
-      const close = calf.pos.clone().addScaledVector(calf.right, 5.5).addScaledVector(calf.fwd, 3.5).add(new Vector3(0, 1.2, 0));
+      // frame the calf's face from the side away from its mother, her great eye behind
+      const toMom = mom.pos.clone().sub(calf.pos);
+      const side = toMom.dot(calf.right) > 0 ? -1 : 1;
+      const close = calf.pos.clone().addScaledVector(calf.right, side * 5.2).addScaledVector(calf.fwd, 4.2).add(new Vector3(0, 0.9, 0));
       this.shot.pos.copy(from).lerp(close, k);
-      this.shot.look.copy(fromLook).lerp(calf.pos.clone().addScaledVector(calf.fwd, 0.8).add(new Vector3(0, 0.4, 0)), k);
-      this.shot.fov = lerp(46, 40, k);
+      const focus = calf.pos.clone().addScaledVector(calf.fwd, 0.9).add(new Vector3(0, 0.3, 0)).lerp(mom.pos, 0.12);
+      this.shot.look.copy(fromLook).lerp(focus, k);
+      this.shot.fov = lerp(46, 38, k);
       t += yield 0;
     }
     this.menu.hide();
@@ -399,6 +434,7 @@ export class Story {
     const g = this.game, herd = this.herd;
     const ch = this.path.chapters[i];
     this.script.cancel('chapter');
+    if (!opts.fromIntro) this.resetWorldState();
     this.state = 'play';
     this.player.enabled = true;
     g.input.setGameplayMode(true);
@@ -811,7 +847,7 @@ export class Story {
     const make = (genome, k) => {
       const w = new Whale(Object.assign({}, genome, { seed: genome.seed + 1000 + k, name: genome.name + '-' + k }));
       w.furQuality = g.furQuality * 0.5;
-      w.group.visible = false;
+      w.group.visible = !!this.gatheringOn;
       g.engine.scene.add(w.group);
       const a = r() * TAU, rad = lerp(180, 700, r());
       w.orbit = { a, rad, h: lerp(-30, 160, r()), speed: lerp(0.02, 0.05, r()) * (r() < 0.5 ? -1 : 1), center: mt };
@@ -983,6 +1019,7 @@ export class Story {
       if (v) v.setPosition?.(w.pos);
     }
     this.updateGathering(dt);
+    this.waterfallMist(dt);
     this.weather.update(dt);
     this.booms.update(dt);
     this.falcon?.update?.(dt);
@@ -1140,6 +1177,26 @@ export class Story {
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});
     // cloud sea wakes when skimming
     g.cloudSea.uniforms.uTrailOn.value = calf.pos.y < 130 ? 1 : 0;
+  }
+
+  waterfallMist(dt) {
+    const g = this.game;
+    const cam = g.engine.camera.position;
+    this.mistT = (this.mistT || 0) + dt;
+    if (this.mistT < 0.12) return;
+    this.mistT = 0;
+    for (const w of this.world.waterfalls) {
+      if (!w.visible) continue;
+      const lip = w.userData.lip;
+      if (Math.abs(lip.x - cam.x) > 600 || Math.abs(lip.z - cam.z) > 600) continue;
+      const out = w.userData.out;
+      const drop = w.userData.drop;
+      // churning spray where the fall meets the cloud ocean, plus a fine veil along it
+      const k = Math.random();
+      const y = lip.y - (0.55 + 0.45 * k) * drop;
+      const p = lip.clone().addScaledVector(out, 4 + k * 10).add(new Vector3((Math.random() - 0.5) * w.userData.width * 2, y - lip.y, (Math.random() - 0.5) * w.userData.width * 2));
+      g.mist.emit({ pos: p, vel: new Vector3((Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3), life: 4, size: w.userData.width * 1.2, sizeEnd: w.userData.width * 4, alpha: 0.35, drag: 0.4, kind: 0, fadeIn: 0.8 });
+    }
   }
 
   updateAudio(dt) {

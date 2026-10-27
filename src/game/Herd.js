@@ -47,6 +47,7 @@ export class Herd {
     });
     for (const w of this.whales) {
       w.phase = r() * 100;
+      w.playT = lerp(8, 40, r());
       w.state = 'travel';
       w.stateT = 0;
       w.homeOffset = new Vector3();
@@ -247,6 +248,21 @@ export class Herd {
       this.windShelter = damp(this.windShelter, inLee ? 0.3 : 1, 2, dt);
     } else this.windShelter = 1;
 
+    // moments of play: slow rolls from the adults, tumbles from the calves
+    if (this.mode === 'travel' || this.mode === 'rest') {
+      for (const w of this.whales) {
+        if (w.role === 'player' || w.play) continue;
+        w.playT -= dt;
+        if (w.playT <= 0) {
+          w.playT = w.isCalf ? lerp(9, 22, Math.random()) : lerp(35, 90, Math.random());
+          if (this.mode === 'travel' && w.vel.length() > 3 && w.pos.distanceTo(calf.pos) < 220) {
+            w.barrelRoll(Math.random() < 0.5 ? 1 : -1);
+            w.drive.happy = 0.8;
+            if (w.isCalf || Math.random() < 0.3) this.voiceHooks?.(w, w.isCalf ? 'play' : 'answer');
+          }
+        }
+      }
+    }
     for (const w of this.whales) {
       if (w.role === 'player') continue;
       this.game.wind.sample(w.pos, w.wind).multiplyScalar(w.isCalf ? 0.6 : 0.25);

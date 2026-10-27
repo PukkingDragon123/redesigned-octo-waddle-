@@ -251,8 +251,8 @@ export class Clouds {
     this.qkeys = new Uint16Array(MAX_PUFFS);
     this.inCloud = 0;
     this.playerInCloud = 0;
-    this.maxDist = 9000;
-    this.budget = MAX_PUFFS;
+    this.maxDist = 7500;
+    this.budget = 7000;
     this._fwd = new Vector3();
   }
 
@@ -384,13 +384,19 @@ export class Clouds {
     const drift = this.uniforms.uDrift.value;
     let vis = 0;
     const maxD2 = this.maxDist * this.maxDist;
-    // gather visible puffs (cluster-level culling first)
+    // cluster-level culling, nearest clusters first so the budget keeps what matters
+    const near = this._near || (this._near = []);
+    near.length = 0;
     for (const cl of this.clusters) {
       const cx = cl.center.x + drift.x - cam.x, cy = cl.center.y + drift.y - cam.y, cz = cl.center.z + drift.z - cam.z;
       const cd2 = cx * cx + cy * cy + cz * cz;
       if (cd2 > (this.maxDist + cl.radius) ** 2) continue;
-      // behind the camera?
       if (cx * fwd.x + cy * fwd.y + cz * fwd.z < -cl.radius - 60) continue;
+      cl._d2 = cd2;
+      near.push(cl);
+    }
+    near.sort((a, b) => a._d2 - b._d2);
+    for (const cl of near) {
       for (let i = cl.start; i < cl.start + cl.count; i++) {
         const o = i * 12;
         const px = d[o] + drift.x - cam.x, py = d[o + 1] + drift.y - cam.y, pz = d[o + 2] + drift.z - cam.z;

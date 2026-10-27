@@ -12,7 +12,8 @@ import { Clouds } from '../world/Clouds.js';
 import { Wind } from '../world/Wind.js';
 import { Particles } from '../render/Particles.js';
 
-const DEV_TESTS = import.meta.glob('../dev/*.js');
+// Dev scenes are only bundled in development builds.
+const DEV_TESTS = import.meta.env.DEV ? import.meta.glob('../dev/*.js') : {};
 
 export class Game {
   constructor(canvas, opts = {}) {
@@ -64,7 +65,7 @@ export class Game {
   applyQuality() {
     const q = this.engine.quality;
     this.cloudSea.setQuality(q.cloudSteps);
-    this.clouds.budget = Math.round(this.clouds.max * q.clouds);
+    this.clouds.budget = Math.round(7000 * q.clouds);
     this.furQuality = q.fur;
   }
 

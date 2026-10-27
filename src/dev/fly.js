@@ -39,6 +39,7 @@ export default async function (game) {
     if (mode === 'glide') return { swim: t < 2 ? 1 : 0, yaw: Math.PI, pitch: -0.05 };
     if (mode === 'dive') return { swim: 1, yaw: Math.PI, pitch: t > 2 ? -0.9 : 0 };
     if (mode === 'idle') return { swim: 0, yaw: Math.PI + t * 0.3, pitch: 0.1 };
+    if (mode === 'straight') return { swim: 0.85, yaw: Math.PI, pitch: -0.02 };
     if (mode === 'look') return { swim: 0.6, yaw: Math.PI + 0.3, pitch: -0.45 };
     if (mode === 'sun') {
       const sd = G.uSunDir.value;
@@ -80,6 +81,16 @@ export default async function (game) {
       a.animate(dt, camPos);
     });
     game.cameraRig.follow(dt, calf, player.aimYaw, player.aimPitch);
+    if (p.get('cam') === 'side' || p.get('cam') === 'front' || p.get('cam') === 'momside') {
+      const tgt = p.get('cam') === 'momside' && whales[1] ? whales[1] : calf;
+      const k = tgt.isCalf ? 1 : 5;
+      const shot = game._devShot || (game._devShot = { pos: new Vector3(), look: new Vector3(), fov: 40 });
+      if (p.get('cam') === 'front') shot.pos.copy(tgt.pos).addScaledVector(tgt.fwd, 9 * k).addScaledVector(tgt.right, 3 * k).add(new Vector3(0, 1.5 * k, 0));
+      else shot.pos.copy(tgt.pos).addScaledVector(tgt.right, 8 * k).addScaledVector(tgt.fwd, 1 * k).add(new Vector3(0, 1.2 * k, 0));
+      shot.look.copy(tgt.pos);
+      game.cameraRig.setCinematic(shot, 10);
+      game.cameraRig.cineW = 1;
+    }
     game.focus.copy(calf.pos);
     game.cloudSea.uniforms.uTrailOn.value = calf.pos.y < 140 ? 1 : 0;
   };

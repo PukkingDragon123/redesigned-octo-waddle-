@@ -65,6 +65,9 @@ function tableAt(P, key, t) {
 }
 
 const SUPER_N = 2.25;
+// Geometry is shared between whales with identical proportions (only bones and materials
+// are per individual), which keeps large gatherings cheap to build and to hold in memory.
+const GEO_CACHE = new Map();
 const spow = (x, e) => Math.sign(x) * Math.pow(Math.abs(x), e);
 
 export class WhaleModel {
@@ -78,6 +81,10 @@ export class WhaleModel {
     // per-genome proportion jitter
     this.girth = genome.girth ?? 1;
     this.finScale = genome.finScale ?? 1;
+    this.key = [genome.calf ? 'c' : 'a', this.L, this.girth, this.finScale, genome.belly ?? 1, genome.frondScale ?? 1].join('|');
+    this.cacheHit = GEO_CACHE.has(this.key);
+    if (!this.cacheHit) GEO_CACHE.set(this.key, {});
+    this.cache = GEO_CACHE.get(this.key);
 
     this._buildUniforms();
     this._buildSkeleton();
@@ -179,7 +186,8 @@ export class WhaleModel {
       uFurShade: { value: g.furShade ?? 0.72 },
       uFurTip: { value: g.furTip ?? 1.12 },
       uFurLen: { value: P.furLen * this.L * (g.furScale ?? 1) },
-      uFurDensity: { value: P.furDensity * (g.furDensityScale ?? 1) / Math.max(1, this.L / 4) * (g.calf ? 1 : 2.4) },
+      // strands per metre: fine on the calf, a little coarser (painterly) on the giants
+      uFurDensity: { value: (g.calf ? P.furDensity : 11) * (g.furDensityScale ?? 1) },
       uInertia: { value: new Vector3() },
       uAirflow: { value: new Vector3() },
     };
@@ -285,7 +293,30 @@ export class WhaleModel {
   }
 
   // ---- body ---------------------------------------------------------------------------------
+  _bodyMesh() {
+    const mat = new ShaderMaterial({
+      vertexShader: BODY_VERT,
+      fragmentShader: BODY_FRAG,
+      uniforms: Object.assign({}, G, this.u),
+      side: DoubleSide,
+    });
+    const mesh = new SkinnedMesh(this.bodyGeo, mat);
+    mesh.frustumCulled = false;
+    mesh.name = 'body';
+    this.body = mesh;
+    this.group.add(mesh);
+  }
+
   _buildBody() {
+    if (this.cacheHit) {
+      const C = this.cache;
+      this.bodyGeo = C.bodyGeo;
+      this.outerVertCount = C.outerVertCount;
+      this.outerIndexCount = C.outerIndexCount;
+      this.u.uEyeLoc.value.y = C.eyeLocY;
+      this._bodyMesh();
+      return;
+    }
     const P = this.P, L = this.L, bi = this.boneIndex;
     const nRings = this.g.calf ? 70 : 84;
     const nSeg = 48;
@@ -347,6 +378,8 @@ export class WhaleModel {
       // mane: longer fur over the shoulders and nape
       const mane = smoothstep(0.35, 0.85, dorsal) * smoothstep(P.joints.chest - 0.1, P.joints.chest, t) * smoothstep(P.hinge + 0.03, P.joints.neck, t);
       fur *= 1 + mane * (P.maneBoost - 1);
+      // calves wear a fluffy cowlick on the crown of the head
+      if (isCalf) fur *= 1 + 1.3 * smoothstep(0.7, 0.95, dorsal) * smoothstep(P.hinge - 0.02, P.hinge + 0.03, t) * (1 - smoothstep(P.eyeT + 0.02, P.eyeT + 0.07, t));
       // none on the face front / lips / around eyes
       if (t > P.hinge - 0.01) {
         const lip = Math.abs(absTh - rp.thM);
@@ -528,20 +561,8 @@ export class WhaleModel {
     this.bodyGeo = geo;
     this.outerVertCount = outerVertCount;
     this.outerIndexCount = outerIndexCount;
-    this.ringPts = ringPts;
-    this.nSeg = nSeg;
-
-    const mat = new ShaderMaterial({
-      vertexShader: BODY_VERT,
-      fragmentShader: BODY_FRAG,
-      uniforms: Object.assign({}, G, this.u),
-      side: DoubleSide,
-    });
-    const mesh = new SkinnedMesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.name = 'body';
-    this.body = mesh;
-    this.group.add(mesh);
+    Object.assign(this.cache, { bodyGeo: geo, outerVertCount, outerIndexCount, eyeLocY: this.u.uEyeLoc.value.y });
+    this._bodyMesh();
   }
 
   // ---- fins ----------------------------------------------------------------------------------
@@ -660,16 +681,19 @@ export class WhaleModel {
       const bones = [bi['fin' + s + '1'], bi['fin' + s + '2'], bi['fin' + s + '3']];
       bones.parent = bi.chest;
       const span = P.finSpan * L * this.finScale;
-      const geo = this._finGeometry({
-        span, chordRoot: P.finChord * L, chordMax: P.finChordMax * L * this.finScale, armR: P.armR * L,
-        rays: this.g.calf ? 4 : 5, scallop: this.g.calf ? 0.09 : 0.16, sweep: 0.2, side, bones, droop: 0.03, bulge: 0.07, tipRound: 0.24, camberAmt: 0.08,
-      });
-      // orient: fin was generated along +X*side from origin; move to shoulder & tilt
-      const sh = this.boneAbs['fin' + s + '1'];
       const q = new Quaternion().setFromUnitVectors(new Vector3(side, 0, 0), this.finDir(side));
-      const m = new Matrix4().compose(sh, q, new Vector3(1, 1, 1));
-      geo.applyMatrix4(m);
       const up = new Vector3(0, 1, 0).applyQuaternion(q);
+      let geo = this.cache['fin' + s];
+      if (!geo) {
+        geo = this._finGeometry({
+          span, chordRoot: P.finChord * L, chordMax: P.finChordMax * L * this.finScale, armR: P.armR * L,
+          rays: this.g.calf ? 4 : 5, scallop: this.g.calf ? 0.09 : 0.16, sweep: 0.2, side, bones, droop: 0.03, bulge: 0.07, tipRound: 0.24, camberAmt: 0.08,
+        });
+        // orient: fin was generated along +X*side from origin; move to shoulder & tilt
+        const sh = this.boneAbs['fin' + s + '1'];
+        geo.applyMatrix4(new Matrix4().compose(sh, q, new Vector3(1, 1, 1)));
+        this.cache['fin' + s] = geo;
+      }
       const mat = this._finMaterial({ up, chordLen: P.finChordMax * L, rays: 4 });
       const mesh = new SkinnedMesh(geo, mat);
       mesh.frustumCulled = false;
@@ -683,14 +707,18 @@ export class WhaleModel {
       const s = side > 0 ? 'R' : 'L';
       const bones = [bi['rear' + s], bi['rear' + s], bi['rear' + s]];
       bones.parent = bi.spine2;
-      const geo = this._finGeometry({
-        span: P.rearSpan * L, chordRoot: P.rearChord * L, chordMax: P.rearChord * L * 1.1, armR: P.armR * L * 0.45,
-        rays: 2, scallop: 0.08, sweep: 0.5, side, bones, fur: false, tipRound: 0.35, droop: 0.2,
-      });
-      const at = this.boneAbs['rear' + s];
       const dir = new Vector3(side * 0.7, -0.55, -0.45).normalize();
       const q = new Quaternion().setFromUnitVectors(new Vector3(side, 0, 0), dir);
-      geo.applyMatrix4(new Matrix4().compose(at, q, new Vector3(1, 1, 1)));
+      let geo = this.cache['rear' + s];
+      if (!geo) {
+        geo = this._finGeometry({
+          span: P.rearSpan * L, chordRoot: P.rearChord * L, chordMax: P.rearChord * L * 1.1, armR: P.armR * L * 0.45,
+          rays: 2, scallop: 0.08, sweep: 0.5, side, bones, fur: false, tipRound: 0.35, droop: 0.2,
+        });
+        const at = this.boneAbs['rear' + s];
+        geo.applyMatrix4(new Matrix4().compose(at, q, new Vector3(1, 1, 1)));
+        this.cache['rear' + s] = geo;
+      }
       const mat = this._finMaterial({ up: new Vector3(0, 1, 0).applyQuaternion(q), chordLen: P.rearChord * L, rays: 2 });
       const mesh = new SkinnedMesh(geo, mat);
       mesh.frustumCulled = false;
@@ -709,11 +737,15 @@ export class WhaleModel {
       const s = side > 0 ? 'R' : 'L';
       const bones = [bi.tail3, bi.fluke, bi.fluke];
       bones.parent = bi.tail3;
-      const geo = this._finGeometry({
-        span: P.flukeSpan * L, chordRoot: P.flukeChord * L, chordMax: P.flukeChord * L * 0.95,
-        armR: this.prof(0.02).hw * 0.9, rays: 3, scallop: 0.05, sweep: 0.7, side, bones, fur: true, tipRound: 0.32, bulge: 0.05,
-      });
-      geo.applyMatrix4(new Matrix4().makeTranslation(base.x, base.y, base.z));
+      let geo = this.cache['fluke' + s];
+      if (!geo) {
+        geo = this._finGeometry({
+          span: P.flukeSpan * L, chordRoot: P.flukeChord * L, chordMax: P.flukeChord * L * 0.95,
+          armR: this.prof(0.02).hw * 0.9, rays: 3, scallop: 0.05, sweep: 0.7, side, bones, fur: true, tipRound: 0.32, bulge: 0.05,
+        });
+        geo.applyMatrix4(new Matrix4().makeTranslation(base.x, base.y, base.z));
+        this.cache['fluke' + s] = geo;
+      }
       const mat = this._finMaterial({ up: new Vector3(0, 1, 0), chordLen: P.flukeChord * L, rays: 3 });
       mat.uniforms.uFlutter.value = 0.03;
       const mesh = new SkinnedMesh(geo, mat);
@@ -729,7 +761,7 @@ export class WhaleModel {
     const P = this.P, L = this.L, g = this.g;
     this.eyes = {};
     const r = P.eyeR * L;
-    const geo = new SphereGeometry(r, 40, 28);
+    const geo = this.cache.eyeGeo || (this.cache.eyeGeo = new SphereGeometry(r, 40, 28));
     for (const side of [1, -1]) {
       const s = side > 0 ? 'R' : 'L';
       const th = P.eyeTheta * side;
@@ -773,6 +805,8 @@ export class WhaleModel {
     const P = this.P, L = this.L, g = this.g;
     const len = P.frondLen * L * (g.frondScale ?? 1);
     this.fronds = {};
+    let geo = this.cache.frondGeo;
+    if (!geo) {
     const pos = [], nor = [], fr = [], idx = [];
     const count = 3;
     for (let f = 0; f < count; f++) {
@@ -783,7 +817,7 @@ export class WhaleModel {
       const stalk = [];
       for (let i = 0; i <= nS; i++) {
         const a = i / nS;
-        const cx = Math.sin(a * 1.2) * fl * 0.15;
+        const cx = a * fl * 0.42 + Math.sin(a * 2.2) * fl * 0.06; // angled back and away from the body
         const cy = (f - 1) * fl * 0.32 * (1 - a * 0.3) + Math.sin(a * 2.0) * fl * 0.05;
         const cz = -a * fl;
         stalk.push([cx, cy, cz, a]);
@@ -818,11 +852,13 @@ export class WhaleModel {
         }
       }
     }
-    const geo = new BufferGeometry();
+    geo = new BufferGeometry();
     geo.setAttribute('position', new Float32BufferAttribute(pos, 3));
     geo.setAttribute('normal', new Float32BufferAttribute(nor, 3));
     geo.setAttribute('aFrond', new Float32BufferAttribute(fr, 3));
     geo.setIndex(idx);
+    this.cache.frondGeo = geo;
+    }
     const fu = {
       uFlare: { value: 0.3 },
       uStream: { value: 0.3 },
@@ -839,7 +875,7 @@ export class WhaleModel {
       const th = side * 1.62;
       const sp = this.surfacePoint(P.frondT, th);
       const sn = this.surfaceNormal(P.frondT, th);
-      const root = sp.clone().addScaledVector(sn, -len * 0.04);
+      const root = sp.clone().addScaledVector(sn, len * 0.02);
       const mat = new ShaderMaterial({
         vertexShader: FROND_VERT, fragmentShader: FROND_FRAG,
         uniforms: Object.assign({}, G, fu), side: DoubleSide,
@@ -869,6 +905,11 @@ export class WhaleModel {
   _buildFur() {
     const shells = this.g.calf ? 22 : 12;
     this.maxShells = shells;
+    if (this.cache.furGeo) {
+      this.furTriPerShell = this.cache.furTriPerShell;
+      this._furMesh(this.cache.furGeo, shells);
+      return;
+    }
     // gather fur-bearing triangles from body outer surface + fin/fluke arms
     const parts = [
       { geo: this.bodyGeo, triCount: this.outerIndexCount / 3 },
@@ -939,6 +980,12 @@ export class WhaleModel {
     geo.setAttribute('skinWeight', new Float32BufferAttribute(sw, 4));
     geo.setIndex(new Uint32BufferAttribute(index, 1));
     this.furTriPerShell = tris.length;
+    this.cache.furGeo = geo;
+    this.cache.furTriPerShell = tris.length;
+    this._furMesh(geo, shells);
+  }
+
+  _furMesh(geo, shells) {
     const mat = new ShaderMaterial({
       vertexShader: FUR_VERT,
       fragmentShader: FUR_FRAG,

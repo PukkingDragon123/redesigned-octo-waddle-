@@ -188,7 +188,7 @@ void main() {
     g *= 0.88 + 0.24 * blades;
     // wind waves rolling over the meadow
     vec2 wd = normalize(uWind.xz + vec2(1e-3));
-    float wave = sin(dot(wp, wd) * 0.07 - uTime * (1.2 + length(uWind) * 0.12) + patchA * 4.0);
+    float wave = sin(dot(wp, wd) * 0.07 - uWavePhase + patchA * 4.0);
     g *= 1.0 + 0.1 * smoothstep(0.55, 1.0, wave) * (0.4 + 0.6 * smoothstep(0.0, 6.0, length(uWind)));
     // sparse flowers
     if (uFlowers > 0.0) {

@@ -242,7 +242,7 @@ export class Ecosystem {
     this._frustum.setFromProjectionMatrix(this._pv);
     ctx.drift.copy(g.wind.drift);
     ctx.wind.copy(g.wind.base);
-    ctx.cloudDriftVel.copy(g.wind.base).multiplyScalar(g.wind.driftSpeed ?? 0.25);
+    ctx.cloudDriftVel.copy(g.wind.driftVel);
     ctx.roosts = this.roosts;
     ctx.songRadius = this.songRadius;
     ctx.floorY = this.floorY;

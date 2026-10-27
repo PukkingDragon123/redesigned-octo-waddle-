@@ -112,6 +112,7 @@ export class Falcon {
     this._as = { poses: null };
     this.listeners = {};
     this._fxT = 0;
+    this._ringT = 0;
     this._cloudT = 0;
     this._inCloud = 0;
     this.anim.flapEvent = (a) => {
@@ -237,7 +238,8 @@ export class Falcon {
         this._ai.climbAlt = P.altitude ?? (this.circleCfg ? this.circleCfg.altitude : (T ? T.pos.y + 150 : this.pos.y + 120));
         break;
       case 'knockback':
-        this._ai.dur = P.duration ?? 1.2 + 0.9 * (P.strength ?? 1);
+        this._ai.dur = P.duration ?? 0.7 + 1.1 * (P.strength ?? 1);
+        this._ai.flail = Math.min(1, 0.35 + 0.65 * (P.strength ?? 1));
         break;
       case 'retreat': {
         this._ai.start = this.pos.clone();
@@ -264,6 +266,10 @@ export class Falcon {
   knockback(fromPos, strength = 1) {
     if (this.mode === 'hidden') return;
     const s = clamp(strength, 0, 2);
+    // every dive ends in strikeHit or strikeMiss, even when a boom interrupts it
+    if (this.mode === 'dive' || (this.mode === 'strike' && !this._ai.resolved)) {
+      this.emit('strikeMiss', { minDist: this._ai.minDist ?? Infinity, interrupted: true, target: this.target });
+    }
     const dir = _a.subVectors(this.pos, fromPos);
     if (dir.lengthSq() < 1) dir.set(0, 1, 0);
     dir.normalize();
@@ -279,9 +285,10 @@ export class Falcon {
     _b.applyQuaternion(_q);
     _b.z += (this.r() - 0.5) * 1.2;
     _b.x += (this.r() - 0.5) * 0.4;
-    this.tumbleW.copy(_b.normalize()).multiplyScalar(2.3 + 2.4 * s);
-    this.anim.jolt(1 + s);
-    if (this.fx) this._burstPuffs(this.pos, 22 + 12 * s, 9 + 6 * s, 1.0);
+    // a calf's small boom makes it flinch; the adults' synchronized boom sends it tumbling
+    this.tumbleW.copy(_b.normalize()).multiplyScalar(Math.min(7, 0.8 + 3.6 * s));
+    this.anim.jolt(0.5 + s);
+    if (this.fx) this._burstPuffs(this.pos, Math.round(10 + 16 * s), 8 + 7 * s, 0.6 + 0.3 * s);
     this.emit('knockback', { strength: s, from: fromPos.clone() });
     if (this.mode === 'retreat') return;
     this.setMode('knockback', { strength: s });
@@ -292,7 +299,7 @@ export class Falcon {
     const visible = this.mode !== 'hidden';
     if (visible) {
       this.anim.screech();
-      if (this.fx) this._screechRing();
+      this._ringT = 0.16; // the shock ring leaves the beak once it is wide open
     }
     this.emit('screech', { pos: this.pos.clone(), distant: !visible });
   }
@@ -606,9 +613,9 @@ export class Falcon {
       }
       case 'knockback': {
         const k = clamp(this.modeT / ai.dur, 0, 1);
-        c.poses.tumble = 1 - smoothstep(0.55, 1.0, k);
+        c.poses.tumble = (1 - smoothstep(0.55, 1.0, k)) * ai.flail;
         c.poses.glide = 1 - c.poses.tumble;
-        c.flail = 1 - smoothstep(0.4, 0.95, k);
+        c.flail = (1 - smoothstep(0.4, 0.95, k)) * ai.flail;
         c.effort = smoothstep(0.7, 1.0, k) * 0.8;
         c.crest = 0;
         c.squint = 1;
@@ -948,6 +955,10 @@ export class Falcon {
     this.talonPos.addVectors(_a, _b).multiplyScalar(0.5);
     if (this.mode === 'strike') this._strikeCheck(dt);
     this._mover(true);
+    if (this._ringT > 0) {
+      this._ringT -= dt;
+      if (this._ringT <= 0 && this.fx) this._screechRing();
+    }
     if (this.fx) this._effects(dt);
   }
 
@@ -1049,11 +1060,11 @@ export class Falcon {
       this.r.onSphere(_a);
       const feather = i % 3 === 0;
       mist.emit({
-        pos: _b.copy(p).addScaledVector(_a, 3 + this.r() * 4),
+        pos: _b.copy(p).addScaledVector(_a, 5 + this.r() * 8),
         vel: _c.copy(_a).multiplyScalar(speed * (0.5 + this.r())).addScaledVector(this.vel, 0.3),
-        life: feather ? 2.8 : 1.6, size: feather ? 0.9 : 3, sizeEnd: feather ? 0.6 : 10,
-        color: feather ? [0.7, 0.76, 0.86] : [1, 1, 1], alpha: alpha * (feather ? 0.9 : 0.45),
-        drag: feather ? 2.2 : 1.4, gravity: feather ? 1.2 : 0, kind: 0,
+        life: feather ? 3.2 : 1.5, size: feather ? 1.1 : 3.5, sizeEnd: feather ? 0.7 : 10,
+        color: feather ? [0.62, 0.68, 0.8] : [1, 1, 1], alpha: alpha * (feather ? 0.95 : 0.26),
+        drag: feather ? 2.2 : 1.3, gravity: feather ? 1.0 : 0, kind: 0,
       });
     }
   }
@@ -1069,13 +1080,14 @@ export class Falcon {
     if (_a.lengthSq() < 1e-4) _a.set(1, 0, 0);
     _a.normalize();
     _b.crossVectors(_a, _e).normalize();
-    const n = 18;
+    // a thin expanding ring of disturbed air in front of the beak (restrained: it must not hide the bird)
+    const n = 30;
     for (let i = 0; i < n; i++) {
       const ang = (i / n) * Math.PI * 2;
-      _c.copy(_a).multiplyScalar(Math.cos(ang)).addScaledVector(_b, Math.sin(ang)).addScaledVector(_e, 0.6).normalize();
+      _c.copy(_a).multiplyScalar(Math.cos(ang)).addScaledVector(_b, Math.sin(ang)).addScaledVector(_e, 0.35).normalize();
       mist.emit({
-        pos: origin.clone().addScaledVector(_c, 2), vel: _c.clone().multiplyScalar(26).addScaledVector(this.vel, 0.6),
-        life: 1.1, size: 2.2, sizeEnd: 7, color: [1, 1, 1], alpha: 0.28, drag: 2.0, kind: 0, fadeIn: 0.05,
+        pos: origin.clone().addScaledVector(_c, 3), vel: _c.clone().multiplyScalar(34).addScaledVector(this.vel, 0.8),
+        life: 0.9, size: 1.8, sizeEnd: 7, color: [1, 1, 1], alpha: 0.22, drag: 2.4, kind: 0, fadeIn: 0.03,
       });
     }
   }

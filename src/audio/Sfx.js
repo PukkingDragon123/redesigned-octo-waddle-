@@ -191,7 +191,7 @@ export class Sfx {
     const len = small ? 1.6 : 4.5;
     const end = t + len;
     const out = this._out(t, pos, nodes, { ref: small ? 25 : 60, airK: 400, wet: small ? 0.35 : 0.6 });
-    const amp = this._gain(gain * (small ? 0.55 : 0.85), nodes);
+    const amp = this._gain(gain * (small ? 0.45 : 0.8), nodes);
     amp.connect(out);
     // thump
     const th = this._osc('sine', 62 * pitch * (small ? 1.5 : 1), t, end, nodes);
@@ -241,7 +241,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 0.5;
     const out = this._out(t, pos, nodes, { ref: 6, wet: 0.15 });
-    const amp = this._gain(gain * 0.55, nodes);
+    const amp = this._gain(gain * 0.4, nodes);
     amp.connect(out);
     const bp = this._filter('bandpass', 420 * pitch, 1.5, nodes);
     bp.connect(amp);
@@ -269,7 +269,7 @@ export class Sfx {
   _sparkle(t, gain, pitch, pos) {
     const nodes = [];
     const out = this._out(t, pos, nodes, { ref: 10, wet: 0.5 });
-    const amp = this._gain(gain * 0.22, nodes);
+    const amp = this._gain(gain * 0.09, nodes);
     amp.connect(out);
     const key = this.sys._keyNow();
     const tones = chordTones(key.ch, 81, 100, []);
@@ -295,7 +295,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 0.4;
     const out = this._out(t, pos, nodes, { ref: 6, wet: 0.2 });
-    const amp = this._gain(gain * 0.7, nodes);
+    const amp = this._gain(gain * 0.35, nodes);
     amp.connect(out);
     const o1 = this._osc('sine', 210 * pitch, t, end, nodes);
     expAt(o1.frequency, 105 * pitch, t + 0.07);
@@ -316,7 +316,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 0.7;
     const out = this._out(t, pos, nodes, { ref: 12, wet: 0.12 });
-    const amp = this._gain(gain * 0.5, nodes);
+    const amp = this._gain(gain * 0.42, nodes);
     amp.connect(out);
     const n = this._noise('pink', t, end, nodes);
     const b1 = this._filter('bandpass', 240 * pitch, 0.9, nodes);
@@ -336,7 +336,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 1.1;
     const out = this._out(t, pos, nodes, { ref: 15, wet: 0.15 });
-    const amp = this._gain(gain * 0.5, nodes);
+    const amp = this._gain(gain * 0.8, nodes);
     let dest = out;
     if (!pos) {
       const sp = this.ctx.createStereoPanner();
@@ -427,7 +427,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 2.2;
     const out = this._out(t, pos, nodes, { ref: 80, airK: 600, wet: 0.5 });
-    const amp = this._gain(gain * 0.75, nodes);
+    const amp = this._gain(gain * 1.0, nodes);
     amp.connect(out);
     const n = this._noise('white', t, t + 0.6, nodes);
     const bp = this._filter('bandpass', 2600 * pitch, 0.45, nodes);
@@ -470,7 +470,7 @@ export class Sfx {
     const len = 0.95;
     const end = t + len + 0.1;
     const out = this._out(t, pos, nodes, { ref: 30, airK: 250, wet: 0.45, echo: 0.35 });
-    const amp = this._gain(gain * 0.42, nodes);
+    const amp = this._gain(gain * 0.34, nodes);
     amp.connect(out);
     const f0 = 2100 * pitch;
     const car = this._osc(getWaves(this.ctx).reed, f0, t, end, nodes);
@@ -523,7 +523,7 @@ export class Sfx {
     const nodes = [];
     const end = t + 0.45;
     const out = this._out(t, pos, nodes, { ref: 12, wet: 0.15 });
-    const amp = this._gain(gain * 0.5, nodes);
+    const amp = this._gain(gain * 0.75, nodes);
     amp.connect(out);
     const n = this._noise('white', t, end, nodes);
     const bp = this._filter('bandpass', 1400 * pitch, 1.2, nodes);
@@ -577,7 +577,7 @@ export class Sfx {
   _chime(t, gain, pitch, pos) {
     const nodes = [];
     const out = this._out(t, pos, nodes, { ref: 12, wet: 0.55 });
-    const amp = this._gain(gain * 0.3, nodes);
+    const amp = this._gain(gain * 0.2, nodes);
     amp.connect(out);
     const key = this.sys._keyNow();
     const tones = chordTones(key.ch, 79, 96, []);

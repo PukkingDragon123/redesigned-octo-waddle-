@@ -128,11 +128,11 @@ vec3 scallops(vec2 uv, vec2 cellSize) {
 }
 
 void main() {
+  vanishClip();
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
     return;
   #endif
-  vanishClip();
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;
   float part = vPart.x;
@@ -419,13 +419,13 @@ void main() {
   float d = abs(x) - w;
   float aa = max(fwidth(x), 1e-4) * 1.1;
   float cov = 1.0 - smoothstep(-aa, aa, d);
+  vanishClip();
   #ifdef DEPTH_PASS
     if (cov < 0.5) discard;
     gl_FragColor = vec4(1.0);
     return;
   #else
   if (cov < 0.02) discard;
-  vanishClip();
   bool top = gl_FrontFacing;
   vec3 N = normalize(vNormal);
   if (!top) N = -N;

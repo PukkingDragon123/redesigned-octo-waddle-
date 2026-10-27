@@ -106,3 +106,117 @@ export function toonMaterial(opts = {}) {
   if (opts.doubleSide) m.side = DoubleSide;
   return m;
 }
+
+// ---------------------------------------------------------------------------------------
+// Terrain: vertex-coloured rock with painted meadows. Grass areas (aGrass) are coloured in
+// the shader: broad tonal patches, dry spots, sparse flowers, fine blade texture and wind
+// waves sweeping across the field, so tops stay painterly at any distance.
+import { getNoiseTexture } from './NoiseTex.js';
+
+const TERRAIN_VERT = /* glsl */ `
+${UNIFORMS}
+attribute float aGrass;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+varying vec3 vColor;
+varying float vGrass;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  vNormal = normalize(mat3(modelMatrix) * normal);
+  #ifdef USE_COLOR
+    vColor = color;
+  #else
+    vColor = vec3(1.0);
+  #endif
+  vGrass = aGrass;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+const TERRAIN_FRAG = /* glsl */ `
+${UNIFORMS}
+${NOISE}
+${SHADOW}
+${LIGHTING}
+uniform sampler2D uNoise;
+uniform vec3 uGrassDark;
+uniform vec3 uGrassLight;
+uniform vec3 uGrassDry;
+uniform vec3 uMossColor;
+uniform float uFlowers;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+varying vec3 vColor;
+varying float vGrass;
+void main() {
+  #ifdef DEPTH_PASS
+    gl_FragColor = vec4(1.0);
+    return;
+  #endif
+  vec3 N = normalize(vNormal);
+  if (!gl_FrontFacing) N = -N;
+  vec3 albedo = vColor;
+  vec2 wp = vWorldPos.xz;
+  // painted rock: broad value shifts and soft vertical streaks
+  float broad = texture2D(uNoise, wp / 140.0 + vWorldPos.y / 300.0).r;
+  float streak = texture2D(uNoise, vec2(wp.x / 9.0 + wp.y / 11.0, vWorldPos.y / 60.0)).b;
+  albedo *= 0.86 + 0.22 * broad + 0.1 * (streak - 0.5);
+  // moss gathers on ledges
+  float ledge = smoothstep(0.45, 0.85, N.y + (texture2D(uNoise, wp / 30.0).a - 0.5) * 0.5);
+  albedo = mix(albedo, uMossColor * (0.85 + 0.3 * broad), ledge * 0.55 * (1.0 - vGrass));
+  float gr = vGrass * smoothstep(0.25, 0.6, N.y);
+  if (gr > 0.001) {
+    float patchA = texture2D(uNoise, wp / 110.0).r;
+    float patchB = texture2D(uNoise, wp / 31.0 + 0.37).a;
+    float blades = texture2D(uNoise, wp / 2.7).b;
+    vec3 g = mix(uGrassDark, uGrassLight, smoothstep(0.28, 0.72, patchA));
+    g = mix(g, uGrassDry, smoothstep(0.55, 0.9, patchB) * 0.32);
+    g *= 0.88 + 0.24 * blades;
+    // wind waves rolling over the meadow
+    vec2 wd = normalize(uWind.xz + vec2(1e-3));
+    float wave = sin(dot(wp, wd) * 0.07 - uTime * (1.2 + length(uWind) * 0.12) + patchA * 4.0);
+    g *= 1.0 + 0.1 * smoothstep(0.55, 1.0, wave) * (0.4 + 0.6 * smoothstep(0.0, 6.0, length(uWind)));
+    // sparse flowers
+    if (uFlowers > 0.0) {
+      vec2 cell = floor(wp / 1.6);
+      float h = hash12(cell);
+      vec2 f = fract(wp / 1.6) - 0.5;
+      float fl = step(1.0 - uFlowers * 0.08, h) * smoothstep(0.22, 0.1, length(f));
+      vec3 fc = mix(vec3(1.0, 0.82, 0.88), vec3(1.0, 0.95, 0.7), hash12(cell + 7.0));
+      fc = mix(fc, vec3(0.78, 0.82, 1.0), step(0.7, hash12(cell + 3.0)));
+      g = mix(g, fc, fl * smoothstep(0.35, 0.65, patchA));
+    }
+    albedo = mix(albedo, g, gr);
+  }
+  Surface s = makeSurface(albedo, N, vWorldPos);
+  s.shadow = sampleShadow(vWorldPos, N);
+  s.rim = 0.22;
+  s.wrap = 0.2;
+  s.trans = gr * 0.25;
+  s.ao = mix(0.72, 1.0, smoothstep(-0.7, 0.5, N.y));
+  vec3 col = stylizedLight(s);
+  col = applyFog(col, vWorldPos);
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+let _terrain = null;
+export function terrainMaterial(opts = {}) {
+  if (_terrain && !opts.unique) return _terrain;
+  const m = new ShaderMaterial({
+    vertexShader: TERRAIN_VERT,
+    fragmentShader: TERRAIN_FRAG,
+    uniforms: Object.assign({}, G, {
+      uNoise: { value: getNoiseTexture() },
+      uGrassDark: { value: new Color(opts.grassDark ?? '#4a7444') },
+      uGrassLight: { value: new Color(opts.grassLight ?? '#86a560') },
+      uGrassDry: { value: new Color(opts.grassDry ?? '#b0a677') },
+      uMossColor: { value: new Color(opts.moss ?? '#6c8f55') },
+      uFlowers: { value: opts.flowers ?? 1 },
+    }),
+    vertexColors: true,
+  });
+  if (!opts.unique) _terrain = m;
+  return m;
+}

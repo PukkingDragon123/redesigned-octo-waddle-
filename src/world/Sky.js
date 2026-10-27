@@ -108,7 +108,7 @@ void main() {
       vec3 lit = pc * mix(vec3(0.16, 0.2, 0.35), vec3(1.0), sun);
       lit += vec3(0.6, 0.75, 1.0) * rimA * 0.6;
       float edgeA = smoothstep(1.0, 0.97, r);
-      float veil = mix(0.55, 0.12, uNight) * (1.0 - smoothstep(0.0, 0.25, y) * 0.35);
+      float veil = mix(0.62, 0.12, uNight) * (1.0 - smoothstep(0.0, 0.25, y) * 0.35);
       vec3 pcol = mix(lit, col, veil);
       col = mix(col, pcol, edgeA * uPlanetVis);
     }
@@ -162,9 +162,9 @@ void main() {
 export class Sky {
   constructor() {
     this.uniforms = Object.assign({}, G, {
-      uPlanetDir: { value: new Vector3(-0.25, 0.16, -1).normalize() },
+      uPlanetDir: { value: new Vector3(-0.3, 0.11, -1).normalize() },
       uPlanetAxis: { value: new Vector3(0.35, 1, 0.1).normalize() },
-      uPlanetSize: { value: 0.17 },
+      uPlanetSize: { value: 0.12 },
       uPlanetVis: { value: 1 },
       uStars: { value: 0 },
       uBankHeight: { value: 0.16 },

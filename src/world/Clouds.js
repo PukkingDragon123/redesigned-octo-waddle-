@@ -201,7 +201,7 @@ void main() {
 }
 `;
 
-const MAX_PUFFS = 9000;
+const MAX_PUFFS = 40000;
 
 export class Clouds {
   constructor(game) {

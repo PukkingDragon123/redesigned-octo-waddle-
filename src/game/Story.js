@@ -81,6 +81,10 @@ export class Story {
     this.herd.voiceHooks = (w, kind) => this.voiceCall(w, kind);
     this.player = new PlayerController(g, this.herd.calf);
     this.weather = new Weather(g);
+    this.weather.onStrike = (pos, dist) => {
+      this.audio.sfx?.('thunder', { position: pos, gain: 1 });
+      if (dist < 500) this.audio.sfx?.('lightningCrack', { position: pos, gain: 1 });
+    };
     this.booms = new SonicBooms(g);
     this.song = new SongGame(this);
     g.cameraRig.collide = (from, to) => this.world.raycast(from, to);
@@ -113,6 +117,9 @@ export class Story {
     window.addEventListener('keydown', wake);
     window.addEventListener('touchend', wake); // iOS unlocks audio on touchend, not touchstart
     window.addEventListener('blur', () => { if (this.state === 'play' && !g.debug) this.pause(); });
+    document.addEventListener('pointerlockchange', () => {
+      if (!document.pointerLockElement && this.state === 'play' && g.input.lockWanted && !g.debug) this.pause();
+    });
     const p = g.params;
     if (g.debug && p.has('auto')) {
       // headless testing: a simple autopilot that follows the herd and its mother
@@ -206,6 +213,7 @@ export class Story {
     let v = this.voices.get(w);
     if (!v) {
       v = this.audio.createVoice?.(w.genome.voice || { base: w.isCalf ? 72 : 50, formant: 1, breath: 0.2 }) || new VoiceStub();
+      v.setPosition?.(w.pos);
       this.voices.set(w, v);
     }
     return v;
@@ -256,6 +264,8 @@ export class Story {
     this.showGathering(false);
     this.player.charge = 0;
     this.player.charging = false;
+    if (this.player.humming) { this.player.humming = false; this.onCalfHumEnd(); }
+    Object.assign(this.song, { listening: false, active: false, expect: null, presses: [] });
   }
 
   enterMenu() {
@@ -281,6 +291,7 @@ export class Story {
     for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;
     this.menu.show('main');
     this.audio.setMood?.('title', { fade: 4 });
+    this.audio.setIntensity?.(0.5);
     g.cameraRig.setCinematic(this.shot, 0.25);
     g.cameraRig.cineW = 1;
     this.menuShot(0);
@@ -494,6 +505,7 @@ export class Story {
     this.populateEcosystem(i);
     if (!instant) g.atmosphere.transition(ch.time, i === 0 ? 120 : 45);
     this.audio.setMood?.(ch.mood, { fade: 8 });
+    this.audio.setIntensity?.(0.5);
     const gen = this['chapter_' + ch.id];
     if (gen) this.script.run(gen.call(this), 'chapter');
     this.chapterStartT = g.time;
@@ -818,6 +830,14 @@ export class Story {
     yield () => herd.s > this.path.chapters[8].start;
   }
 
+  /** Yields until the score's next beat (offset seconds earlier), so a voice lands on the music's grid. */
+  *untilNextBeat(maxWait = 2, early = 0) {
+    const ctx = this.audio.ctx;
+    const k = this.audio.getKey?.();
+    if (!ctx || !k || !Number.isFinite(k.nextBeatTime)) return;
+    yield clamp(k.nextBeatTime - ctx.currentTime - early, 0, maxWait);
+  }
+
   nearFalcon(r) {
     return !!this.falcon && this.falcon.pos && this.falcon.pos.distanceTo(this.herd.calf.pos) < r;
   }
@@ -951,6 +971,7 @@ export class Story {
       const target = new Vector3(o.center.x + Math.cos(o.a) * o.rad, o.center.y + 150 + o.h + Math.sin(o.a * 3) * 10, o.center.z + Math.sin(o.a) * o.rad);
       this.herd.steer(w, target, w.isCalf ? 7 : 6, dt, { arrive: 20, minSpeed: 3 });
       w.step(dt);
+      this.voices.get(w)?.setPosition?.(w.pos);
       w.animate(dt, cam);
     }
   }
@@ -964,8 +985,16 @@ export class Story {
     herd.mode = 'gather';
     herd.songCenter = center;
     herd.targetSpeed = 0;
+    const p = this.player;
+    if (p.humming) { p.humming = false; this.onCalfHumEnd(); }
+    p.charge = 0;
+    p.charging = false;
+    calf.drive.charge = 0;
     this.audio.setMood?.('finale', { fade: 6 });
-    yield 4;
+    // the mother begins on the finale's first downbeat
+    let wait = 0;
+    while (this.audio.getKey?.().mood !== 'finale' && wait < 6) wait += yield 0;
+    yield* this.untilNextBeat(4);
     // the mother begins the song of the herd
     const key = this.song;
     const theme = [[2, 2], [4, 1], [7, 1], [6, 3], [5, 1], [4, 2], [2, 1], [1, 1], [2, 4]];
@@ -976,8 +1005,11 @@ export class Story {
       mom.drive.sing = 1;
       yield b * beat;
     }
-    // everyone joins, the calf with them
-    for (const w of [...herd.whales, ...(this.gathering || [])]) {
+    // everyone joins, the calf with them: the herd and the nearest gathered whales are heard,
+    // the far ones sing with their bodies (the voice budget is 16)
+    const near = (this.gathering || []).slice().sort((a, b) => a.pos.distanceToSquared(calf.pos) - b.pos.distanceToSquared(calf.pos)).slice(0, 3);
+    for (const w of this.gathering || []) w.drive.sing = 1;
+    for (const w of [...herd.whales, ...near]) {
       if (w === calf) continue;
       w.drive.sing = 1;
       const deg = [0, 4, 2, 7][Math.floor(Math.random() * 4)];

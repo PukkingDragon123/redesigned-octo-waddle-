@@ -271,8 +271,8 @@ export class Menu {
     if (a === 'controls') return this.build('controls');
     if (a === 'back') return this.build(this.returnPage || 'main');
     if (a === 'quality') { const q = ['high', 'medium', 'low']; s.quality = q[(q.indexOf(s.quality) + 1) % 3]; s.autoQuality = false; return refresh(); }
-    if (a === 'music') { s.music = Math.round(((s.music + 0.2) % 1.2) * 10) / 10; return refresh(); }
-    if (a === 'sound') { s.sound = Math.round(((s.sound + 0.2) % 1.2) * 10) / 10; return refresh(); }
+    if (a === 'music') { s.music = s.music >= 0.95 ? 0 : Math.min(1, Math.round((s.music + 0.2) * 10) / 10); return refresh(); }
+    if (a === 'sound') { s.sound = s.sound >= 0.95 ? 0 : Math.min(1, Math.round((s.sound + 0.2) * 10) / 10); return refresh(); }
     if (a === 'invert') { s.invertY = !s.invertY; return refresh(); }
     if (a === 'sens') { s.sensitivity = Math.round(((s.sensitivity + 0.25 - 0.25) % 2 + 0.25) * 100) / 100; if (s.sensitivity > 2) s.sensitivity = 0.25; return refresh(); }
     this.onAction(a);
@@ -325,7 +325,8 @@ export class Menu {
       if (inp.menuRight) this.adjust(cur, 1);
       if (inp.menuConfirm) this.activate(cur);
       if (inp.menuBack && this.page !== 'main') {
-        if (this.page === 'pause') this.onAction('resume');
+        // Esc toggles pause in Story; here only Backspace / gamepad B resume (else Esc would reopen and close in one frame)
+        if (this.page === 'pause') { if (!inp.pausePressed) this.onAction('resume'); }
         else this.build(this.page === 'controls' ? 'settings' : this.returnPage || 'main');
       }
       // mouse hover

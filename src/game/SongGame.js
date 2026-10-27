@@ -102,17 +102,18 @@ export class SongGame {
         // the mother turns to the calf and breathes in
         herd.motherScript = (m) => ({ target: calf.pos.clone().add(new Vector3(-10, 3, 8)), speed: 4, arrive: 14, lookAt: calf.pos, face: calf.pos });
         mom.drive.sing = 0.6;
-        yield beat;
+        yield beat * 0.5;
+        // the first inhale ends on a beat of the score; each later one borrows the end of the note before
+        yield* S.untilNextBeat(beat * 1.5, beat * 0.35);
         for (const [deg, beats] of phrase) {
-          // inhale a beat before: the body swells, the head lifts
+          // inhale: the body swells, the head lifts
           mom.drive.sing = 1;
           mom.anim.sHeadPitch.impulse(-1.2);
           yield beat * 0.35;
-          S.voiceHum(mom, this.midi(deg, -1), beats * beat * 0.92);
+          S.voiceHum(mom, this.midi(deg, -1), (beats - 0.35) * beat * 0.95);
           mom.drive.hum = 1;
-          yield beats * beat * 0.92;
+          yield (beats - 0.35) * beat;
           mom.drive.hum = 0;
-          yield beats * beat * 0.08;
         }
         mom.drive.sing = 0.4;
         // a look and a nod: your turn
@@ -120,6 +121,8 @@ export class SongGame {
         mom.anim.sHeadPitch.impulse(2.4);
         mom.drive.happy = 0.6;
         yield beat * 0.4;
+        // the calf's window opens on a beat, so the herd's breathing pulse and the music agree
+        yield* S.untilNextBeat(beat * 1.2);
         this.expect = phrase;
         this.presses = [];
         this.windowStart = this.game.time;

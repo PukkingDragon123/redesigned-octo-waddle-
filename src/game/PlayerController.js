@@ -106,7 +106,7 @@ export class PlayerController {
       this.charge = Math.min(1, this.charge + dt / 1.6);
     } else if (this.charging) {
       this.charging = false;
-      if (this.charge > 0.22) {
+      if (this.enabled && this.charge > 0.22) {
         this.emit('boom', { power: this.charge });
         w.energy = clamp(w.energy - 0.12 * this.charge, 0, 1);
         w.anim.blast(0.6 + this.charge * 0.6);

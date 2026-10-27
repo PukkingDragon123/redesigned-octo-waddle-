@@ -117,6 +117,8 @@ export class Falcon {
     this._ringT = 0;
     this._cloudT = 0;
     this._inCloud = 0;
+    this._appear = 0;     // fade-in still to go after appearing (1 -> 0 over params.fadeIn s)
+    this._appearDur = 1;
     this.anim.flapEvent = (a) => {
       this.emit('flap', { strength: a, pos: this.pos });
       if (this.fx && a > 0.5) this._flapPuffs(a);
@@ -251,6 +253,14 @@ export class Falcon {
       default:
         break;
     }
+    // { fadeIn: s } materializes it out of a puff of cloud instead of popping into view
+    if (mode === 'hidden') this._appear = 0;
+    else if (wasHidden && P.fadeIn > 0) {
+      this._appear = 1;
+      this._appearDur = P.fadeIn;
+      this.model.vanish.value = 1;
+      if (this.fx) for (let i = 0; i < 4; i++) this._vanishPuff();
+    }
     if (mode !== 'hidden') this.group.visible = true;
     this.emit('modeChange', { mode, prev, params: this.params });
   }
@@ -268,6 +278,9 @@ export class Falcon {
     dir.normalize();
     dir.y = Math.max(dir.y, -0.25) + 0.3;
     dir.normalize();
+    // the blast stops it dead before throwing it back (the impulse alone is slower than a dive)
+    const vin = this.vel.dot(dir);
+    if (vin < 0) this.vel.addScaledVector(dir, -vin * Math.min(1, 0.6 + 0.4 * s));
     this.vel.addScaledVector(dir, 9 + 15 * s);
     // tumble: mostly pitch and roll, away from the blast
     _b.crossVectors(dir, UP);
@@ -306,6 +319,11 @@ export class Falcon {
       return;
     }
     this.group.visible = true;
+    if (this._appear > 0) {
+      // the retreat's own dissolve (written by _guide below) wins while it fades out
+      this._appear = Math.max(0, this._appear - dt / this._appearDur);
+      this.model.vanish.value = this._appear;
+    }
     this.time += dt;
     this.modeT += dt;
     const cmd = this._guide(dt);
@@ -440,6 +458,8 @@ export class Falcon {
         const sp = _d.length();
         if (sp < 16) _d.multiplyScalar(16 / Math.max(sp, 1e-3));
         if (sp > 44) _d.multiplyScalar(44 / sp);
+        // climb only as fast as its spare speed allows: a zoom climb up to the station stalls it
+        _d.y = clamp(_d.y, -6, 4 + Math.max(0, this.vel.length() - 20) * 0.6);
         c.acc.subVectors(_d, this.vel).multiplyScalar(0.8);
         c.updraft = SOAR_LIFT;
         c.poses.glide = 1;
@@ -470,10 +490,15 @@ export class Falcon {
           c.acc.subVectors(_d, this.vel).multiplyScalar(0.8);
           c.updraft = SOAR_LIFT;
           c.poses.climb = 1;
+          c.effort = 1; // the commanded speed is above its top level speed: flap hard, never brake
           c.crest = 0.6;
           c.focus = 1;
           if (Math.atan2(this.pos.y - T.pos.y, H) > 0.6 || dd < 40) {
             ai.phase = 'rollin';
+            ai.rollT0 = this.modeT;
+          } else if (this.modeT > 7 || (this.modeT > 1.5 && speed < 15)) {
+            // stalled in the climb or never reaching its point: commit from where it is
+            ai.phase = this.pos.y - T.pos.y > 45 ? 'rollin' : 'flare';
             ai.rollT0 = this.modeT;
           }
           this._avoid(c.acc);
@@ -539,14 +564,23 @@ export class Falcon {
           _b.subVectors(_a, this.pos);
           _c.subVectors(T.vel, this.vel);
           this._steerAt(_b, _c, 3.6, c.acc);
+          const losCos = _b.dot(this.vel) / Math.max(_b.length() * this.vel.length(), 1e-3);
           const cupW = 1 - smoothstep(0.3, 0.8, ai.flareT);
           c.poses.cup = cupW;
           c.poses.mshape = 1 - cupW;
-          c.maxBank = lerp(1.4, 0.9, smoothstep(0.0, 1.2, ai.flareT));
+          // level the wings for the strike only once it points at the calf: a flare begun slow or
+          // heading away must bank freely to turn back (a clamped, inverted lift request is zero lift)
+          if (losCos > 0.3) c.maxBank = lerp(1.4, 0.9, smoothstep(0.0, 1.2, ai.flareT));
           c.crest = 0.45;
           c.focus = 1;
           c.levelHead = 0.5;
           c.effort = 0;
+          if (this.pos.y < T.pos.y - 60) {
+            // fell far below its prey: no flare can climb back up, give it up
+            this.emit('strikeMiss', { minDist: Infinity, timeout: true, target: T });
+            this.setMode('pullout', {});
+            return this._cmd;
+          }
           const r = _b.length();
           const vc = -_b.dot(_c) / Math.max(r, 1e-3);
           const tgo = r / Math.max(vc, 5);
@@ -647,6 +681,7 @@ export class Falcon {
         c.focus = 0;
         c.look = null;
         c.jaw = 0.4 * (1 - smoothstep(0.2, 0.6, k));
+        this._avoid(c.acc);
         if (k >= 1) {
           this.setMode('pullout', { recover: true });
           return this._cmd;
@@ -850,8 +885,21 @@ export class Falcon {
       const dPlus = Math.hypot(ox - hd.x * back, oz - hd.z * back);
       const dMinus = Math.hypot(ox + hd.x * back, oz + hd.z * back);
       if (dPlus < (P.minStart ?? 420) && dMinus > dPlus) hd.negate();
+      else if ((wasHidden || P.teleport) && dMinus > (P.minStart ?? 420) * 0.6 && this._inView(_c.copy(S).addScaledVector(hd, -back))) {
+        // ...nor in the middle of the shot, when the other way round starts out of view
+        if (!this._inView(_d.copy(S).addScaledVector(hd, back))) hd.negate();
+      }
     }
     if (wasHidden || P.teleport) this._place(_c.copy(S).addScaledVector(hd, -ai.speed * crossIn), hd, ai.speed);
+  }
+
+  /** Whether p is in the main camera's view (with a margin for the 70 m wings). */
+  _inView(p) {
+    const cam = this.game.engine.camera;
+    if (!cam) return false;
+    cam.updateMatrixWorld();
+    _e.copy(p).project(cam);
+    return Math.abs(_e.z) < 1 && Math.abs(_e.x) < 1.15 && Math.abs(_e.y) < 1.15;
   }
 
   /** Where the falcon must be for its shadow to fall on the swept point `tAhead` seconds from now. */
@@ -946,11 +994,14 @@ export class Falcon {
     const D = kD * speed * speed + PHYS.kI * liftAct * liftAct / Math.max(speed * speed, 100);
     const Tav = Math.min(PHYS.tMax, PHYS.pMax / Math.max(speed, 8));
     const Treq = aPar - (gDot + upd * vdir.y) + D;
-    let effort = cmd.effort !== undefined ? cmd.effort : clamp(Treq / Tav, 0, 1);
+    // never cut power or brake below flying speed: slowing to a stall leaves no lift to turn with
+    const vS = Math.sqrt(GRAV / (PHYS.kL * area));
+    const slow = cmd.effort === undefined && speed < 1.3 * vS;
+    let effort = cmd.effort !== undefined ? cmd.effort : (slow ? 1 : clamp(Treq / Tav, 0, 1));
     effort = Math.max(effort, cmd.burst || 0);
     const thrust = effort * Tav;
     // air brakes: spread feathers when it must slow down
-    const brake = cmd.effort === undefined ? clamp(-Treq, 0, 4) * 0.6 : 0;
+    const brake = cmd.effort === undefined && !slow ? clamp(-Treq, 0, 4) * 0.6 : 0;
     // integrate
     v.addScaledVector(_gv, h);
     v.y += upd * h;

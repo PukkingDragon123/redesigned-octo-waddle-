@@ -6,6 +6,7 @@ import { damp, dampVec3, clamp, lerp, smoothstep, dirFromYawPitch, easeInOut } f
 const _f = new Vector3();
 const _r = new Vector3();
 const _u = new Vector3();
+const _t = new Vector3();
 const _m = new Matrix4();
 const UP = new Vector3(0, 1, 0);
 
@@ -71,7 +72,15 @@ export class CameraRig {
       }
     }
     const lookT = _u.copy(whale.pos).addScaledVector(aim, 3.5 + speed * 0.12).addScaledVector(UP, 0.8 + this.wide * 0.5);
-    if (opts.lookBias) lookT.lerp(opts.lookBias, opts.lookBiasW || 0.3);
+    if (opts.lookBias) {
+      // lookBiasMax caps the shift in metres, so a far target (a falcon 500 m away) turns the view
+      // toward it without losing the calf
+      if (opts.lookBiasMax !== undefined) {
+        _t.copy(opts.lookBias).sub(lookT);
+        const L = _t.length();
+        if (L > 1e-3) lookT.addScaledVector(_t, Math.min(opts.lookBiasW || 0.3, opts.lookBiasMax / L));
+      } else lookT.lerp(opts.lookBias, opts.lookBiasW || 0.3);
+    }
     if (!this.initialized) {
       this.gPos.copy(desired);
       this.gLook.copy(lookT);

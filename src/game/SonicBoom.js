@@ -95,6 +95,11 @@ export class SonicBooms {
       b.shell.scale.setScalar(Math.max(0.1, r));
       b.shell.material.uniforms.uAlpha.value = 0.35 * fade * (0.6 + 0.4 * b.power);
       b.front = r;
+      const F = this.falcon;
+      if (b.knockFalcon && !b.hitFalcon && F && F.mode !== 'hidden' && F.mode !== 'knockback' && F.pos.distanceTo(b.center) < r + F.radius) {
+        b.hitFalcon = true;
+        F.knockback(b.center, b.knockFalcon);
+      }
       // screen-space lens ring
       if (k < shocks.length && fade > 0.01) {
         const v = b.center.clone().project(cam);

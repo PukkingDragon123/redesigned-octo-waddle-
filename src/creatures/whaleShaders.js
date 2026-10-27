@@ -249,7 +249,7 @@ void main() {
   transformed += normal * uBreath * breathMask * uLen * 0.006;
   // Extrude along the normal, combed back toward the tail.
   transformed += normal * h * len;
-  transformed += aComb * (h * h) * len * 0.75;
+  transformed += aComb * (h * h) * len * 1.25;
   #include <skinning_vertex>
   vec4 wp = modelMatrix * vec4(transformed, 1.0);
   vec3 N = normalize(mat3(modelMatrix) * objectNormal);
@@ -309,9 +309,11 @@ void main() {
   float strandLen = mix(0.45, 1.0, rnd) * mix(0.75, 1.15, clump) * smoothstep(0.0, 0.35, vFur);
   float h = vShell;
   if (h > strandLen) discard;
-  float radius = (1.0 - h / strandLen) * 0.62 + 0.08;
-  float cov = smoothstep(radius, radius - 0.22, d);
-  cov = max(cov, smoothstep(0.3, 0.0, h) * 0.95);
+  // soft plush clumps rather than needles: gentle taper, wide soft edge
+  float radius = mix(0.78, 0.3, pow(h / strandLen, 1.3));
+  float cov = smoothstep(radius, radius - 0.32, d);
+  cov = max(cov, smoothstep(0.38, 0.0, h) * 0.95);
+  cov *= 1.0 - smoothstep(0.82, 1.0, h / strandLen) * 0.6;
   if (cov < 0.05) discard;
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
@@ -321,10 +323,10 @@ void main() {
   Surface s = makeSurface(albedo, normalize(vNormal), vWorldPos);
   s.shadow = vShadow;
   s.ao = mix(0.62, 1.0, h) * mix(0.75, 1.0, smoothstep(-0.8, 0.4, vDorsal));
-  s.rim = 0.75 * h;
-  s.spec = 0.05;
-  s.trans = 0.35 * h;
-  s.wrap = 0.26;
+  s.rim = 0.45 * h;
+  s.spec = 0.03;
+  s.trans = 0.3 * h;
+  s.wrap = 0.28;
   vec3 col = stylizedLight(s);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
@@ -378,6 +380,7 @@ uniform vec3 uMembrane;
 uniform vec3 uFinTip;
 uniform vec3 uRayCol;
 uniform float uSeed;
+uniform float uRays;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec4 vFin;
@@ -392,9 +395,17 @@ void main() {
   float span = vFin.x, chord = vFin.y;
   float arm = 1.0 - smoothstep(0.08, 0.22, chord);
   vec3 mem = mix(uMembrane, uFinTip, smoothstep(0.55, 1.0, max(span, chord * 0.8)));
-  // Rays: bony fingers running through the membrane.
-  float ray = vFin.z;
-  mem = mix(mem, uRayCol, ray * 0.55);
+  // Rays: bony fingers running through the membrane, splaying toward the trailing edge.
+  float ray = 0.0;
+  for (int i = 0; i < 6; i++) {
+    if (float(i) >= uRays) break;
+    float ur = 0.2 + (0.72 / uRays) * (float(i) + 0.5) + 0.1 * chord;
+    ray = max(ray, smoothstep(0.022, 0.006, abs(span - ur)));
+  }
+  ray *= smoothstep(0.12, 0.3, chord) * (1.0 - smoothstep(0.92, 1.0, chord));
+  mem = mix(mem, uRayCol, ray * 0.6);
+  // membrane darkens slightly toward the scalloped edge, lighter between rays
+  mem *= 0.92 + 0.12 * smoothstep(0.3, 0.9, chord);
   // fine painted veining
   float vein = smoothstep(0.06, 0.0, abs(vnoise(vec2(span * 18.0, chord * 4.0) + uSeed) - 0.5));
   mem *= 1.0 - vein * 0.08;

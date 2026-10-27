@@ -27,11 +27,11 @@ const PROFILES = {
     hinge: 0.835, mouthBack: -0.12, mouthFront: -0.24,
     joints: { tail3: 0.04, tail2: 0.13, tail1: 0.24, spine2: 0.36, spine1: 0.47, root: 0.55, chest: 0.64, neck: 0.75, head: 0.83 },
     eyeT: 0.875, eyeTheta: 1.12, eyeR: 0.029, eyeFront: 0.45,
-    finT: 0.625, finTheta: 1.68, finSpan: 0.6, finChord: 0.27, finChordMax: 0.31, armR: 0.022,
+    finT: 0.625, finTheta: 1.68, finSpan: 0.54, finChord: 0.3, finChordMax: 0.36, armR: 0.024,
     rearT: 0.31, rearTheta: 2.2, rearSpan: 0.12, rearChord: 0.075,
     flukeSpan: 0.25, flukeChord: 0.15,
     gill: [0.77, 0.815], frondLen: 0.1, frondT: 0.79,
-    furLen: 0.013, furDensity: 12, maneBoost: 1.9,
+    furLen: 0.011, furDensity: 12, maneBoost: 1.8,
   },
   calf: {
     t:   [0.00, 0.06, 0.16, 0.30, 0.44, 0.56, 0.66, 0.75, 0.83, 0.90, 0.95, 1.00],
@@ -43,11 +43,11 @@ const PROFILES = {
     hinge: 0.805, mouthBack: -0.14, mouthFront: -0.3,
     joints: { tail3: 0.05, tail2: 0.15, tail1: 0.27, spine2: 0.38, spine1: 0.48, root: 0.55, chest: 0.63, neck: 0.71, head: 0.78 },
     eyeT: 0.86, eyeTheta: 0.92, eyeR: 0.066, eyeFront: 0.62,
-    finT: 0.6, finTheta: 1.74, finSpan: 0.5, finChord: 0.24, finChordMax: 0.28, armR: 0.034,
+    finT: 0.6, finTheta: 1.74, finSpan: 0.42, finChord: 0.28, finChordMax: 0.33, armR: 0.036,
     rearT: 0.33, rearTheta: 2.25, rearSpan: 0.11, rearChord: 0.085,
     flukeSpan: 0.26, flukeChord: 0.17,
     gill: [0.735, 0.775], frondLen: 0.15, frondT: 0.76,
-    furLen: 0.03, furDensity: 30, maneBoost: 1.5,
+    furLen: 0.025, furDensity: 30, maneBoost: 1.4,
   },
 };
 
@@ -545,7 +545,7 @@ export class WhaleModel {
   }
 
   // ---- fins ----------------------------------------------------------------------------------
-  _finGeometry({ span, chordRoot, chordMax, armR, rays = 4, scallop = 0.1, sweep = 0.12, side = 1, bones, tipRound = 0.15, fur = true, droop = 0, bulge = 0 }) {
+  _finGeometry({ span, chordRoot, chordMax, armR, rays = 4, scallop = 0.1, sweep = 0.12, side = 1, bones, tipRound = 0.15, fur = true, droop = 0, bulge = 0, camberAmt = 0.07 }) {
     const nU = 26, nLoop = 22;
     const pos = [], nor = [], uv = [], fin = [], loft = [], mask = [], skinI = [], skinW = [], comb = [];
     const idx = [];
@@ -583,7 +583,9 @@ export class WhaleModel {
         if (v < vArm) ht = thick * Math.sqrt(Math.max(0, 1 - (v / vArm) ** 2)) + memT * 0.5;
         else ht = memT * (1 - Math.pow(v, 4)) * 0.5 + 0.0005;
         const x = leX + v * ch * 0.18 * u; // trailing points splay outward slightly
-        const y = leY + top * ht;
+        // camber: the membrane arches like a sail between arm and trailing edge
+        const camber = (camberAmt ?? 0.07) * ch * Math.sin(Math.PI * Math.min(1, v * 1.05)) * Math.sin(Math.PI * Math.min(1, u * 1.15 + 0.1));
+        const y = leY + top * ht + camber;
         const z = leZ - v * ch;
         // bind-space: rotate into place (side mirror)
         pos.push(x * side, y, z);
@@ -660,7 +662,7 @@ export class WhaleModel {
       const span = P.finSpan * L * this.finScale;
       const geo = this._finGeometry({
         span, chordRoot: P.finChord * L, chordMax: P.finChordMax * L * this.finScale, armR: P.armR * L,
-        rays: 4, scallop: this.g.calf ? 0.07 : 0.13, sweep: 0.2, side, bones, droop: 0.03, bulge: 0.07, tipRound: 0.22,
+        rays: this.g.calf ? 4 : 5, scallop: this.g.calf ? 0.09 : 0.16, sweep: 0.2, side, bones, droop: 0.03, bulge: 0.07, tipRound: 0.24, camberAmt: 0.08,
       });
       // orient: fin was generated along +X*side from origin; move to shoulder & tilt
       const sh = this.boneAbs['fin' + s + '1'];

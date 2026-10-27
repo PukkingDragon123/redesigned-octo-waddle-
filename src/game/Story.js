@@ -1,6 +1,1170 @@
-// Placeholder: replaced by the full story director.
-export class Story {
-  constructor(game) { this.game = game; }
-  async init() {}
+// The story director: menu -> opening cinematic -> ten chapters of one seamless migration ->
+// the Oasis -> the ending song -> back to the title. Owns the calf's moment-to-moment play
+// (flight, collisions, eating, humming, sonic booms), weather, the falcon encounter, saving,
+// and the hand-off between gameplay and cinematic cameras. Communicates only through the
+// world: no HUD, no prompts.
+import { Vector3, Quaternion, Color } from 'three';
+import { MigrationPath } from '../world/MigrationPath.js';
+import { WorldBuilder } from '../world/WorldBuilder.js';
+import { Herd } from './Herd.js';
+import { PlayerController } from './PlayerController.js';
+import { Weather } from './Weather.js';
+import { SonicBooms } from './SonicBoom.js';
+import { Menu } from './Menu.js';
+import { Script, until } from './Script.js';
+import { SongGame } from './SongGame.js';
+import { Whale } from '../creatures/Whale.js';
+import { ADULTS, CALVES } from '../creatures/WhaleTypes.js';
+import { G } from '../render/Globals.js';
+import { clamp, damp, lerp, smoothstep, rng, TAU, dirFromYawPitch, easeInOut } from '../core/math.js';
+
+const OPTIONAL = import.meta.glob(['../audio/AudioSystem.js', '../creatures/Ecosystem.js', '../creatures/Falcon.js']);
+const SAVE_KEY = 'skysong.save';
+
+class VoiceStub {
+  setPosition() {}
+  hum() {}
+  release() {}
+  call() {}
+  setChargeLevel() {}
+}
+class AudioStub {
+  constructor() { this.ready = false; }
+  async start() {}
   update() {}
+  setVolumes() {}
+  setMood() {}
+  setIntensity() {}
+  stinger() {}
+  getKey() { return { rootMidi: 62, scale: [0, 2, 4, 5, 7, 9, 11], chord: [62, 66, 69], beat: 60 / 66 }; }
+  createVoice() { return new VoiceStub(); }
+  sfx() {}
+  setAmbience() {}
+  duck() {}
+}
+
+export class Story {
+  constructor(game) {
+    this.game = game;
+    this.state = 'boot';
+    this.script = new Script();
+    this.audio = new AudioStub();
+    this.eco = null;
+    this.falcon = null;
+    this.chapterIndex = -1;
+    this.voices = new Map();
+    this.humTimers = new Map();
+    this.shot = { pos: new Vector3(), look: new Vector3(), fov: 50, roll: 0 };
+    this.eaten = 0;
+    this.calfHums = 0;
+    this.lastBonk = 0;
+    this.spawned = new Set();
+    this.completed = false;
+    this._v = new Vector3();
+    this._v2 = new Vector3();
+  }
+
+  // ---- setup ----------------------------------------------------------------------------
+  async init() {
+    const g = this.game;
+    try {
+      await Promise.race([
+        document.fonts?.load('300 96px "Cormorant Garamond"'),
+        new Promise((r) => setTimeout(r, 2500)),
+      ]);
+    } catch (e) { /* fonts unavailable: fall back to Georgia */ }
+    this.path = new MigrationPath();
+    this.world = new WorldBuilder(g, this.path);
+    // the cradle first, so the menu has a world to look at; the rest grows behind it
+    await this.world.buildChapter('cradle');
+    this.herd = new Herd(g, this.path, this.world);
+    this.herd.voiceHooks = (w, kind) => this.voiceCall(w, kind);
+    this.player = new PlayerController(g, this.herd.calf);
+    this.weather = new Weather(g);
+    this.booms = new SonicBooms(g);
+    this.song = new SongGame(this);
+    g.cameraRig.collide = (from, to) => this.world.raycast(from, to);
+    await this.loadOptional();
+    this.player.on('hum', () => this.onCalfHum());
+    this.player.on('humEnd', () => this.onCalfHumEnd());
+    this.player.on('boom', (e) => this.onCalfBoom(e));
+    this.player.on('roll', () => this.voiceCall(this.herd.calf, 'play'));
+    this.herd.onCaught = (c) => { this.herd.calf.drive.happy = 1; this.audio.sfx?.('chime', { position: c.pos, gain: 0.5 }); };
+    this.menu = new Menu(g, {
+      onAction: (a) => this.onMenu(a),
+      hasSave: () => !!this.loadSave(),
+    });
+    this.world.build((p) => { this.buildProgress = p; }).then(() => {
+      this.worldReady = true;
+      this.prepareGathering();
+    });
+    // first user gesture wakes the audio
+    const wake = () => {
+      this.audio.start?.().then(() => this.applyVolumes()).catch(() => {});
+    };
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
+    const p = g.params;
+    if (g.debug && p.has('auto')) {
+      // headless testing: a simple autopilot that follows the herd and its mother
+      this.player.autopilot = () => {
+        const calf = this.herd.calf;
+        const goal = this.herd.mother.pos.clone().addScaledVector(this.herd.mother.fwd, -6).add(new Vector3(6, 2, 0));
+        const to = goal.sub(calf.pos);
+        const d = to.length();
+        return { swim: d > 10 ? 1 : 0.4, yaw: Math.atan2(to.x, to.z), pitch: Math.asin(clamp(to.y / Math.max(d, 1), -1, 1)) * 0.8, surge: d > 60 };
+      };
+    }
+    if (g.debug && p.has('chapter')) {
+      // debug: jump straight into a chapter
+      await this.waitWorld();
+      this.startChapter(+p.get('chapter'), { skipIntro: true });
+    } else if (g.debug && p.has('intro')) {
+      this.enterMenu();
+      this.onMenu('new');
+    } else {
+      this.enterMenu();
+    }
+  }
+
+  async loadOptional() {
+    const g = this.game;
+    try {
+      const m = OPTIONAL['../audio/AudioSystem.js'];
+      if (m) {
+        const { AudioSystem } = await m();
+        this.audio = new AudioSystem(g);
+      }
+    } catch (e) { console.warn('[skysong] audio unavailable', e); this.audio = new AudioStub(); }
+    try {
+      const m = OPTIONAL['../creatures/Ecosystem.js'];
+      if (m) {
+        const { Ecosystem } = await m();
+        this.eco = new Ecosystem(g);
+        this.eco.roosts = [this.herd.elder, ...this.herd.adults.slice(0, 3)];
+      }
+    } catch (e) { console.warn('[skysong] ecosystem unavailable', e); this.eco = null; }
+    try {
+      const m = OPTIONAL['../creatures/Falcon.js'];
+      if (m) {
+        const { Falcon } = await m();
+        this.falcon = new Falcon(g);
+        this.falcon.setMode?.('hidden');
+        const F = this.falcon;
+        F.on?.('strikeHit', () => { this.falconResult = 'hit'; });
+        F.on?.('strikeMiss', () => { this.falconResult = 'miss'; });
+        F.on?.('screech', () => this.audio.sfx?.('falconScreech', { position: F.pos, gain: 1 }));
+        F.on?.('flap', () => this.audio.sfx?.('falconWing', { position: F.pos, gain: 0.8 }));
+      }
+    } catch (e) { console.warn('[skysong] falcon unavailable', e); this.falcon = null; }
+  }
+
+  async waitWorld() {
+    while (!this.worldReady) await new Promise((r) => setTimeout(r, 50));
+  }
+
+  applyVolumes() {
+    const s = this.game.settings;
+    this.audio.setVolumes?.(s.music, s.sound);
+  }
+
+  // ---- saving ---------------------------------------------------------------------------
+  loadSave() {
+    try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
+  }
+
+  save(chapter) {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter, completed: this.completed, t: Date.now() })); } catch (e) { /* private mode */ }
+  }
+
+  // ---- voices ---------------------------------------------------------------------------
+  voiceOf(w) {
+    let v = this.voices.get(w);
+    if (!v) {
+      v = this.audio.createVoice?.(w.genome.voice || { base: w.isCalf ? 72 : 50, formant: 1, breath: 0.2 }) || new VoiceStub();
+      this.voices.set(w, v);
+    }
+    return v;
+  }
+
+  voiceHum(w, midi, dur) {
+    this.voiceOf(w).hum?.(midi, dur, { gain: w.role === 'player' || w.role === 'mother' ? 1 : 0.6 });
+    w.drive.hum = 1;
+    this.humTimers.set(w, dur);
+  }
+
+  voiceCall(w, kind) {
+    this.voiceOf(w).call?.(kind);
+    w.drive.hum = 1;
+    this.humTimers.set(w, kind === 'warn' ? 1.6 : 0.9);
+    if (kind === 'answer' || kind === 'chirp' || kind === 'coo') w.anim.sHeadPitch.impulse(-1);
+  }
+
+  // ---- menu -------------------------------------------------------------------------------
+  enterMenu() {
+    const g = this.game;
+    this.state = 'menu';
+    this.script.cancel();
+    this.player.enabled = false;
+    g.input.setGameplayMode(false);
+    document.body.classList.remove('playing');
+    this.herd.placeAt(60);
+    this.herd.mode = 'rest';
+    this.herd.targetSpeed = 0;
+    this.herd.calf.drive.sleep = 1;
+    this.herd.mother.drive.sleep = 0.5;
+    this.herd.motherScript = null;
+    g.atmosphere.set('menu');
+    this.weather.set(0, { lightning: 0 });
+    g.wind.set(3, 0.3);
+    this.menuT = 0;
+    this.menu.returnPage = 'main';
+    this.menu.dissolving = false;
+    for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;
+    this.menu.show('main');
+    this.audio.setMood?.('title', { fade: 4 });
+    g.cameraRig.setCinematic(this.shot, 0.25);
+    g.cameraRig.cineW = 1;
+    this.menuShot(0);
+    if (!g.debug) {
+      g.engine.post.grade.uFade.value = 1;
+      g.fadeRate = -0.35;
+    }
+    this.populateEcosystem(0);
+  }
+
+  menuShot(t) {
+    // a slow drift between the resting whales, high and wide
+    const c = this.path.pointAt(60);
+    const a = 2.2 + t * 0.012;
+    const r = 120 + Math.sin(t * 0.05) * 25;
+    this.shot.pos.set(c.x + Math.cos(a) * r, c.y + 18 + Math.sin(t * 0.07) * 8, c.z + Math.sin(a) * r);
+    this.shot.look.copy(c).add(new Vector3(Math.sin(t * 0.03) * 20, 6, -10));
+    this.shot.fov = 46;
+    this.shot.roll = Math.sin(t * 0.04) * 0.02;
+  }
+
+  onMenu(a) {
+    const g = this.game;
+    if (a === 'settingsChanged') {
+      this.applyVolumes();
+      g.input.settings.invertY = g.settings.invertY;
+      g.input.settings.sensitivity = g.settings.sensitivity;
+      if (g.engine.qualityName !== g.settings.quality) {
+        g.engine.setQuality(g.settings.quality);
+        g.applyQuality();
+        for (const w of this.herd.whales) w.furQuality = g.furQuality;
+      }
+      return;
+    }
+    if (a === 'new') {
+      this.audio.start?.().then(() => this.applyVolumes());
+      try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+      this.menu.dissolveAll();
+      this.state = 'intro';
+      this.script.run(this.intro(), 'intro');
+      return;
+    }
+    if (a === 'continue') {
+      this.audio.start?.().then(() => this.applyVolumes());
+      const s = this.loadSave();
+      this.menu.dissolveAll();
+      this.script.run(this.continueFrom(s ? s.chapter : 0), 'continue');
+      return;
+    }
+    if (a === 'resume') return this.resume();
+    if (a === 'title') {
+      this.resume(true);
+      this.fadeThen(() => this.enterMenu());
+    }
+  }
+
+  *continueFrom(ch) {
+    const g = this.game;
+    g.fadeRate = 0.9;
+    yield () => g.engine.post.grade.uFade.value >= 0.99;
+    this.menu.hide();
+    yield* this.waitPromise(this.waitWorld());
+    this.startChapter(ch, { skipIntro: true });
+    g.fadeRate = -0.5;
+  }
+
+  *waitPromise(p) {
+    let done = false;
+    p.then(() => { done = true; });
+    yield () => done;
+  }
+
+  fadeThen(fn) {
+    const g = this.game;
+    g.fadeRate = 1.2;
+    this.script.run((function* () {
+      yield () => g.engine.post.grade.uFade.value >= 0.99;
+      fn();
+      g.fadeRate = -0.6;
+    })(), 'fade');
+  }
+
+  pause() {
+    if (this.state !== 'play') return;
+    this.state = 'paused';
+    this.game.timeScaleTarget = 0.02;
+    this.player.enabled = false;
+    this.game.input.setGameplayMode(false);
+    document.body.classList.remove('playing');
+    this.menu.returnPage = 'pause';
+    this.menu.dissolving = false;
+    for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;
+    this.menu.show('pause');
+    this.audio.duck?.(0.5, 0.4);
+  }
+
+  resume(silent = false) {
+    if (this.state !== 'paused') return;
+    this.state = 'play';
+    this.game.timeScaleTarget = 1;
+    this.menu.hide();
+    this.player.enabled = true;
+    this.game.input.setGameplayMode(true);
+    document.body.classList.add('playing');
+  }
+
+  // ---- the opening ----------------------------------------------------------------------
+  *intro() {
+    const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
+    this.menu.dissolveAll();
+    g.atmosphere.transition('dawn', 14);
+    this.audio.setMood?.('dawn', { fade: 6 });
+    // glide from the wide drift down to the sleeping calf, nestled by its mother
+    const from = this.shot.pos.clone(), fromLook = this.shot.look.clone();
+    let t = 0;
+    const T = 9;
+    while (t < T) {
+      const k = easeInOut(clamp(t / T, 0, 1));
+      const close = calf.pos.clone().addScaledVector(calf.right, 5.5).addScaledVector(calf.fwd, 3.5).add(new Vector3(0, 1.2, 0));
+      this.shot.pos.copy(from).lerp(close, k);
+      this.shot.look.copy(fromLook).lerp(calf.pos.clone().addScaledVector(calf.fwd, 0.8).add(new Vector3(0, 0.4, 0)), k);
+      this.shot.fov = lerp(46, 40, k);
+      t += yield 0;
+    }
+    this.menu.hide();
+    // the mother hums the calf awake
+    this.voiceCall(mom, 'answer');
+    mom.drive.happy = 0.6;
+    yield 2.5;
+    // waits for the player: any key, click or stick (or it wakes on its own)
+    let waited = 0;
+    let nudged = 0;
+    while (waited < 16) {
+      if (g.input.anyPressed || g.input.mouseMovedThisFrame && waited > 1.5) break;
+      if (waited > 4 + nudged * 4) {
+        // a gentle nudge from the mother
+        nudged++;
+        mom.anim.sHeadPitch.impulse(2);
+        calf.anim.flinch(0.3);
+        this.voiceCall(mom, 'coo');
+      }
+      waited += yield 0;
+    }
+    // waking: eyes flutter, a yawn, a stretch, a look up at mother
+    calf.drive.sleep = 0;
+    calf.anim.blinkT = 0.2;
+    yield 0.8;
+    calf.drive.mouth = 1;
+    this.voiceCall(calf, 'yawn');
+    calf.anim.sFinFlare.impulse(6);
+    yield 1.3;
+    calf.drive.mouth = 0;
+    calf.drive.lookAt = mom.pos;
+    yield 0.6;
+    calf.drive.happy = 1;
+    this.voiceCall(calf, 'chirp');
+    mom.drive.happy = 1;
+    mom.drive.sleep = 0;
+    yield 1.4;
+    // hand over to the player without a cut
+    this.state = 'play';
+    this.player.enabled = true;
+    this.player.syncAim();
+    g.input.setGameplayMode(true);
+    document.body.classList.add('playing');
+    g.cameraRig.initialized = false;
+    g.cameraRig.setCinematic(this.shot, 0.22);
+    g.cameraRig.cineTarget = 0;
+    this.startChapter(0, { fromIntro: true });
+  }
+
+  // ---- chapters ----------------------------------------------------------------------------
+  startChapter(i, opts = {}) {
+    const g = this.game, herd = this.herd;
+    const ch = this.path.chapters[i];
+    this.script.cancel('chapter');
+    this.state = 'play';
+    this.player.enabled = true;
+    g.input.setGameplayMode(true);
+    document.body.classList.add('playing');
+    if (!opts.fromIntro) {
+      herd.placeAt(ch.start + 30, { speed: i === 0 ? 0 : 6 });
+      herd.calf.drive.sleep = 0;
+      herd.mother.drive.sleep = 0;
+      this.player.syncAim();
+      g.cameraRig.cineTarget = 0;
+      g.cameraRig.cineW = 0;
+      g.cameraRig.initialized = false;
+      g.atmosphere.set(ch.time);
+      this.menu.hide();
+    }
+    this.chapterIndex = i;
+    this.enterChapter(i, !opts.fromIntro);
+  }
+
+  enterChapter(i, instant = false) {
+    const g = this.game, herd = this.herd;
+    const ch = this.path.chapters[i];
+    this.chapterIndex = i;
+    this.save(i);
+    this.populateEcosystem(i);
+    if (!instant) g.atmosphere.transition(ch.time, i === 0 ? 120 : 45);
+    this.audio.setMood?.(ch.mood, { fade: 8 });
+    const gen = this['chapter_' + ch.id];
+    if (gen) this.script.run(gen.call(this), 'chapter');
+    this.chapterStartT = g.time;
+  }
+
+  populateEcosystem(i) {
+    if (!this.eco) return;
+    const ids = [i, i + 1].map((k) => this.path.chapters[k]?.id).filter(Boolean);
+    for (const id of ids) {
+      if (this.spawned.has(id)) continue;
+      this.spawned.add(id);
+      const sp = this.world.spawns;
+      for (const k of sp.krill.filter((s) => s.chapter === id)) this.eco.addKrillSwarm?.(k.pos, k.count);
+      for (const k of sp.rays.filter((s) => s.chapter === id)) this.eco.addRaySchool?.(k.pos, k.count);
+      for (const k of sp.jellies.filter((s) => s.chapter === id)) this.eco.addJellies?.(k.pos, 160, k.count);
+      for (const k of sp.birds.filter((s) => s.chapter === id)) this.eco.addFlock?.(k.pos, k.count);
+    }
+  }
+
+  *chapter_cradle() {
+    const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
+    herd.mode = 'rest';
+    herd.targetSpeed = 0;
+    // the mother shows the way: a short swim, then she turns and calls
+    let phase = 0;
+    const spot = this.path.offsetAt(130, -6, 6);
+    herd.motherScript = (m) => {
+      if (phase === 0) return { target: spot, speed: 5, arrive: 10, lookAt: calf.pos };
+      return { target: spot, speed: 3, arrive: 12, lookAt: calf.pos, face: calf.pos };
+    };
+    yield 6;
+    phase = 1;
+    this.voiceCall(mom, 'answer');
+    yield* until(() => calf.pos.distanceTo(mom.pos) < 22, 30);
+    mom.drive.happy = 1;
+    this.voiceCall(mom, 'answer');
+    calf.drive.happy = 1;
+    yield 1.5;
+    // the herd wakes and sets off
+    herd.motherScript = null;
+    herd.mode = 'travel';
+    herd.targetSpeed = 5;
+    this.voiceCall(herd.elder, 'answer');
+    yield 12;
+    herd.targetSpeed = 8;
+    yield () => herd.s > this.path.chapters[1].start;
+  }
+
+  *chapter_valleys() {
+    const herd = this.herd, mom = herd.mother, calf = herd.calf;
+    herd.mode = 'travel';
+    herd.targetSpeed = 9;
+    yield 20;
+    // call and answer: the mother hums and waits for the calf's reply
+    this.voiceCall(mom, 'answer');
+    mom.drive.lookAt = calf.pos;
+    const before = this.calfHums;
+    let tries = 0;
+    while (this.calfHums === before && tries < 3) {
+      yield* until(() => this.calfHums > before, 7);
+      if (this.calfHums === before) this.voiceCall(mom, 'answer');
+      tries++;
+    }
+    yield () => herd.s > (this.world.archInfo?.s ?? 1860) - 80;
+    // beneath the Great Arch
+    this.audio.stinger?.('discover');
+    calf.drive.excite = 1;
+    yield () => herd.s > this.path.chapters[2].start;
+  }
+
+  *chapter_krill() {
+    const herd = this.herd, mom = herd.mother, calf = herd.calf;
+    herd.mode = 'travel';
+    herd.targetSpeed = 6;
+    yield 6;
+    herd.mode = 'feed';
+    herd.targetSpeed = 3;
+    herd.feedHook = (w) => {
+      const n = this.eco?.nearestSwarm?.(w.pos);
+      return n && n.dist < 400 ? n.pos : null;
+    };
+    // the mother demonstrates a lunge through a swarm near the calf
+    const sw = () => this.eco?.nearestSwarm?.(calf.pos);
+    let demo = 0;
+    herd.motherScript = (m) => {
+      const n = sw();
+      if (!n) return null;
+      if (demo === 0) {
+        const near = m.pos.distanceTo(n.pos) < 30;
+        m.drive.feed = near ? 1 : 0;
+        m.drive.mouth = m.drive.feed;
+        return { target: n.pos.clone().add(new Vector3(0, 0, 0)), speed: 10, arrive: 2, minSpeed: 7, lookAt: n.pos };
+      }
+      m.drive.feed = 0;
+      m.drive.mouth = 0;
+      return { target: calf.pos.clone().add(new Vector3(-9, 2, 6)), speed: 6, arrive: 10, lookAt: calf.pos };
+    };
+    yield 14;
+    demo = 1;
+    this.voiceCall(mom, 'answer');
+    const eaten0 = this.eaten;
+    yield* until(() => this.eaten - eaten0 > 12, 50);
+    if (this.eaten - eaten0 > 12) {
+      mom.drive.happy = 1;
+      this.voiceCall(mom, 'answer');
+    }
+    herd.motherScript = null;
+    yield 20;
+    herd.mode = 'travel';
+    herd.targetSpeed = 8;
+    yield () => herd.s > this.path.chapters[3].start;
+  }
+
+  *chapter_forest() {
+    const herd = this.herd;
+    herd.mode = 'travel';
+    herd.targetSpeed = 7;
+    yield 14;
+    // playmates come to invite the calf into a chase
+    for (let k = 0; k < herd.calves.length; k++) {
+      const c = herd.calves[k];
+      herd.startPlay(c);
+      this.voiceCall(c, 'play');
+      yield* until(() => (c.play?.caught ?? 0) > 0, 40);
+      yield 10;
+      c.play = null;
+      if (herd.s > this.path.chapters[4].start - 200) break;
+    }
+    herd.stopPlay();
+    yield () => herd.s > this.path.chapters[4].start;
+  }
+
+  *chapter_song() {
+    const g = this.game, herd = this.herd;
+    herd.mode = 'travel';
+    herd.targetSpeed = 6;
+    const center = this.world.songCenter || this.path.pointAt(5800);
+    yield () => herd.s > 5650;
+    herd.mode = 'gather';
+    herd.songCenter = center.clone();
+    herd.targetSpeed = 0;
+    yield* until(() => herd.calf.pos.distanceTo(center) < 140, 30);
+    yield 3;
+    yield* this.song.run();
+    // dusk falls as the herd moves on
+    herd.mode = 'travel';
+    herd.songCenter = null;
+    herd.targetSpeed = 8;
+    g.atmosphere.transition('dusk', 40);
+    this.audio.setMood?.('night', { fade: 12 });
+    yield () => herd.s > this.path.chapters[5].start;
+  }
+
+  *chapter_night() {
+    const herd = this.herd;
+    herd.mode = 'travel';
+    herd.targetSpeed = 8;
+    yield () => herd.s > this.path.chapters[6].start;
+  }
+
+  *chapter_storm() {
+    const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
+    herd.mode = 'travel';
+    herd.targetSpeed = 7;
+    this.weather.set(0.6, { lightning: 0.08, spots: this.world.lightningSpots });
+    g.wind.set(9, 0.7);
+    yield 15;
+    this.weather.set(1, { lightning: 0.22 });
+    g.wind.set(15, 0.95);
+    herd.mode = 'shield';
+    herd.formationTight = 1;
+    this.audio.setIntensity?.(0.7);
+    yield () => herd.s > 7550;
+    // a downdraft tears the calf away from its mother
+    this.weather.strike(calf.pos.clone().add(new Vector3(40, 140, -60)));
+    calf.vel.add(new Vector3(18, -16, 10));
+    calf.anim.flinch(1.5);
+    calf.drive.fear = 1;
+    this.voiceCall(calf, 'coo');
+    yield 0.6;
+    this.voiceCall(mom, 'warn');
+    this.audio.setIntensity?.(1);
+    herd.care.mode = 'fetch';
+    yield* until(() => calf.pos.distanceTo(mom.pos) < 24, 40);
+    calf.drive.fear = 0;
+    mom.drive.happy = 1;
+    this.voiceCall(mom, 'answer');
+    this.audio.setIntensity?.(0.6);
+    yield () => herd.s > 8150;
+    this.weather.set(0.25, { lightning: 0.02 });
+    g.wind.set(5, 0.4);
+    herd.mode = 'travel';
+    herd.formationTight = 0;
+    yield () => herd.s > this.path.chapters[7].start;
+    this.weather.set(0, { lightning: 0 });
+  }
+
+  *chapter_falcon() {
+    const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
+    const F = this.falcon;
+    herd.mode = 'travel';
+    herd.targetSpeed = 8;
+    g.wind.set(4, 0.3);
+    yield 8;
+    // something is wrong: a far cry, the herd tenses
+    this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(-900, 300, -1400)), gain: 0.5 });
+    for (const w of herd.adults) w.drive.fear = 0.35;
+    this.audio.setIntensity?.(0.3);
+    yield 6;
+    if (this.eco) this.eco.threat = calf.pos.clone().add(new Vector3(0, 200, -500));
+    yield 5;
+    // a vast shadow sweeps over the herd from above the cloud ceiling
+    if (F) {
+      const a = calf.pos.clone().add(new Vector3(-500, 230, 300));
+      const b = calf.pos.clone().add(new Vector3(600, 230, -500));
+      F.setMode?.('shadowPass', { from: a, to: b });
+    }
+    yield 7;
+    this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(300, 250, -300)), gain: 0.9 });
+    this.voiceCall(mom, 'warn');
+    for (const c of herd.calves) this.voiceCall(c, 'coo');
+    yield 2;
+    // the herd closes around its calves
+    herd.mode = 'protect';
+    this.audio.setMood?.('chase', { fade: 3 });
+    this.audio.setIntensity?.(0.5);
+    // a living shelter: the adults form a shell; the calf must fly in between them
+    herd.protectCenter = this.path.offsetAt(herd.s + 40, 0, 6);
+    herd.targetSpeed = 2;
+    this.protecting = true;
+    const safe = () => calf.pos.distanceTo(herd.protectCenter) < 30;
+    for (let wave = 0; wave < 3; wave++) {
+      yield* until(() => safe(), wave === 0 ? 6 : 3);
+      if (F) {
+        if (this.eco) this.eco.threat = F.pos;
+        herd.threat = F.pos;
+        F.target = calf;
+        F.setMode?.('dive');
+        this.falconResult = null;
+        let boomed = false;
+        let t = 0;
+        while (this.falconResult === null && t < 20) {
+          // the adults answer together when the hunter closes on a sheltered calf
+          if (!boomed && safe() && F.pos.distanceTo(herd.protectCenter) < 95) {
+            boomed = true;
+            this.herdBoom(0.8 + wave * 0.15);
+          }
+          t += yield 0;
+        }
+        if (this.falconResult === 'hit') yield* this.rescue();
+      } else {
+        yield 6;
+        this.herdBoom(0.9);
+      }
+      this.audio.setIntensity?.(0.55 + wave * 0.15);
+      yield 7;
+    }
+    // the final stand: every adult gathers its voice; the calf joins in
+    for (const w of herd.adults) w.drive.charge = 0;
+    let t = 0;
+    while (t < 3.2) {
+      for (const w of herd.adults) w.drive.charge = clamp(t / 3, 0, 1);
+      this.audio.setIntensity?.(0.8 + t * 0.06);
+      t += yield 0;
+    }
+    this.herdBoom(1.6, true);
+    for (const w of herd.adults) w.drive.charge = 0;
+    if (F) {
+      F.knockback?.(herd.protectCenter || calf.pos, 2);
+      yield 2.5;
+      F.setMode?.('retreat');
+    }
+    herd.threat = null;
+    this.protecting = false;
+    if (this.eco) this.eco.threat = null;
+    yield 3;
+    // relief
+    herd.mode = 'travel';
+    herd.protectCenter = null;
+    this.audio.setMood?.('relief', { fade: 6 });
+    this.audio.stinger?.('resolve');
+    for (const w of herd.whales) w.drive.fear = 0;
+    herd.motherScript = (m) => ({ target: calf.pos.clone().add(new Vector3(-5, 1.5, 3)), speed: 6, arrive: 6, lookAt: calf.pos });
+    mom.drive.happy = 1;
+    calf.drive.happy = 1;
+    this.voiceCall(mom, 'answer');
+    yield 6;
+    herd.motherScript = null;
+    yield () => herd.s > this.path.chapters[8].start;
+  }
+
+  nearFalcon(r) {
+    return !!this.falcon && this.falcon.pos && this.falcon.pos.distanceTo(this.herd.calf.pos) < r;
+  }
+
+  *rescue() {
+    const herd = this.herd, mom = herd.mother, calf = herd.calf;
+    // talons graze the calf: it tumbles free; the mother answers with a blast
+    calf.vel.add(new Vector3(0, -8, 0)).addScaledVector(calf.right, 6);
+    calf.anim.flinch(2);
+    calf.drive.fear = 1;
+    this.voiceCall(calf, 'coo');
+    this.game.cameraRig.addShake(0.9);
+    this.audio.stinger?.('strike');
+    yield 0.4;
+    mom.anim.blast(1.2);
+    this.voiceCall(mom, 'roar');
+    this.booms.spawn(mom.pos.clone().addScaledVector(mom.fwd, mom.L * 0.5), { power: 1.4, radius: 110, source: mom });
+    this.falcon?.knockback?.(mom.pos, 1.4);
+    yield 1.5;
+    calf.drive.fear = 0.4;
+  }
+
+  /** Adults release a synchronised boom from around the calf. */
+  herdBoom(power = 1, giant = false) {
+    const herd = this.herd;
+    let center = new Vector3();
+    let n = 0;
+    for (const w of herd.adults) {
+      w.anim.blast(1.2);
+      this.voiceCall(w, 'roar');
+      center.add(w.pos);
+      n++;
+      if (!giant) this.booms.spawn(w.pos.clone().addScaledVector(w.fwd, w.L * 0.5), { power: power * 0.8, radius: 70 * power, source: w });
+    }
+    center.divideScalar(Math.max(1, n));
+    if (giant) {
+      this.booms.spawn(center, { power: 2.2, radius: 320, speed: 160, strength: 120 });
+      this.game.cameraRig.addShake(1.3);
+    }
+    this.audio.sfx?.('boom', { position: center, gain: 1.2 });
+    this.audio.stinger?.('boom');
+    this.audio.duck?.(0.4, 1.2);
+    if (this.falcon && this.falcon.pos.distanceTo(center) < (giant ? 400 : 120 * power)) this.falcon.knockback?.(center, giant ? 2 : power);
+    this.eco?.scatter?.(center, giant ? 400 : 150, 1.5);
+  }
+
+  *chapter_wall() {
+    const herd = this.herd, mom = herd.mother, calf = herd.calf;
+    herd.mode = 'travel';
+    herd.targetSpeed = 7;
+    // through the wall the mother stays close and keeps calling
+    herd.motherScript = (m) => ({ target: calf.pos.clone().addScaledVector(calf.fwd, 14).add(new Vector3(-6, 3, 0)), speed: Math.max(7, calf.vel.length() + 1), arrive: 8, minSpeed: 3, lookAt: calf.pos });
+    let t = 0;
+    while (herd.s < this.path.chapters[9].start - 40) {
+      if (t > 6) { this.voiceCall(mom, 'answer'); t = 0; }
+      t += yield 0;
+    }
+    herd.motherScript = null;
+  }
+
+  *chapter_oasis() {
+    const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
+    herd.mode = 'travel';
+    herd.targetSpeed = 6;
+    this.audio.stinger?.('discover');
+    this.showGathering(true);
+    // the reveal: the camera rises wide as the calf emerges from the wall
+    const t0 = g.time;
+    g.cameraRig.setCinematic(this.shot, 0.35);
+    while (g.time - t0 < 9) {
+      const k = (g.time - t0) / 9;
+      this.shot.pos.copy(calf.pos).addScaledVector(calf.fwd, -20 - k * 30).add(new Vector3(0, 8 + k * 30, 0)).addScaledVector(calf.right, 14);
+      this.shot.look.copy(calf.pos).addScaledVector(calf.fwd, 220).add(new Vector3(0, -20, 0));
+      this.shot.fov = 55;
+      yield 0;
+    }
+    g.cameraRig.cineTarget = 0;
+    // free to explore; the herd drifts toward the Mother Tree
+    const mt = this.world.motherTree || this.path.pointAt(11150);
+    yield () => herd.s > 11000 || g.time - t0 > 200;
+    yield* until(() => calf.pos.distanceTo(mom.pos) < 120 && calf.pos.distanceTo(mt) < 600, 60);
+    yield* this.ending();
+  }
+
+  // ---- the Oasis gathering ---------------------------------------------------------------
+  prepareGathering() {
+    // many herds gather at the Oasis: built quietly in the background
+    const g = this.game;
+    this.gathering = [];
+    const r = rng(77);
+    const mt = this.world.motherTree || this.path.pointAt(11150);
+    const make = (genome, k) => {
+      const w = new Whale(Object.assign({}, genome, { seed: genome.seed + 1000 + k, name: genome.name + '-' + k }));
+      w.furQuality = g.furQuality * 0.5;
+      w.group.visible = false;
+      g.engine.scene.add(w.group);
+      const a = r() * TAU, rad = lerp(180, 700, r());
+      w.orbit = { a, rad, h: lerp(-30, 160, r()), speed: lerp(0.02, 0.05, r()) * (r() < 0.5 ? -1 : 1), center: mt };
+      w.place(new Vector3(mt.x + Math.cos(a) * rad, mt.y + 150 + w.orbit.h, mt.z + Math.sin(a) * rad), a);
+      this.gathering.push(w);
+    };
+    let k = 0;
+    const queue = [];
+    for (let i = 0; i < 14; i++) queue.push(ADULTS[i % ADULTS.length]);
+    for (let i = 0; i < 5; i++) queue.push(CALVES[i % CALVES.length]);
+    const step = () => {
+      if (!queue.length) return;
+      make(queue.shift(), k++);
+      setTimeout(step, 30);
+    };
+    step();
+  }
+
+  showGathering(v) {
+    for (const w of this.gathering || []) w.group.visible = v;
+    this.gatheringOn = v;
+  }
+
+  updateGathering(dt) {
+    if (!this.gatheringOn) return;
+    const cam = this.game.engine.camera.position;
+    for (const w of this.gathering) {
+      const o = w.orbit;
+      o.a += o.speed * dt;
+      const target = new Vector3(o.center.x + Math.cos(o.a) * o.rad, o.center.y + 150 + o.h + Math.sin(o.a * 3) * 10, o.center.z + Math.sin(o.a) * o.rad);
+      this.herd.steer(w, target, w.isCalf ? 7 : 6, dt, { arrive: 20, minSpeed: 3 });
+      w.step(dt);
+      w.animate(dt, cam);
+    }
+  }
+
+  // ---- the ending -----------------------------------------------------------------------
+  *ending() {
+    const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
+    this.state = 'ending';
+    const mt = this.world.motherTree || this.path.pointAt(11150);
+    const center = mt.clone().add(new Vector3(0, 120, 0));
+    herd.mode = 'gather';
+    herd.songCenter = center;
+    herd.targetSpeed = 0;
+    this.audio.setMood?.('finale', { fade: 6 });
+    yield 4;
+    // the mother begins the song of the herd
+    const key = this.song;
+    const theme = [[2, 2], [4, 1], [7, 1], [6, 3], [5, 1], [4, 2], [2, 1], [1, 1], [2, 4]];
+    const beat = key.key().beat;
+    herd.motherScript = (m) => ({ target: calf.pos.clone().add(new Vector3(-10, 2, 6)), speed: 4, arrive: 10, lookAt: calf.pos, face: center });
+    for (const [deg, b] of theme) {
+      this.voiceHum(mom, key.midi(deg, -1), b * beat * 0.95);
+      mom.drive.sing = 1;
+      yield b * beat;
+    }
+    // everyone joins, the calf with them
+    for (const w of [...herd.whales, ...(this.gathering || [])]) {
+      if (w === calf) continue;
+      w.drive.sing = 1;
+      const deg = [0, 4, 2, 7][Math.floor(Math.random() * 4)];
+      setTimeout(() => this.voiceHum(w, key.midi(deg, w.isCalf ? 1 : -2), beat * 10), Math.random() * 1200);
+    }
+    this.voiceHum(calf, key.midi(4, 1), beat * 10);
+    calf.drive.sing = 1;
+    calf.drive.happy = 1;
+    G.uSongRipple.value.set(center.x, center.y, center.z, g.time);
+    G.uSongAmp.value = 2.2;
+    if (this.eco) this.eco.songFocus = center;
+    this.audio.setIntensity?.(1);
+    // a slow rising crane shot around the herd and the Mother Tree
+    this.player.enabled = false;
+    g.cameraRig.setCinematic(this.shot, 0.18);
+    const t0 = g.time;
+    this.endTitle = null;
+    while (g.time - t0 < 30) {
+      const k = (g.time - t0) / 30;
+      const a = 0.5 + k * 1.3;
+      const rad = lerp(40, 260, easeInOut(k));
+      this.shot.pos.set(calf.pos.x + Math.cos(a) * rad, calf.pos.y + lerp(6, 160, easeInOut(k)), calf.pos.z + Math.sin(a) * rad);
+      this.shot.look.copy(calf.pos).lerp(mt.clone().add(new Vector3(0, 200, 0)), easeInOut(k) * 0.7);
+      this.shot.fov = lerp(45, 55, k);
+      if (k > 0.55 && !this.endTitle) {
+        this.endTitle = true;
+        this.menu.returnPage = 'main';
+        this.menu.items.forEach((it) => (it.targetOpacity = 0));
+        this.menu.visible = false;
+        this.menu.dissolving = false;
+        this.menu.title.dissolve = 0;
+        this.menu.subtitle.dissolve = 0;
+        this.menu.title.targetOpacity = 1;
+      }
+      yield 0;
+    }
+    this.audio.stinger?.('resolve');
+    this.completed = true;
+    this.save(9);
+    yield 6;
+    g.fadeRate = 0.25;
+    yield () => g.engine.post.grade.uFade.value >= 0.99;
+    G.uSongAmp.value = 0;
+    this.showGathering(false);
+    this.enterMenu();
+  }
+
+  // ---- calf interaction events ---------------------------------------------------------
+  onCalfHum() {
+    const calf = this.herd.calf;
+    this.calfHums++;
+    let midi = this.song.listening ? this.song.humStart() : null;
+    if (midi === null) {
+      // free humming: nose-up raises the pitch, snapped to the key
+      const k = this.song.key();
+      const deg = Math.round(clamp((this.player.aimPitch + 0.6) * 5, 0, 9));
+      midi = k.rootMidi + 12 + k.scale[deg % 7] + 12 * Math.floor(deg / 7);
+      this.herd.calfHummed();
+    }
+    this.voiceOf(calf).hum?.(midi, undefined, { gain: 1, glideFrom: midi - 2 });
+    calf.drive.hum = 1;
+    this.humTimers.set(calf, 99);
+    calf.drive.happy = Math.max(calf.drive.happy, 0.5);
+  }
+
+  onCalfHumEnd() {
+    const calf = this.herd.calf;
+    this.song.humEnd();
+    this.voiceOf(calf).release?.(0.35);
+    this.humTimers.set(calf, 0.05);
+  }
+
+  onCalfBoom(e) {
+    const calf = this.herd.calf;
+    const pos = calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.6);
+    const b = this.booms.spawn(pos, { power: e.power, radius: 16 + 26 * e.power, source: calf });
+    this.voiceOf(calf).setChargeLevel?.(0);
+    this.voiceCall(calf, 'roar');
+    this.audio.sfx?.('boomSmall', { position: pos, gain: 0.6 + e.power * 0.5 });
+    this.eco?.scatter?.(pos, 30 + 40 * e.power, e.power);
+    if (this.falcon && this.falcon.pos && this.falcon.pos.distanceTo(pos) < 22 + 38 * e.power) this.falcon.knockback?.(pos, 0.5 + e.power * 0.6);
+  }
+
+  // ---- per-frame --------------------------------------------------------------------------
+  update(dt) {
+    const g = this.game;
+    // pause handling (eases time down/up)
+    if (g.timeScaleTarget !== undefined) g.timeScale = damp(g.timeScale, g.timeScaleTarget, 4, Math.max(dt, 0.016));
+    if (g.input.pausePressed) {
+      if (this.state === 'play') this.pause();
+      else if (this.state === 'paused' && this.menu.page === 'pause') this.resume();
+    }
+    this.script.update(dt);
+    this.menu.update(Math.max(dt, 0.016));
+    if (this.state === 'menu') {
+      this.menuT = (this.menuT || 0) + dt;
+      this.menuShot(this.menuT);
+    }
+    this.updateCalf(dt);
+    this.herd.update(dt);
+    const cam = g.engine.camera.position;
+    for (const w of this.herd.whales) {
+      if (w.role !== 'player') w.animate(dt, cam);
+      const ht = this.humTimers.get(w);
+      if (ht !== undefined) {
+        const nt = ht - dt;
+        if (nt <= 0) { w.drive.hum = 0; this.humTimers.delete(w); } else this.humTimers.set(w, nt);
+      }
+      const v = this.voices.get(w);
+      if (v) v.setPosition?.(w.pos);
+    }
+    this.updateGathering(dt);
+    this.weather.update(dt);
+    this.booms.update(dt);
+    this.falcon?.update?.(dt);
+    this.eco?.update?.(dt);
+    if (this.protecting && this.herd.protectCenter) {
+      this.herd.protectCenter.lerp(this.path.offsetAt(this.herd.s + 40, 0, 6), 1 - Math.exp(-dt * 0.3));
+    }
+    // chapter progression
+    if (this.state === 'play' || this.state === 'ending') {
+      const next = this.path.chapters[this.chapterIndex + 1];
+      if (next && this.herd.s >= next.start && this.state === 'play') this.enterChapter(this.chapterIndex + 1);
+    }
+    this.world.updateVisibility(this.state === 'menu' ? 60 : this.herd.s);
+    this.updateAudio(dt);
+    // big whales part the clouds
+    let mi = 0;
+    for (const w of this.herd.adults) {
+      if (mi >= G.uMovers.value.length) break;
+      if (w.pos.distanceTo(cam) > 900) continue;
+      G.uMovers.value[mi++].set(w.pos.x, w.pos.y, w.pos.z, w.L * 0.45);
+    }
+    for (; mi < G.uMovers.value.length; mi++) G.uMovers.value[mi].w = 0;
+  }
+
+  updateCalf(dt) {
+    const g = this.game, herd = this.herd, calf = herd.calf;
+    const playing = this.state === 'play' || this.state === 'paused';
+    // the calf sleeps in the menu; it is the player's to steer in play
+    if (playing) this.player.update(dt);
+    else {
+      calf.ctl.thrust = 0;
+      calf.ctl.targetYaw = calf.yaw;
+      calf.ctl.targetPitch = 0;
+      calf.drive.effort = 0;
+      calf.drive.glide = 0.2;
+      if (this.state === 'menu' || this.state === 'intro') {
+        // nestle beside the mother
+        const spot = herd.mother.pos.clone().addScaledVector(herd.mother.right, 7).add(new Vector3(0, -3, 2));
+        calf.vel.lerp(spot.sub(calf.pos).multiplyScalar(0.5), 1 - Math.exp(-dt * 1.5));
+        calf.ctl.targetYaw = herd.mother.yaw;
+      }
+      if (this.state === 'ending') {
+        const spot = herd.songCenter ? herd.songCenter.clone().add(new Vector3(-8, -2, 30)) : calf.pos;
+        herd.steer(calf, spot, 5, dt, { arrive: 20 });
+      }
+    }
+    // wind: the storm buffets the calf unless it shelters in its mother's lee
+    g.wind.sample(calf.pos, calf.wind).multiplyScalar(herd.windShelter * (0.35 + this.weather.level * 0.9));
+    calf.step(dt);
+    // soft world limits: dense air below, thin air above, the herd's pull around
+    const anchor = herd.anchor;
+    if (calf.pos.y < 55) calf.vel.y += (55 - calf.pos.y) * 0.9 * dt;
+    if (calf.pos.y < 0) calf.vel.y += 12 * dt;
+    const ceiling = anchor.y + 260;
+    if (calf.pos.y > ceiling) calf.vel.y -= (calf.pos.y - ceiling) * 0.5 * dt;
+    const away = this._v.copy(calf.pos).sub(anchor);
+    const far = away.length();
+    if (playing && far > 420) {
+      // a homeward wind turns the calf back toward its family
+      calf.vel.addScaledVector(away.normalize(), -(far - 420) * 0.04 * dt * 10);
+      herd.care.mode = 'fetch';
+    }
+    // collisions with rock
+    const push = this.world.collide(calf.pos, calf.radius * 0.95, this._v2);
+    if (push.lengthSq() > 1e-6) {
+      const n = push.clone().normalize();
+      const vn = calf.vel.dot(n);
+      calf.pos.add(push);
+      if (vn < 0) {
+        calf.vel.addScaledVector(n, -vn * 1.5);
+        if (-vn > 4 && g.time - this.lastBonk > 0.8) {
+          this.lastBonk = g.time;
+          calf.anim.flinch(Math.min(2, -vn / 6));
+          this.audio.sfx?.('bonk', { position: calf.pos, gain: Math.min(1, -vn / 12) });
+          g.cameraRig.addShake(0.25);
+        }
+      }
+      calf._syncTransform();
+    }
+    // bumping into the big whales (and nuzzling mother)
+    for (const w of herd.whales) {
+      if (w === calf) continue;
+      const d = calf.pos.distanceTo(w.pos);
+      const min = (calf.radius + w.radius) * 1.05;
+      if (d < min && d > 0.01) {
+        const n = this._v.copy(calf.pos).sub(w.pos).divideScalar(d);
+        calf.pos.addScaledVector(n, (min - d) * (w.isCalf ? 0.5 : 0.9));
+        if (w.isCalf) w.pos.addScaledVector(n, -(min - d) * 0.5);
+        const vn = calf.vel.dot(n);
+        if (vn < 0) calf.vel.addScaledVector(n, -vn * 1.2);
+        if (w === herd.mother && calf.vel.length() < 7 && g.time - (this.lastNuzzle || 0) > 4) {
+          this.lastNuzzle = g.time;
+          calf.drive.happy = 1;
+          w.drive.happy = 1;
+          this.voiceCall(calf, 'coo');
+          setTimeout(() => this.voiceCall(w, 'answer'), 500);
+        }
+        calf._syncTransform();
+      }
+    }
+    // eating: the mouth opens by itself near krill
+    let feed = 0;
+    if (this.eco && playing) {
+      const n = this.eco.nearestSwarm?.(calf.pos);
+      const sp = calf.vel.length();
+      if (n && n.dist < 28 && sp > 2.5) feed = 1;
+      const mouth = calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.48);
+      if (calf.drive.mouth > 0.4) {
+        const eaten = this.eco.eat?.(mouth, calf.L * 0.35 + 0.6, dt) || 0;
+        if (eaten > 0) {
+          this.eaten += eaten;
+          calf.energy = Math.min(1, calf.energy + eaten * 0.012);
+          calf.drive.happy = Math.max(calf.drive.happy, 0.8);
+          if (g.time - (this.lastGulp || 0) > 0.35) {
+            this.lastGulp = g.time;
+            this.audio.sfx?.('gulp', { position: mouth, gain: 0.6 });
+          }
+        }
+      }
+    }
+    calf.drive.feed = damp(calf.drive.feed, feed, 4, dt);
+    calf.drive.mouth = damp(calf.drive.mouth, Math.max(feed, calf.drive.charge > 0 ? 0 : 0), 6, dt);
+    calf.drive.happy = damp(calf.drive.happy, 0.25, 0.25, dt);
+    if (playing) {
+      const near = herd.mother.pos.distanceTo(calf.pos) < 40;
+      calf.drive.lookAt = near && Math.sin(g.time * 0.4) > 0.3 ? herd.mother.pos : (this.falcon && herd.threat ? this.falcon.pos : null);
+    }
+    // sonic boom charge feedback
+    const ch = this.player.charge;
+    this.voiceOf(calf).setChargeLevel?.(ch);
+    this.booms.charge = ch > 0.02 ? { pos: calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.55), amount: ch } : null;
+    calf.animate(dt, g.engine.camera.position);
+    g.focus.copy(calf.pos);
+    // mist trails when slicing through cloud
+    const inCloud = g.clouds.playerInCloud;
+    const sp = calf.vel.length();
+    if ((inCloud > 0.15 || calf.pos.y < 70) && sp > 3) {
+      const rate = (inCloud > 0.15 ? inCloud : 0.4) * sp * 0.25;
+      this.mistAcc = (this.mistAcc || 0) + rate * dt;
+      while (this.mistAcc > 1) {
+        this.mistAcc -= 1;
+        for (const side of [-1, 1]) {
+          const tip = calf.pos.clone().addScaledVector(calf.right, side * calf.L * 0.55).addScaledVector(calf.fwd, -calf.L * 0.1);
+          g.mist.emit({ pos: tip, vel: calf.vel.clone().multiplyScalar(0.15), life: 1.6, size: 0.6, sizeEnd: 3.2, alpha: 0.55, drag: 1.2, kind: 0 });
+        }
+      }
+    }
+    // camera
+    if (playing || this.state === 'ending') {
+      const opts = {};
+      if (herd.mode === 'gather' && herd.songCenter) { opts.lookBias = herd.songCenter; opts.lookBiasW = 0.25; opts.extraDist = 4; opts.busy = true; }
+      if (herd.mode === 'protect' && this.falcon && this.falcon.pos) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.extraDist = 3; opts.busy = true; }
+      g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
+    }
+    if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});
+    // cloud sea wakes when skimming
+    g.cloudSea.uniforms.uTrailOn.value = calf.pos.y < 130 ? 1 : 0;
+  }
+
+  updateAudio(dt) {
+    const g = this.game, a = this.audio;
+    if (!a || !a.update) return;
+    a.update(dt);
+    const calf = this.herd.calf;
+    const wf = this.world.nearestWaterfall(calf.pos);
+    a.setAmbience?.({
+      wind: clamp(0.25 + g.wind.strength / 18, 0, 1),
+      rain: this.weather.rain,
+      storm: this.weather.level,
+      speed: calf.vel.length(),
+      inCloud: Math.max(g.clouds.inCloud, g.clouds.playerInCloud),
+      waterfall: wf && wf.dist < 400 ? { pos: wf.wf.userData.lip.clone().add(new Vector3(0, -Math.min(wf.wf.userData.drop * 0.5, 80), 0)), gain: 1 - wf.dist / 400 } : null,
+      night: G.uNight.value,
+      birds: this.chapterIndex >= 0 && this.chapterIndex < 4 ? 0.4 : this.chapterIndex === 9 ? 0.7 : 0.1,
+    });
+    if (this.state === 'play') {
+      const ch = this.path.chapters[this.chapterIndex];
+      if (ch && (ch.mood === 'flight' || ch.mood === 'krill' || ch.mood === 'forest' || ch.mood === 'oasis')) a.setIntensity?.(clamp(calf.vel.length() / 20, 0, 1));
+    }
+  }
+
+  onSongSuccess() {
+    this.herd.calf.drive.happy = 1;
+  }
 }

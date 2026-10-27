@@ -26,10 +26,10 @@ function preset(o) {
 
 export const PRESETS = {
   dawn: preset({
-    sunElev: 4, sunAz: 72, sun: C('#ffae72', 2.8),
+    sunElev: 4, sunAz: 72, sun: C('#ffae72', 2.6),
     zenith: C('#3a5797'), horizon: C('#ffb994'),
-    ambient: C('#8e98d8', 0.78), bounce: C('#f0b490', 0.62), shadowTint: C('#d9cff6'),
-    fog: C('#b8a3c9'), scatter: C('#ffa96f', 1.25),
+    ambient: C('#7f8cd8', 0.84), bounce: C('#d6aa9c', 0.55), shadowTint: C('#c6c2f2'),
+    fog: C('#a89bc8'), scatter: C('#ffa96f', 1.25),
     cloudLit: C('#ffd2ad', 1.15), cloudShadow: C('#6b6cb0', 0.92),
     bankLit: C('#ffc29a'), bankShadow: C('#7c6fb2'),
     fogDist: 0.00006, fogHeight: 0.004,
@@ -38,10 +38,10 @@ export const PRESETS = {
     vignette: 0.32, vigColor: C('#9b86b8'), bloom: 0.08, threshold: 1.2, rays: 0.38,
   }),
   menu: preset({
-    sunElev: 7, sunAz: 55, sun: C('#ffb57e', 2.7),
+    sunElev: 7, sunAz: 55, sun: C('#ffb57e', 2.55),
     zenith: C('#3d5d9f'), horizon: C('#ffc4a0'),
-    ambient: C('#929fdc', 0.8), bounce: C('#f3bb98', 0.65), shadowTint: C('#dbd3f6'),
-    fog: C('#bba9cc'), scatter: C('#ffb282', 1.2),
+    ambient: C('#8290da', 0.85), bounce: C('#d9b09f', 0.56), shadowTint: C('#c8c4f2'),
+    fog: C('#ab9fca'), scatter: C('#ffb282', 1.2),
     cloudLit: C('#ffd9bb', 1.12), cloudShadow: C('#7072b4', 0.92),
     bankLit: C('#ffcaa6'), bankShadow: C('#8076b6'),
     fogDist: 0.00006, fogHeight: 0.0045,
@@ -80,7 +80,7 @@ export const PRESETS = {
   golden: preset({
     sunElev: 4.5, sunAz: 4, sun: C('#ffa45a', 2.8),
     zenith: C('#4c62a8'), horizon: C('#ffb38a'),
-    ambient: C('#a29ad2', 0.75), bounce: C('#ffc19a', 0.82), shadowTint: C('#dccdf3'),
+    ambient: C('#8c8ad0', 0.78), bounce: C('#e5ae92', 0.62), shadowTint: C('#c9c0f0'),
     fog: C('#efb29c'), scatter: C('#ffa463', 1.7),
     cloudLit: C('#ffd1a6', 1.15), cloudShadow: C('#8a7bb8', 0.9),
     bankLit: C('#ffbf8e'), bankShadow: C('#8b70a8'),

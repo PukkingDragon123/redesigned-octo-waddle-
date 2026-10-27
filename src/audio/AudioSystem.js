@@ -8,20 +8,21 @@
 // never throws. Pass { context } to run on an injected (e.g. Offline) AudioContext.
 //
 // Signal flow
-//   score instruments ─► musicDry ─► duck ─► musicVol ─► musicLP ─┐
-//                      └► musicWet ─► duckW ─► musicVolW ─► reverb  │
-//   stingers ─► stingDry/stingWet (join after the duck)             ├─► master ─► shelf
-//   voices / sfx / ambience ─► world (sound vol) ─► worldLP ────────┤   ─► compressor
-//   sends ─► worldWet ─► reverb (convolver, 5 s) ─► verbLP ─────────┤   ─► limiter ─► soft clip
-//   whale calls ─► echo ─► sky echo (ping-pong feedback delay) ─────┘   (ceiling -1.1 dBFS)
+//   score ─► musicDry ─► duck ─► musicVol ─► low shelf ─► musicLP (clouds) ──┐
+//         └► musicWet ─► duckW ─► musicVolW ─► reverb                         │
+//   stingers ─► stingDry / stingWet (join after the duck: never ducked)       ├─► master
+//   voices / sfx / ambience ─► world (sound vol) ─► worldLP (clouds) ─────────┤
+//   sends ─► worldWet ─► reverb: 5 s IR as head + delayed-tail convolvers ────┤
+//   whale calls ─► echo ─► sky echo (ping-pong feedback delay) ───────────────┘
+//   master ─► 32 Hz low-cut ─► high shelf ─► compressor ─► limiter ─► soft clip (-1.1 dBFS)
 import { Conductor } from './Conductor.js';
 import { WhaleVoice } from './WhaleVoice.js';
 import { Sfx } from './Sfx.js';
 import { Ambience } from './Ambience.js';
-import { loadBank, preloadBank } from './SampleBank.js';
+import { loadBank, preloadBank, IR_SPLIT } from './SampleBank.js';
 import { MOODS, MOOD_NAMES } from './moods.js';
 import { parseChord, SCALES, bassNote, chordTones } from './theory.js';
-import { clamp, glide, setAt, holdAt, finite, softClipCurve } from './util.js';
+import { clamp, glide, setAt, holdAt, finite, softClipCurve, yieldNow } from './util.js';
 
 const SFX_NAMES = ['boom', 'boomSmall', 'gulp', 'sparkle', 'bonk', 'wingbeat', 'whoosh', 'thunder', 'lightningCrack', 'falconScreech', 'falconWing', 'splash', 'chime'];
 const STINGERS = ['discover', 'boom', 'strike', 'harmony', 'resolve'];
@@ -123,11 +124,11 @@ export class AudioSystem {
             if (document.hidden) {
               if (this.ctx.state === 'running') {
                 this._hiddenSuspend = true;
-                this.ctx.suspend();
+                this.ctx.suspend().catch(() => {});
               }
             } else if (this._hiddenSuspend) {
               this._hiddenSuspend = false;
-              this.ctx.resume();
+              this.ctx.resume().catch(() => {});
             }
           } catch (e) { /* ignore */ }
         };
@@ -191,12 +192,19 @@ export class AudioSystem {
     B.clip.connect(ctx.destination);
     // reverb
     B.verbIn = g(1);
-    B.convolver = ctx.createConvolver();
-    B.convolver.normalize = false;
+    B.convHead = ctx.createConvolver();
+    B.convHead.normalize = false;
+    B.convTail = ctx.createConvolver();
+    B.convTail.normalize = false;
+    B.verbDelay = ctx.createDelay(IR_SPLIT + 0.5);
+    B.verbDelay.delayTime.value = IR_SPLIT;
     B.verbOut = g(1);
     B.verbLP = lp(20000);
-    B.verbIn.connect(B.convolver);
-    B.convolver.connect(B.verbOut);
+    B.verbIn.connect(B.convHead);
+    B.convHead.connect(B.verbOut);
+    B.verbIn.connect(B.verbDelay);
+    B.verbDelay.connect(B.convTail);
+    B.convTail.connect(B.verbOut);
     B.verbOut.connect(B.verbLP);
     B.verbLP.connect(B.master);
     // music
@@ -279,14 +287,24 @@ export class AudioSystem {
     this.stats.maxSliceMs = bank.maxSliceMs || 0;
     this.stats.maxStepMs = bank.maxStepMs || 0;
     this.stats.maxStepLabel = bank.maxStepLabel || '';
+    // each step is its own short task (installing a convolver buffer runs FFTs)
     try {
-      this.bus.convolver.buffer = bank.ir;
+      this.bus.convHead.buffer = bank.irHead;
     } catch (e) {
       this._warn(e);
     }
+    await yieldNow();
+    try {
+      this.bus.convTail.buffer = bank.irTail;
+    } catch (e) {
+      this._warn(e);
+    }
+    await yieldNow();
     this.conductor = new Conductor(this);
     this.sfxEngine = new Sfx(this);
     this.ambience = new Ambience(this);
+    await yieldNow();
+    this._warmup();
     this.ambience.set(this._amb);
     this.conductor.setIntensity(this._intensity, true);
     this._built = true;
@@ -298,6 +316,20 @@ export class AudioSystem {
           if (this.ready && performance.now() - this._lastUpdate > 80) this.conductor.update(0.05, this.ctx.currentTime);
         } catch (e) { /* ignore */ }
       }, 50);
+    }
+  }
+
+  /** Exercise the cold code paths once (silently) so the first frames of play stay smooth. */
+  _warmup() {
+    try {
+      this.conductor.warmup();
+      const now = this.ctx.currentTime;
+      const v = new WhaleVoice(this, { base: 50 });
+      v._engine(now);
+      v._killEngine(now);
+      v.dispose();
+    } catch (e) {
+      this._warn(e);
     }
   }
 

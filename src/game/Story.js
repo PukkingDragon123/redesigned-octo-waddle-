@@ -106,6 +106,7 @@ export class Story {
     };
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', wake);
+    window.addEventListener('touchend', wake); // iOS unlocks audio on touchend, not touchstart
     window.addEventListener('blur', () => { if (this.state === 'play' && !g.debug) this.pause(); });
     const p = g.params;
     if (g.debug && p.has('auto')) {
@@ -136,7 +137,9 @@ export class Story {
       const m = OPTIONAL['../audio/AudioSystem.js'];
       if (m) {
         const { AudioSystem } = await m();
-        this.audio = new AudioSystem(g);
+        // phones get plain stereo panning for whale voices: HRTF is costly on the audio thread
+        const touchOnly = navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches;
+        this.audio = new AudioSystem(g, { hrtf: !touchOnly });
       }
     } catch (e) { console.warn('[skysong] audio unavailable', e); this.audio = new AudioStub(); }
     try {

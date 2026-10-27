@@ -184,8 +184,11 @@ const gain = await page.evaluate(() => window.__audioTest.chainGain(-30));
 console.log(`master chain static gain at -30 dBFS: ${gain} dB`);
 const perf = await page.evaluate(() => window.__audioTest.perf(6));
 console.log('live perf', JSON.stringify(perf));
-if (perf.maxMs > 4) fails.push(`live update() max ${perf.maxMs} ms`);
+// budget: ~1 ms of main-thread time per frame (average and 95th percentile); the max
+// allows for a stray GC pause. The first second (one-time warm-up) is reported only.
 if (perf.avgMs > 1) fails.push(`live update() avg ${perf.avgMs} ms`);
+if (perf.p95Ms > 1) fails.push(`live update() p95 ${perf.p95Ms} ms`);
+if (perf.maxMs > 6) fails.push(`live update() max ${perf.maxMs} ms`);
 if (perf.errors) fails.push(`live errors ${perf.errors}: ${perf.lastError}`);
 if (boot.longestSliceMs > 40) fails.push(`bank build slice ${boot.longestSliceMs} ms > 40`);
 

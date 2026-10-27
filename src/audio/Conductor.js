@@ -9,7 +9,7 @@ import { MOODS } from './moods.js';
 import { PATTERNS } from './patterns.js';
 import { parseBar, parseChord, bassNote, chordTones, voiceChord, SCALES } from './theory.js';
 import { Sampler, Section, Line, getWaves } from './instruments.js';
-import { clamp, smoothstep, makeRng } from './util.js';
+import { clamp, smoothstep, makeRng, disconnect } from './util.js';
 
 const LOOKAHEAD = 0.15;
 const BURST = 12; // events per frame before deferring the ones not yet due
@@ -200,6 +200,42 @@ export class Conductor {
     this.beatDur = 60 / def.bpm;
     this.barStart = t;
     this.grids.push({ t0: t, beat: this.beatDur });
+  }
+
+  /**
+   * Run every pattern once on each mood's first bar without dispatching anything, and
+   * build/tear down a throwaway section, so the first real bars do not pay for JIT
+   * warm-up on the game's frames.
+   */
+  warmup() {
+    const c = this._c;
+    for (const name of Object.keys(MOODS)) {
+      const def = MOODS[name];
+      const sec = def.sections[def.form[0]];
+      const chords = parseBar(sec.bars[0], 4);
+      c.beats = 4;
+      c.beatDur = 60 / def.bpm;
+      c.chords = chords;
+      c.chordAt = () => chords[0].ch;
+      c.melody = sec.melody ? sec.melody[0] : null;
+      c.key = def.key;
+      c.secBar = 0;
+      c.secLen = sec.bars.length;
+      c.secName = def.form[0];
+      c.secCount = 0;
+      c.rng = this.rng;
+      c.energy = 0.5;
+      c.bar = 0;
+      for (const L of def.layers) {
+        try { PATTERNS[L.p](c, L, {}); } catch (e) { /* reported when it matters */ }
+      }
+    }
+    const now = this.ctx.currentTime;
+    const s = new Section(this.sys, { wave: getWaves(this.ctx).strings, voices: 1, unison: 2, filter: 1000, body: [300, 1], vib: [5, 5], formants: true, tremolo: { rate: 5, depth: 0.5 }, send: 0.1 });
+    s.setNotes([60], now);
+    s._build(now);
+    s._teardown(now);
+    disconnect(s.out, s.art, s.wet);
   }
 
   // ---- scheduling --------------------------------------------------------------------

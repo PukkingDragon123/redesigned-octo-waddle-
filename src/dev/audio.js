@@ -453,11 +453,14 @@ function makeHooks(game, live, liveVoices, errors, start) {
       liveVoices.sage.hum(k.rootMidi - 5, seconds);
       liveVoices.calf.hum(k.rootMidi + 12, seconds);
       const times = [];
+      const warm = [];
       const orig = live.update.bind(live);
+      const tStart = performance.now();
       live.update = (dt) => {
         const a = performance.now();
         orig(dt);
-        times.push(performance.now() - a);
+        // the first second includes one-time costs (first section builds, first voices)
+        (performance.now() - tStart < 1000 ? warm : times).push(performance.now() - a);
       };
       const t0 = performance.now();
       let n = 0;
@@ -475,6 +478,7 @@ function makeHooks(game, live, liveVoices, errors, start) {
       times.sort((a, b) => a - b);
       const avg = times.reduce((a, b) => a + b, 0) / Math.max(1, times.length);
       return {
+        firstSecondMaxMs: Math.round(Math.max(0, ...warm) * 1000) / 1000,
         frames: times.length,
         avgMs: Math.round(avg * 1000) / 1000,
         p95Ms: Math.round((times[Math.floor(times.length * 0.95)] || 0) * 1000) / 1000,

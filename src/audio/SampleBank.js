@@ -24,6 +24,8 @@ const RANGES = {
 };
 const DRUM_RATE = 24000;
 const CYMBAL_RATE = 32000;
+export const IR_SECONDS = 5;
+export const IR_SPLIT = 2.5;
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const envCache = new Map();
@@ -106,7 +108,7 @@ export function loadBank(ctx, stats = null) {
 
 function* buildEnv(ctx, sr) {
   const rand = makeRng(20261027);
-  const bank = { sr, inst: null, noise: {}, rain: null, ir: null };
+  const bank = { sr, inst: null, noise: {}, rain: null, irHead: null, irTail: null };
   for (const type of ['white', 'pink', 'brown']) {
     yield `noise ${type}`;
     const b = makeBuffer(ctx, 1, Math.floor(sr * 3), sr);
@@ -114,10 +116,23 @@ function* buildEnv(ctx, sr) {
     bank.noise[type] = b;
   }
   {
+    // The 5 s IR is split into a head and a tail (the tail is fed through a delay of
+    // IR_SPLIT seconds): assigning a convolver buffer costs main-thread FFT work in
+    // proportion to its length, so two halves can be installed in two short tasks.
     yield 'reverb';
-    const b = makeBuffer(ctx, 2, Math.floor(sr * 5), sr);
-    yield* S.reverbIR(b.getChannelData(0), b.getChannelData(1), sr, 5, rand);
-    bank.ir = b;
+    const len = Math.floor(sr * IR_SECONDS);
+    const L = new Float32Array(len);
+    const R = new Float32Array(len);
+    yield* S.reverbIR(L, R, sr, IR_SECONDS, rand);
+    const cut = Math.floor(sr * IR_SPLIT);
+    const head = makeBuffer(ctx, 2, cut, sr);
+    const tail = makeBuffer(ctx, 2, len - cut, sr);
+    head.copyToChannel(L.subarray(0, cut), 0);
+    head.copyToChannel(R.subarray(0, cut), 1);
+    tail.copyToChannel(L.subarray(cut), 0);
+    tail.copyToChannel(R.subarray(cut), 1);
+    bank.irHead = head;
+    bank.irTail = tail;
   }
   {
     yield 'rain';

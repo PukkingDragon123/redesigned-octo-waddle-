@@ -162,6 +162,19 @@ void main() {
   float broad = texture2D(uNoise, wp / 140.0 + vWorldPos.y / 300.0).r;
   float streak = texture2D(uNoise, vec2(wp.x / 9.0 + wp.y / 11.0, vWorldPos.y / 60.0)).b;
   albedo *= 0.86 + 0.22 * broad + 0.1 * (streak - 0.5);
+  // painted sediment lines and fine cracks on the steep faces
+  float steep = 1.0 - smoothstep(0.35, 0.7, abs(N.y));
+  if (steep > 0.01) {
+    float wob = texture2D(uNoise, vec2(wp.x / 160.0 - wp.y / 170.0, vWorldPos.y / 400.0)).r;
+    float sy = vWorldPos.y / 3.4 + wob * 1.1;
+    float lineW = 0.06 + 0.06 * streak;
+    float sed = smoothstep(lineW, 0.0, abs(fract(sy) - 0.5) - (0.5 - lineW)) * smoothstep(0.3, 0.6, fract(sy * 0.37 + broad));
+    float cr = worley2(vec2(wp.x * 0.7 + wp.y * 0.7, vWorldPos.y * 0.45) / 3.5 + broad * 2.0);
+    float crack = smoothstep(0.09, 0.02, cr) * smoothstep(0.35, 0.7, streak);
+    albedo *= 1.0 - steep * (sed * 0.13 + crack * 0.2);
+    // sun-bleached lips above each line
+    albedo *= 1.0 + steep * 0.06 * smoothstep(0.0, 0.2, fract(sy) - 0.5) * (1.0 - smoothstep(0.2, 0.45, fract(sy) - 0.5));
+  }
   // moss gathers on ledges
   float ledge = smoothstep(0.45, 0.85, N.y + (texture2D(uNoise, wp / 30.0).a - 0.5) * 0.5);
   albedo = mix(albedo, uMossColor * (0.85 + 0.3 * broad), ledge * 0.55 * (1.0 - vGrass));

@@ -124,5 +124,15 @@ Add `?debug` to the URL, then optionally:
 - `&test=fly|whale|islands|world` (dev scenes in `src/dev/`), `&time=dawn|morning|…`.
 - `&quality=high|medium|low`, `&nobloom`, `&norays`, `&noshadow`, `&nosea`.
 
-`tools/probe.mjs` and `tools/chapters.mjs` drive headless Chromium for screenshots and
-chapter smoke tests.
+### Headless checks
+
+All of these drive headless Chromium against the dev server (`npm run dev`):
+
+| Command | What it checks |
+|---|---|
+| `node tools/chapters.mjs 0,1,2 25 [shots]` | Runs chapters with the autopilot and reports state and errors (and screenshots) |
+| `node tools/probe.mjs "<query>" out.png <frames> <w> <h>` | Captures a frame; `EVAL="<js>"` prints an expression (`g` is the game) |
+| `node tools/falcon-run.mjs 150` | Plays the falcon encounter and logs every falcon event and the herd's shelter |
+| `node tools/audio-check.mjs` | Renders every mood, voice and effect offline: no NaNs, nothing silent, gain staging |
+| `node tools/audio-game.mjs 4 40` | Runs a chapter with live audio and reports the mood, chords and audio errors |
+| `node tools/touch-check.mjs` | Phone viewport: taps New Game on the floating menu with a touch event |

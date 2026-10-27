@@ -26,6 +26,11 @@ try {
     e.preventDefault();
     fail(new Error('WebGL context lost'), 'The sky slipped away for a moment. Please reload the page.');
   });
+  canvas.addEventListener('webglcontextrestored', () => {
+    // three has rebuilt its state by now; the scene target must not render to texture directly
+    document.getElementById('skysong-fail')?.remove();
+    game.engine.renderer.properties.get(game.engine.rt).__useRenderToTexture = false;
+  });
   game.start();
 } catch (e) {
   fail(e);

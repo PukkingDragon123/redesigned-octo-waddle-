@@ -87,7 +87,7 @@ export class Story {
     };
     this.booms = new SonicBooms(g);
     this.song = new SongGame(this);
-    g.cameraRig.collide = (from, to) => this.world.raycast(from, to);
+    g.cameraRig.collide = (from, to) => this.cameraHit(from, to);
     await this.loadOptional();
     this.player.on('hum', () => this.onCalfHum());
     this.player.on('humEnd', () => this.onCalfHumEnd());
@@ -267,11 +267,23 @@ export class Story {
     this.player.charging = false;
     if (this.player.humming) { this.player.humming = false; this.onCalfHumEnd(); }
     Object.assign(this.song, { listening: false, active: false, expect: null, presses: [] });
+    herd.care.answerAt = -1;
+    for (const w of this.gathering || []) { w.drive.sing = 0; w.drive.hum = 0; this.humTimers.delete(w); }
+    herd.calf.energy = 1;
+    herd.calf.drive.tired = 0;
+    this.player.cooldown = 0;
+    this.weather.rain = 0;
+    this.weather.rainU.uRain.value = 0;
+    this.weather.rainMesh.visible = false;
+    this.weather.flash = 0;
+    G.uFlash.value = 0;
+    G.uWet.value = 0;
   }
 
   enterMenu() {
     const g = this.game;
     this.state = 'menu';
+    this.chapterIndex = -1;
     this.script.cancel();
     this.resetWorldState();
     this.player.enabled = false;
@@ -329,7 +341,6 @@ export class Story {
     }
     if (a === 'new') {
       this.audio.start?.().then(() => this.applyVolumes());
-      try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
       this.menu.dissolveAll();
       this.state = 'intro';
       this.script.run(this.intro(), 'intro');
@@ -837,6 +848,39 @@ export class Story {
     yield () => herd.s > this.path.chapters[8].start;
   }
 
+  /**
+   * Distance from `from` toward `to` at which the camera would enter rock or one of the big whales
+   * (a capsule along each adult's body), or null. A whale the calf is already touching is ignored.
+   */
+  cameraHit(from, to) {
+    let best = this.world.raycast(from, to);
+    const dir = this._chDir || (this._chDir = new Vector3());
+    const a = this._chA || (this._chA = new Vector3()), b = this._chB || (this._chB = new Vector3());
+    const p = this._chP || (this._chP = new Vector3());
+    dir.subVectors(to, from);
+    const len = dir.length();
+    if (len < 1e-3) return best;
+    dir.divideScalar(len);
+    const segDist = (q) => {
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+      const t = clamp(((q.x - a.x) * abx + (q.y - a.y) * aby + (q.z - a.z) * abz) / (abx * abx + aby * aby + abz * abz || 1), 0, 1);
+      return Math.hypot(q.x - a.x - abx * t, q.y - a.y - aby * t, q.z - a.z - abz * t);
+    };
+    for (const w of this.herd.adults) {
+      const half = Math.max(0, w.L * 0.5 - w.radius);
+      a.copy(w.pos).addScaledVector(w.fwd, -half);
+      b.copy(w.pos).addScaledVector(w.fwd, half);
+      const rc = w.radius * 1.1;
+      if (segDist(from) < rc) continue;
+      if (Math.min(w.pos.distanceTo(from), w.pos.distanceTo(to)) > len + w.L) continue;
+      for (let t = 0; t <= len; t += 0.5) {
+        if (best !== null && t >= best) break;
+        if (segDist(p.copy(from).addScaledVector(dir, t)) < rc) { best = t; break; }
+      }
+    }
+    return best;
+  }
+
   /** Yields until the score's next beat (offset seconds earlier), so a voice lands on the music's grid. */
   *untilNextBeat(maxWait = 2, early = 0) {
     const ctx = this.audio.ctx;
@@ -900,7 +944,10 @@ export class Story {
     herd.mode = 'travel';
     herd.targetSpeed = 7;
     // through the wall the mother stays close and keeps calling
-    herd.motherScript = (m) => ({ target: calf.pos.clone().addScaledVector(calf.fwd, 14).add(new Vector3(-6, 3, 0)), speed: Math.max(7, calf.vel.length() + 1), arrive: 8, minSpeed: 3, lookAt: calf.pos });
+    herd.motherScript = () => {
+      const sA = clamp(herd.calfS + 25, herd.s - 40, herd.s + 40);
+      return { target: this.path.offsetAt(sA, -6, 3).lerp(calf.pos, 0.3), speed: Math.max(7, calf.vel.length() + 1), arrive: 8, minSpeed: 3, lookAt: calf.pos };
+    };
     let t = 0;
     while (herd.s < this.path.chapters[9].start - 40) {
       if (t > 6) { this.voiceCall(mom, 'answer'); t = 0; }
@@ -983,6 +1030,11 @@ export class Story {
       this.herd.steer(w, target, w.isCalf ? 7 : 6, dt, { arrive: 20, minSpeed: 3 });
       w.step(dt);
       this.voices.get(w)?.setPosition?.(w.pos);
+      const ht = this.humTimers.get(w);
+      if (ht !== undefined) {
+        const nt = ht - dt;
+        if (nt <= 0) { w.drive.hum = 0; this.humTimers.delete(w); } else this.humTimers.set(w, nt);
+      }
       w.animate(dt, cam);
     }
   }
@@ -990,6 +1042,8 @@ export class Story {
   // ---- the ending -----------------------------------------------------------------------
   *ending() {
     const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
+    // the finale cannot start under the pause menu (Resume would then be dead)
+    while (this.state === 'paused') yield 0;
     this.state = 'ending';
     const mt = this.world.motherTree || this.path.pointAt(11150);
     const center = mt.clone().add(new Vector3(0, 120, 0));
@@ -1079,7 +1133,7 @@ export class Story {
       const k = this.song.key();
       const deg = Math.round(clamp((this.player.aimPitch + 0.6) * 5, 0, 9));
       midi = k.rootMidi + 12 + k.scale[deg % 7] + 12 * Math.floor(deg / 7);
-      this.herd.calfHummed();
+      if (!this.song.active) this.herd.calfHummed();
     }
     this.voiceOf(calf).hum?.(midi, undefined, { gain: 1, glideFrom: midi - 2 });
     calf.drive.hum = 1;
@@ -1110,13 +1164,14 @@ export class Story {
   update(dt) {
     const g = this.game;
     // pause handling (eases time down/up)
-    if (g.timeScaleTarget !== undefined) g.timeScale = damp(g.timeScale, g.timeScaleTarget, 4, Math.max(dt, 0.016));
+    const ud = g.dtReal ?? Math.max(dt, 0.016);
+    if (g.timeScaleTarget !== undefined) g.timeScale = damp(g.timeScale, g.timeScaleTarget, 4, ud);
     if (g.input.pausePressed) {
       if (this.state === 'play') this.pause();
       else if (this.state === 'paused' && this.menu.page === 'pause') this.resume();
     }
     this.script.update(dt);
-    this.menu.update(Math.max(dt, 0.016));
+    this.menu.update(ud);
     if (this.state === 'menu') {
       this.menuT = (this.menuT || 0) + dt;
       this.menuShot(this.menuT);
@@ -1222,12 +1277,15 @@ export class Story {
       calf._syncTransform();
     }
     // bumping into the big whales (and nuzzling mother)
+    const ax = this._ax || (this._ax = new Vector3());
     for (const w of herd.whales) {
       if (w === calf) continue;
-      const d = calf.pos.distanceTo(w.pos);
-      const min = (calf.radius + w.radius) * 1.05;
+      // contact is with the body's axis (head to tail), not a sphere at the whale's centre
+      const rad = w.nearestOnBody ? w.nearestOnBody(calf.pos, ax) : (ax.copy(w.pos), w.radius);
+      const d = calf.pos.distanceTo(ax);
+      const min = (calf.radius + rad) * 1.05;
       if (d < min && d > 0.01) {
-        const n = this._v.copy(calf.pos).sub(w.pos).divideScalar(d);
+        const n = this._v.copy(calf.pos).sub(ax).divideScalar(d);
         calf.pos.addScaledVector(n, (min - d) * (w.isCalf ? 0.5 : 0.9));
         if (w.isCalf) w.pos.addScaledVector(n, -(min - d) * 0.5);
         const vn = calf.vel.dot(n);
@@ -1292,7 +1350,7 @@ export class Story {
     // camera
     if (playing || this.state === 'ending') {
       const opts = {};
-      if (herd.mode === 'gather' && herd.songCenter) { opts.lookBias = herd.songCenter; opts.lookBiasW = 0.25; opts.extraDist = 4; opts.busy = true; }
+      if (herd.mode === 'gather' && herd.songCenter) { opts.lookBias = herd.songCenter; opts.lookBiasW = 0.25; opts.lookBiasMax = 8; opts.extraDist = 4; opts.busy = true; }
       const fv = this.falcon && this.falcon.mode !== 'hidden' && this.falcon.group?.visible;
       if (herd.mode === 'protect' && fv) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.lookBiasMax = 6; opts.extraDist = 3; opts.busy = true; }
       if (fv && this.lookUpUntil && g.time < this.lookUpUntil) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.3; opts.lookBiasMax = 6; opts.busy = true; }
@@ -1306,7 +1364,7 @@ export class Story {
   /** Blossom petals from the Oasis trees, drifting on the breeze around the calf. */
   oasisPetals(dt) {
     const ch = this.path.chapters[this.chapterIndex];
-    if (!ch || ch.id !== 'oasis' || this.state === 'menu') return;
+    if (!ch || ch.id !== 'oasis' || !['play', 'paused', 'ending'].includes(this.state)) return;
     const g = this.game, calf = this.herd.calf;
     this.petalT = (this.petalT || 0) + dt;
     const wind = g.wind.base;

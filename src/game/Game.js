@@ -24,6 +24,8 @@ export class Game {
     this.params = new URLSearchParams(location.search);
     this.debug = this.params.has('debug');
     this.settings = loadSettings();
+    // automatic quality starts every session from the default; step-downs only last for the session
+    if (this.settings.autoQuality) this.settings.quality = 'high';
     const quality = this.params.get('quality') || this.settings.quality;
     this.engine = new Engine(canvas, quality, { preserve: this.debug });
     this.input = new Input(canvas);
@@ -35,7 +37,6 @@ export class Game {
     this.atmosphere.set(this.params.get('time') || 'menu');
     this.wind = new Wind();
     this.cloudSea = new CloudSea(this.engine);
-    this.engine.midPasses.push(this.cloudSea);
     this.clouds = new Clouds(this);
     this.mist = new Particles(this, { max: 2500, additive: false, name: 'mist', order: 20 });
     this.glow = new Particles(this, { max: 3000, additive: true, name: 'glow', order: 30 });
@@ -95,7 +96,9 @@ export class Game {
       p.cooldown = 3;
       p.calm = 0;
     } else if (avg < 1 / 50 && ++p.calm >= 4) {
-      p.ready = false; // settled
+      // smooth for a while: check less often, but keep watching for heavier chapters
+      p.calm = 0;
+      p.cooldown = 20;
     }
   }
 
@@ -147,6 +150,7 @@ export class Game {
       }
     };
     this.init().then(() => {
+      this.input.endFrame();
       if (this.params.has('warp')) this.warp(+this.params.get('warp'));
       this._last = performance.now();
       requestAnimationFrame(loop);
@@ -182,6 +186,7 @@ export class Game {
 
   update(dtReal) {
     this.governQuality(dtReal);
+    this.dtReal = this.fixedDt || dtReal;
     let dt = this.fixedDt || dtReal;
     dt *= this.timeScale;
     this.frame++;
@@ -199,7 +204,8 @@ export class Game {
     this.glow.update(dt);
     this.sky.update(cam);
     const post = this.engine.post.grade;
-    if (!this.debug && this.fadeRate) post.uFade.value = Math.max(0, Math.min(1, post.uFade.value + this.fadeRate * dt));
+    // fades run on real time, so pausing mid-fade never leaves the screen dark
+    if (!this.debug && this.fadeRate) post.uFade.value = Math.max(0, Math.min(1, post.uFade.value + this.fadeRate * this.dtReal));
     this.engine.render();
     if (this.frame === 2 && this.veil) this.veil.classList.add('gone');
     this.input.endFrame();

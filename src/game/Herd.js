@@ -288,6 +288,17 @@ export class Herd {
     const calfSpeed = calf.vel.length();
     care.callT -= dt;
     let target, speed;
+    // answer the calf's hums, whatever she is doing
+    if (care.answerAt > 0 && this.time >= care.answerAt) {
+      care.answerAt = -1;
+      this.voiceHooks?.(m, 'answer');
+      m.drive.happy = 1;
+      care.happyT = 3;
+    }
+    if (care.happyT > 0) {
+      care.happyT -= dt;
+      if (care.happyT <= 0) m.drive.happy = 0.3;
+    }
     if (this.motherScript) {
       // the story is directing her (demonstrations, cinematics)
       const r = this.motherScript(m, dt);
@@ -329,7 +340,9 @@ export class Herd {
       return;
     }
     if (this.mode === 'rest' || this.mode === 'sleep') {
-      target = calf.pos.clone().add(new Vector3(-9, 3, 4));
+      // she holds her place in the herd, leaning toward her calf (chasing the calf, who nestles
+      // against her, made the pair drift away from the herd)
+      target = this.slotWorld(m.slot).lerp(calf.pos, 0.25);
       this.steer(m, target, 3, dt, { arrive: 14 });
       m.drive.lookAt = calf.pos;
       m.drive.sleep = this.mode === 'sleep' ? 1 : damp(m.drive.sleep, 0, 1, dt);
@@ -366,17 +379,6 @@ export class Herd {
       const pace = Math.max(this.speed, Math.min(calfSpeed, 14)) + 1;
       this.steer(m, target, pace, dt, { arrive: 25, minSpeed: this.speed * 0.5 });
       m.drive.lookAt = Math.sin(this.time * 0.35) > -0.2 ? calf.pos : null;
-    }
-    // answer the calf's hums
-    if (care.answerAt > 0 && this.time >= care.answerAt) {
-      care.answerAt = -1;
-      this.voiceHooks?.(m, 'answer');
-      m.drive.happy = 1;
-      care.happyT = 3;
-    }
-    if (care.happyT > 0) {
-      care.happyT -= dt;
-      if (care.happyT <= 0) m.drive.happy = 0.3;
     }
   }
 

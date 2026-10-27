@@ -88,6 +88,8 @@ export class Engine {
     this.width = pw;
     this.height = ph;
     this.rt.setSize(pw, ph);
+    // setSize disposes the target's GPU state, and with it this override
+    this.renderer.properties.get(this.rt).__useRenderToTexture = false;
     this.post.setSize(pw, ph);
     for (const p of this.midPasses) p.setSize?.(pw, ph);
     this.camera.aspect = w / h;

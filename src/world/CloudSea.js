@@ -179,6 +179,15 @@ export class CloudSea {
     });
     this.pass = new FullscreenPass(mat);
     this.enabled = true;
+    // drawn first in the transparent pass (it reads the resolved scene depth like the puffs do),
+    // which saves a full-screen MSAA resolve every frame
+    this.pass.mesh.renderOrder = -100;
+    engine.sceneT.add(this.pass.mesh);
+    engine.beforeRender.push((cam) => {
+      this.uniforms.uInvProj.value.copy(cam.projectionMatrixInverse);
+      this.uniforms.uCamWorld.value.copy(cam.matrixWorld);
+      this.pass.mesh.visible = this.enabled;
+    });
   }
 
   setQuality(q) {
@@ -191,11 +200,4 @@ export class CloudSea {
     return this.uniforms.uSea.value.x + this.uniforms.uSea.value.y * 0.6;
   }
 
-  render(renderer, target, camera) {
-    if (!this.enabled) return;
-    const u = this.uniforms;
-    u.uInvProj.value.copy(camera.projectionMatrixInverse);
-    u.uCamWorld.value.copy(camera.matrixWorld);
-    this.pass.render(renderer, target);
-  }
 }

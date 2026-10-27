@@ -3,7 +3,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const [query = '', out = 'tools/out/probe.png', waitFrames = '3', width = '480', height = '270'] = process.argv.slice(2);
-const url = `http://127.0.0.1:5173/?${query}&frames=${waitFrames}`;
+const url = `${process.env.BASE || 'http://127.0.0.1:5173/'}?${query}&frames=${waitFrames}`;
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: +width, height: +height } });
 page.on('console', (m) => console.log(`[${m.type()}] ${m.text().slice(0, 600)}`));

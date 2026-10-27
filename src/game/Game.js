@@ -19,6 +19,7 @@ const DEV_TESTS = import.meta.env.DEV ? import.meta.glob('../dev/*.js') : {};
 export class Game {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
+    this.opts = opts;
     this.veil = opts.veil;
     this.params = new URLSearchParams(location.search);
     this.debug = this.params.has('debug');
@@ -134,7 +135,16 @@ export class Game {
       requestAnimationFrame(loop);
       const dt = Math.min(0.05, Math.max(0.0001, (now - this._last) / 1000));
       this._last = now;
-      if (this.ready) this.update(dt);
+      if (!this.ready) return;
+      try {
+        this.update(dt);
+      } catch (e) {
+        // keep flying: report the first failure, then carry on with the next frame
+        if (!this._frameError) console.error(e);
+        this._frameError = true;
+        window.__skysongError = String(e && e.stack || e);
+        this.input.endFrame();
+      }
     };
     this.init().then(() => {
       if (this.params.has('warp')) this.warp(+this.params.get('warp'));
@@ -143,6 +153,7 @@ export class Game {
     }).catch((e) => {
       console.error(e);
       window.__skysongError = String(e && e.stack || e);
+      this.opts.onError?.(e);
     });
   }
 

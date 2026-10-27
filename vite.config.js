@@ -7,6 +7,7 @@ export default defineConfig({
     outDir: 'dist',
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 4000,
+    modulePreload: { polyfill: false },
     rolldownOptions: {
       output: {
         // one self-contained bundle: simplest to host anywhere

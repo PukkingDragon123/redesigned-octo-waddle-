@@ -171,6 +171,8 @@ export class WhaleModel {
       uMark2: { value: c(g.mark2 || '#ffffff') },
       uPattern: { value: new Vector4(0, 0, 0, 0) },
       uEyeLoc: { value: new Vector4(P.eyeT, 0.3, P.eyeR * 1.6, 0) },
+      // x lip seam ring parameter, y jaw hinge t, z ink strength, w line width (ring units)
+      uMouthLine: { value: new Vector4(10 / 48, P.hinge, g.calf ? 0.75 : 0.55, g.calf ? 0.007 : 0.0045) },
       uSeed: { value: (g.seed || 1) * 0.37 % 10 },
       uGarden: { value: g.garden ? 1 : 0 },
       uBlush: { value: new Color(g.blush || '#ff9a9a') },
@@ -381,20 +383,20 @@ export class WhaleModel {
       // calves wear a fluffy cowlick on the crown of the head
       if (isCalf) fur *= 1 + 1.3 * smoothstep(0.7, 0.95, dorsal) * smoothstep(P.hinge - 0.02, P.hinge + 0.03, t) * (1 - smoothstep(P.eyeT + 0.02, P.eyeT + 0.07, t));
       // none on the face front / lips / around eyes
-      if (t > P.hinge - 0.01) {
-        const lip = Math.abs(absTh - rp.thM);
-        fur *= smoothstep(0.08, 0.35, lip);
-        fur *= 1 - smoothstep(isCalf ? 0.9 : 0.93, isCalf ? 0.97 : 0.985, t);
-      }
+      // bare lips: a narrow band along the mouth line, fading in at the corner
+      const lipK = smoothstep(P.hinge - 0.03, P.hinge + 0.02, t);
+      if (lipK > 0) fur *= 1 - lipK * (1 - smoothstep(0.03, 0.16, Math.abs(absTh - rp.thM)));
+      if (t > P.hinge) fur *= 1 - smoothstep(isCalf ? 0.88 : 0.9, isCalf ? 0.97 : 0.985, t);
       const dEye = Math.hypot((t - eyeT) / (P.eyeR * 1.15), (absTh - eyeTh) / (P.eyeR * 7.0));
       fur *= smoothstep(1.0, 1.6, dEye);
       // buoyancy sacs (lower flanks)
-      const sac = Math.max(0, 1 - ((t - 0.46) / 0.11) ** 2) * Math.max(0, 1 - ((absTh - 2.2) / 0.42) ** 2);
-      const sacM = smoothstep(0.0, 0.5, sac);
-      fur *= 1 - sacM;
+      // an elliptical dome; fur thins over it rather than stopping at an edge
+      const sac = Math.max(0, 1 - ((t - 0.46) / 0.11) ** 2 - ((absTh - 2.2) / 0.42) ** 2);
+      const sacM = smoothstep(0.0, 0.6, sac);
+      fur *= 1 - smoothstep(0.1, 0.9, sac) * 0.85;
       // gills
       const gill = smoothstep(gTA - 0.006, gTA + 0.004, t) * (1 - smoothstep(gTB - 0.004, gTB + 0.006, t)) * smoothstep(1.2, 1.38, absTh) * (1 - smoothstep(2.0, 2.2, absTh));
-      fur *= 1 - gill * 0.95;
+      fur *= 1 - gill * 0.6; // short fur over the gill slits, which show through it
       // throat pleats
       const throat = smoothstep(P.joints.neck - 0.08, P.joints.neck - 0.02, t) * smoothstep(-0.55, -0.85, dorsal) * (1 - smoothstep(0.95, 0.99, t));
       fur *= 1 - throat * 0.9;
@@ -810,46 +812,27 @@ export class WhaleModel {
     const pos = [], nor = [], fr = [], idx = [];
     const count = 3;
     for (let f = 0; f < count; f++) {
-      const fl = len * (1 - f * 0.18);
-      const nS = 10;
-      const rad = fl * 0.07;
-      // stalk: a flat-ish tapered ribbon curving back and outward (local: -Z back, +X out)
-      const stalk = [];
-      for (let i = 0; i <= nS; i++) {
-        const a = i / nS;
-        const cx = a * fl * 0.42 + Math.sin(a * 2.2) * fl * 0.06; // angled back and away from the body
-        const cy = (f - 1) * fl * 0.32 * (1 - a * 0.3) + Math.sin(a * 2.0) * fl * 0.05;
-        const cz = -a * fl;
-        stalk.push([cx, cy, cz, a]);
-      }
+      // Each frond is one feathery ribbon (axolotl-like external gill): the barbs are cut
+      // out in the shader, so the outline stays soft at any distance. The three fan out.
+      const fl = len * (1 - Math.abs(f - 1) * 0.16);
+      const nS = 14;
       const base = pos.length / 3;
       for (let i = 0; i <= nS; i++) {
-        const [cx, cy, cz, a] = stalk[i];
-        const w = rad * (1 - a * 0.75);
+        const a = i / nS;
+        // lift away from the cheek, then sweep back; the outer two splay up and down
+        const cx = (0.12 + a * 0.55) * fl * Math.sin(Math.min(1, a * 1.6) * 1.4) + (f - 1) * fl * 0.03;
+        const cy = (f - 1) * (fl * 0.08 + a * fl * 0.62) + Math.sin(a * 2.0) * fl * 0.05;
+        const cz = -a * fl * 0.92;
+        const w = fl * (0.04 + 0.19 * Math.pow(Math.sin(Math.PI * Math.min(1, a * 0.85 + 0.12)), 0.8));
         for (const side of [-1, 1]) {
           pos.push(cx, cy + side * w, cz);
           nor.push(1, 0, 0);
-          fr.push(a, 0, f);
+          fr.push(a, side, f);
         }
       }
       for (let i = 0; i < nS; i++) {
         const a = base + i * 2, b = a + 1, c = a + 2, d = a + 3;
         idx.push(a, c, b, b, c, d);
-      }
-      // fringe filaments on both edges (feathery)
-      for (let i = 1; i <= nS; i++) {
-        const [cx, cy, cz, a] = stalk[i];
-        const flen = fl * 0.28 * Math.sin(Math.PI * Math.min(1, a * 1.05)) + fl * 0.03;
-        for (const side of [-1, 1]) {
-          const b0 = pos.length / 3;
-          const tipY = cy + side * flen;
-          const tipZ = cz - flen * 0.55;
-          const ww = rad * 0.45;
-          pos.push(cx, cy, cz + ww, cx, cy, cz - ww, cx + flen * 0.08, tipY, tipZ);
-          nor.push(1, 0, 0, 1, 0, 0, 1, 0, 0);
-          fr.push(a, 0.05, f, a, 0.05, f, a, 1, f);
-          idx.push(b0, b0 + 1, b0 + 2);
-        }
       }
     }
     geo = new BufferGeometry();
@@ -867,6 +850,7 @@ export class WhaleModel {
       uFlowDir: { value: new Vector3(0, 0, -1) },
       uFrondCol: { value: new Color(g.frond || '#ff9f9a') },
       uFrondTip: { value: new Color(g.frondTip || '#ffd2c4') },
+      uFrondRoot: { value: new Color(g.back).lerp(new Color(g.frond || '#ff9f9a'), 0.3) },
       uFlareF: { value: 0.3 },
     };
     this.frondU = fu;
@@ -880,6 +864,7 @@ export class WhaleModel {
         vertexShader: FROND_VERT, fragmentShader: FROND_FRAG,
         uniforms: Object.assign({}, G, fu), side: DoubleSide,
       });
+      mat.alphaToCoverage = true;
       const mesh = new Mesh(geo, mat);
       mesh.name = 'fronds' + s;
       mesh.frustumCulled = false;
@@ -903,7 +888,8 @@ export class WhaleModel {
 
   // ---- fur shells ------------------------------------------------------------------------------
   _buildFur() {
-    const shells = this.g.calf ? 22 : 12;
+    // the LOD in Whale.animate draws only as many as the fur's height on screen needs
+    const shells = this.g.calf ? 24 : 20;
     this.maxShells = shells;
     if (this.cache.furGeo) {
       this.furTriPerShell = this.cache.furTriPerShell;

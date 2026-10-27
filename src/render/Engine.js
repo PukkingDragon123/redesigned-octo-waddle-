@@ -97,6 +97,9 @@ export class Engine {
 
   render() {
     const r = this.renderer;
+    // count every pass of the frame, not just the last one
+    r.info.autoReset = false;
+    r.info.reset();
     const cam = this.camera;
     cam.updateMatrixWorld();
     G.uCamPos.value.setFromMatrixPosition(cam.matrixWorld);

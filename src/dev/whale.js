@@ -29,6 +29,9 @@ export default async function (game) {
     momq: [[10, 112, 12], [-16, 98, -22]],
     momtop: [[-16, 140, -22.01], [-16, 98, -22]],
     calftop: [[0, 109, 0.01], [0, 100, 0]],
+    momface: [[-6, 99.5, -8], [-14, 98.6, -14.5]],
+    momcheek: [[-9.5, 99.2, -11], [-13.6, 98.8, -15]],
+    momfront: [[-14, 99.5, -2], [-16, 98.6, -14]],
   };
   const v = views[p.get('view') || 'side'] || views.side;
   game.cameraRig.setCinematic({ pos: { x: 0 }, look: {} }, 1);

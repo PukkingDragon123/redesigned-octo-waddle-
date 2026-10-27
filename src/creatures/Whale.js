@@ -150,12 +150,12 @@ export class Whale {
   /** Animate (call after step). */
   animate(dt, camPos) {
     const d = camPos ? this.pos.distanceTo(camPos) : 0;
-    // level of detail for fur and facial animation
-    const furNear = this.isCalf ? 30 : 140;
-    const furFar = this.isCalf ? 120 : 520;
-    const k = 1 - smoothstep(furNear, furFar, d);
+    // level of detail for fur and facial animation: about one shell per pixel of fur
+    // height on screen (mane fur is longer), so layers never separate at silhouettes
+    const furFar = this.isCalf ? 160 : 620;
+    const furPx = (this.model.u.uFurLen.value * 1.6 * Whale.pxPerRad) / Math.max(d, 0.5);
     const max = this.model.maxShells * (this.furQuality ?? 1);
-    this.model.setFurShells(Math.ceil(max * (0.25 + 0.75 * k) * (d < furFar ? 1 : 0)));
+    this.model.setFurShells(d < furFar && furPx > 0.5 ? Math.ceil(clamp(furPx * 1.5, 4, max)) : 0);
     this.lod = d < (this.isCalf ? 60 : 250) ? 0 : d < (this.isCalf ? 200 : 900) ? 1 : 2;
     const dr = this.drive;
     const s = this._animState || (this._animState = {});
@@ -181,3 +181,6 @@ export class Whale {
     this.anim.update(dt, s, this.lod);
   }
 }
+
+/** Screen pixels per radian at the centre of the view; kept current by the game loop. */
+Whale.pxPerRad = 1100;

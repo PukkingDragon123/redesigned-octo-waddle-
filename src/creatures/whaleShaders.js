@@ -139,6 +139,7 @@ uniform float uThroat;
 uniform vec3 uGillColor;
 uniform vec3 uMouthColor;
 uniform float uFurShade;
+uniform vec4 uMouthLine;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec2 vLoft;
@@ -156,6 +157,17 @@ void main() {
   vec3 albedo = whaleAlbedo(vLoft, vUvw, dorsal);
   // Under the fur the skin is a touch darker so shells read as depth.
   albedo *= mix(1.0, uFurShade, smoothstep(0.05, 0.4, vMask.x));
+  // Anime mouth line: the lip seam, curling up into a soft smile crease past the corner.
+  if (vInner < 0.5) {
+    float tt = vLoft.x;
+    float behind = clamp((uMouthLine.y - tt) / 0.035, 0.0, 1.0);
+    float sLine = uMouthLine.x + behind * behind * 0.035;
+    float on = smoothstep(uMouthLine.y - 0.038, uMouthLine.y - 0.022, tt) * (1.0 - smoothstep(0.975, 0.995, tt));
+    float w = uMouthLine.w * mix(1.0, 0.35, behind);
+    float d = abs(min(vLoft.y, 1.0 - vLoft.y) - sLine);
+    float ink = smoothstep(w, w * 0.25, d) * on;
+    albedo = mix(albedo, albedo * vec3(0.38, 0.3, 0.36), ink * uMouthLine.z);
+  }
   float trans = 0.05;
   float spec = 0.12;
   float rim = 0.55;
@@ -312,7 +324,8 @@ void main() {
   // soft plush clumps rather than needles: gentle taper, wide soft edge
   float radius = mix(0.78, 0.3, pow(h / strandLen, 1.3));
   float cov = smoothstep(radius, radius - 0.32, d);
-  cov = max(cov, smoothstep(0.38, 0.0, h) * 0.95);
+  // the dense undercoat thins out where the fur does, so fur fades into bare skin
+  cov = max(cov, smoothstep(0.38, 0.0, h) * 0.95 * smoothstep(0.03, 0.3, vFur));
   cov *= 1.0 - smoothstep(0.82, 1.0, h / strandLen) * 0.6;
   if (cov < 0.05) discard;
   #ifdef DEPTH_PASS
@@ -524,7 +537,7 @@ void main() {
 export const FROND_VERT = /* glsl */ `
 ${UNIFORMS}
 ${NOISE}
-attribute vec3 aFrond;  // x along stalk 0..1, y fringe 0..1 (0 = stalk), z frond index
+attribute vec3 aFrond;  // x along stalk 0..1, y across the ribbon -1..1, z frond index
 uniform float uFlare;
 uniform float uStream;
 uniform float uWiggle;
@@ -558,6 +571,7 @@ ${SHADOW}
 ${LIGHTING}
 uniform vec3 uFrondCol;
 uniform vec3 uFrondTip;
+uniform vec3 uFrondRoot;
 uniform float uFlareF;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
@@ -567,17 +581,33 @@ void main() {
     gl_FragColor = vec4(1.0);
     return;
   #endif
+  float a = vFrond.x;
+  float y = abs(vFrond.y);
+  // central stalk
+  float rachis = smoothstep(0.15, 0.07, y) * (1.0 - smoothstep(0.9, 0.99, a));
+  // soft barbs sweeping back toward the tip, each ending in a rounded point
+  float u = a * 16.0 - y * 1.7 + vFrond.z * 0.37 + sin(uTime * 3.0 + a * 9.0 + vFrond.z) * 0.06 * uFlareF;
+  float barbId = floor(u);
+  float stripe = abs(fract(u) - 0.5);
+  float thick = mix(0.36, 0.16, y);
+  float barb = smoothstep(thick, thick - 0.14, stripe);
+  float reach = 0.78 + 0.22 * hash12(vec2(barbId, vFrond.z + 3.0));
+  barb *= smoothstep(reach, reach - 0.16, y);
+  float cov = max(rachis, barb) * smoothstep(1.0, 0.88, a + y * 0.1);
+  if (cov < 0.1) discard;
+  vec3 albedo = mix(uFrondRoot, uFrondCol, smoothstep(0.0, 0.3, a));
+  albedo = mix(albedo, uFrondTip, smoothstep(0.35, 0.95, y) * 0.75 + smoothstep(0.55, 1.0, a) * 0.25);
+  albedo *= mix(0.86, 1.0, rachis) * (1.0 + uFlareF * 0.12);
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;
-  vec3 albedo = mix(uFrondCol, uFrondTip, smoothstep(0.2, 1.0, vFrond.y) * 0.8 + vFrond.x * 0.2);
-  albedo *= 1.0 + uFlareF * 0.15;
   Surface s = makeSurface(albedo, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
-  s.rim = 0.6;
-  s.trans = 1.2;
-  s.wrap = 0.3;
+  s.ao = mix(0.7, 1.0, smoothstep(0.0, 0.4, a));
+  s.rim = 0.5;
+  s.trans = 1.1;
+  s.wrap = 0.35;
   vec3 col = stylizedLight(s);
   col = applyFog(col, vWorldPos);
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(col, cov);
 }
 `;

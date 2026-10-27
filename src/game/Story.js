@@ -69,7 +69,7 @@ export class Story {
     const g = this.game;
     try {
       await Promise.race([
-        document.fonts?.load('300 96px "Cormorant Garamond"'),
+        Promise.all(['300 96px', '400 96px', 'italic 400 96px'].map((f) => document.fonts?.load(`${f} "Cormorant Garamond"`))),
         new Promise((r) => setTimeout(r, 2500)),
       ]);
     } catch (e) { /* fonts unavailable: fall back to Georgia */ }
@@ -368,20 +368,24 @@ export class Story {
     this.audio.setMood?.('dawn', { fade: 6 });
     // glide from the wide drift down to the sleeping calf, nestled by its mother
     const from = this.shot.pos.clone(), fromLook = this.shot.look.clone();
+    const close = new Vector3(), focus = new Vector3();
+    const frameCalf = (k) => {
+      // the calf's face from the side away from its mother, her furry flank behind it
+      const side = mom.pos.clone().sub(calf.pos).dot(calf.right) > 0 ? -1 : 1;
+      close.copy(calf.pos).addScaledVector(calf.right, side * 7.2).addScaledVector(calf.fwd, 5.4).add(new Vector3(0, 1.5, 0));
+      focus.copy(calf.pos).addScaledVector(calf.fwd, 0.8).add(new Vector3(0, 0.4, 0)).lerp(mom.pos, 0.1);
+      this.shot.pos.copy(from).lerp(close, k);
+      this.shot.look.copy(fromLook).lerp(focus, k);
+      this.shot.fov = lerp(46, 40, k);
+    };
     let t = 0;
     const T = 9;
     while (t < T) {
-      const k = easeInOut(clamp(t / T, 0, 1));
-      // frame the calf's face from the side away from its mother, her great eye behind
-      const toMom = mom.pos.clone().sub(calf.pos);
-      const side = toMom.dot(calf.right) > 0 ? -1 : 1;
-      const close = calf.pos.clone().addScaledVector(calf.right, side * 5.2).addScaledVector(calf.fwd, 4.2).add(new Vector3(0, 0.9, 0));
-      this.shot.pos.copy(from).lerp(close, k);
-      const focus = calf.pos.clone().addScaledVector(calf.fwd, 0.9).add(new Vector3(0, 0.3, 0)).lerp(mom.pos, 0.12);
-      this.shot.look.copy(fromLook).lerp(focus, k);
-      this.shot.fov = lerp(46, 38, k);
+      frameCalf(easeInOut(clamp(t / T, 0, 1)));
       t += yield 0;
     }
+    // hold the framing on the calf, which bobs with its mother's breathing, until hand-over
+    this.script.run((function* () { for (;;) { frameCalf(1); yield 0; } })(), 'introCam');
     this.menu.hide();
     // the mother hums the calf awake
     this.voiceCall(mom, 'answer');
@@ -418,6 +422,7 @@ export class Story {
     mom.drive.sleep = 0;
     yield 1.4;
     // hand over to the player without a cut
+    this.script.cancel('introCam');
     this.state = 'play';
     this.player.enabled = true;
     this.player.syncAim();
@@ -1056,10 +1061,12 @@ export class Story {
       calf.drive.effort = 0;
       calf.drive.glide = 0.2;
       if (this.state === 'menu' || this.state === 'intro') {
-        // nestle beside the mother
-        const spot = herd.mother.pos.clone().addScaledVector(herd.mother.right, 7).add(new Vector3(0, -3, 2));
-        calf.vel.lerp(spot.sub(calf.pos).multiplyScalar(0.5), 1 - Math.exp(-dt * 1.5));
-        calf.ctl.targetYaw = herd.mother.yaw;
+        // nestle against the mother's cheek, just under her eye and clear of her fin, drifting with her
+        const mom = herd.mother;
+        const spot = mom.pos.clone().addScaledVector(mom.right, 0.2 * mom.L).addScaledVector(mom.fwd, 0.36 * mom.L).addScaledVector(mom.up, -0.03 * mom.L);
+        const want = spot.sub(calf.pos).multiplyScalar(0.9).add(mom.vel);
+        calf.vel.lerp(want, 1 - Math.exp(-dt * 2.5));
+        calf.ctl.targetYaw = mom.yaw;
       }
       if (this.state === 'ending') {
         const spot = herd.songCenter ? herd.songCenter.clone().add(new Vector3(-8, -2, 30)) : calf.pos;

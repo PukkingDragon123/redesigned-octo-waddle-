@@ -11,6 +11,7 @@ import { CloudSea } from '../world/CloudSea.js';
 import { Clouds } from '../world/Clouds.js';
 import { Wind } from '../world/Wind.js';
 import { Particles } from '../render/Particles.js';
+import { Whale } from '../creatures/Whale.js';
 
 // Dev scenes are only bundled in development builds.
 const DEV_TESTS = import.meta.env.DEV ? import.meta.glob('../dev/*.js') : {};
@@ -148,6 +149,7 @@ export class Game {
     this.simulate(dt);
     const cam = this.engine.camera;
     cam.updateMatrixWorld();
+    Whale.pxPerRad = this.engine.height / (2 * Math.tan((cam.fov * Math.PI) / 360));
     this.engine.shadowFocus.copy(this.focus);
     this.clouds.uniforms.uDrift.value.copy(this.wind.drift);
     this.clouds.update(dt, cam, this.focus);

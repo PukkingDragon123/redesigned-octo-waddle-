@@ -32,10 +32,11 @@ void main() {
   float halo = t.r; // red channel holds the blurred glow
   float d = n(vUv * vec2(18.0, 5.0) + uTime * 0.3);
   float keep = smoothstep(uDissolve - 0.08, uDissolve + 0.08, d);
-  // crisp letters over a faint dark halo (legible on bright skies) plus a soft glow on hover
-  float shadowA = halo * 0.28 * uOpacity * keep;
+  // crisp letters over a soft dark halo (legible on bright dawn skies) plus a glow on hover.
+  // Letters are slightly over-bright so they still read as white after tone mapping.
+  float shadowA = halo * 0.46 * uOpacity * keep;
   float textA = core * uOpacity * keep;
-  vec3 col = uTint * (1.0 + uGlow * 0.3) * textA + uTint * halo * uGlow * 0.35 * uOpacity * keep;
+  vec3 col = uTint * 1.3 * (1.0 + uGlow * 0.3) * textA + uTint * halo * uGlow * 0.3 * uOpacity * keep;
   float a = max(textA, shadowA);
   gl_FragColor = vec4(col, a);
 }
@@ -72,7 +73,7 @@ function makeTextTexture(text, size = 96, opts = {}) {
   draw(0, 'rgba(255,255,255,1)');
   const crisp = ctx.getImageData(0, 0, c.width, c.height);
   ctx.clearRect(0, 0, c.width, c.height);
-  draw(size * 0.18, 'rgba(255,255,255,1)');
+  draw(size * 0.22, 'rgba(255,255,255,1)');
   const glow = ctx.getImageData(0, 0, c.width, c.height);
   const out = ctx.createImageData(c.width, c.height);
   for (let i = 0; i < out.data.length; i += 4) {
@@ -154,8 +155,8 @@ export class Menu {
     this.anchorQ = new Quaternion();
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
-    this.title = new TextItem('SKYSONG', 5.6, { size: 150, weight: 300, spacing: 0.32 });
-    this.subtitle = new TextItem('a journey home across the sky', 1.3, { size: 72, italic: true, weight: 300, spacing: 0.06 });
+    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 300, spacing: 0.32 });
+    this.subtitle = new TextItem('a journey home across the sky', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
   }
@@ -217,13 +218,15 @@ export class Menu {
       ];
     }
     const small = page === 'controls';
-    const h = small ? 1.2 : page === 'settings' ? 1.6 : 2.0;
-    const gap = small ? 1.7 : page === 'settings' ? 2.25 : 2.9;
+    const h = small ? 2.1 : page === 'settings' ? 2.7 : 3.5;
+    const gap = small ? 2.75 : page === 'settings' ? 3.5 : 4.5;
+    // under the title on the main and pause pages, vertically centred elsewhere
+    const top = page === 'main' || page === 'pause' ? 0 : (entries.length - 1) * gap * 0.5;
     entries.forEach(([label, action], i) => {
-      const it = new TextItem(label, h, { size: small ? 64 : 88, weight: 300, spacing: 0.08, dim: action === null });
+      const it = new TextItem(label, h, { size: small ? 64 : 88, weight: 400, spacing: 0.07, dim: action === null });
       it.action = action;
-      it.mesh.position.set(0, -i * gap, 0);
-      it.baseY = -i * gap;
+      it.mesh.position.set(0, top - i * gap, 0);
+      it.baseY = top - i * gap;
       it.index = i;
       this.group.add(it.mesh);
       this.items.push(it);
@@ -234,8 +237,8 @@ export class Menu {
     const showTitle = page === 'main' || page === 'pause';
     this.title.targetOpacity = showTitle ? 1 : 0;
     this.subtitle.targetOpacity = page === 'main' ? 0.85 : 0;
-    this.title.mesh.position.set(0, 7.0, 0);
-    this.subtitle.mesh.position.set(0, 3.9, 0);
+    this.title.mesh.position.set(0, 8.2, 0);
+    this.subtitle.mesh.position.set(0, 4.9, 0);
     // left-align items under the title
     const left = -this.title.width * 0.5;
     for (const it of this.items) it.mesh.position.x = left + it.width * 0.5 + 0.4;
@@ -280,10 +283,15 @@ export class Menu {
   update(dt) {
     this.t += dt;
     const g = this.game, inp = g.input, cam = g.engine.camera;
-    // float in front of the camera, slightly left of centre, lagging gently
+    // float in front of the camera in the left third, lagging gently; narrow screens shrink it
     const fwd = cam.getWorldDirection(new Vector3());
     const right = new Vector3().crossVectors(fwd, new Vector3(0, 1, 0)).normalize();
-    const target = cam.position.clone().addScaledVector(fwd, this.dist).addScaledVector(right, -this.dist * 0.36).add(new Vector3(0, -this.dist * 0.04, 0));
+    const halfH = this.dist * Math.tan((cam.fov * Math.PI) / 360);
+    const halfW = halfH * cam.aspect;
+    const fit = Math.min(1, (halfW * 1.45) / this.title.width, (halfH * 1.7) / 26);
+    this.group.scale.setScalar(fit);
+    const across = -halfW * 0.86 + this.title.width * 0.5 * fit;
+    const target = cam.position.clone().addScaledVector(fwd, this.dist).addScaledVector(right, across).add(new Vector3(0, -this.dist * 0.04, 0));
     if (this.anchor.lengthSq() === 0) this.anchor.copy(target);
     this.anchor.lerp(target, 1 - Math.exp(-dt * 2.2));
     this.group.position.copy(this.anchor);

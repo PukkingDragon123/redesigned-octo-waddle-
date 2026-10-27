@@ -149,6 +149,7 @@ void main() {
 const MEMBRANE_FRAG = /* glsl */ `
 ${UNIFORMS}
 ${NOISE}
+${SHADOW}
 ${LIGHTING}
 ${DEPTH}
 uniform vec3 uJMem[4];
@@ -192,6 +193,8 @@ void main() {
     trans = 1.4; rim = 0.6; spec = 0.2;
   }
   Surface s = makeSurface(albedo, N, vWorldPos);
+  // sampled outside the bell toward the sun so the jelly's own (inflated) core shadow is skipped
+  s.shadow = sampleShadow(vCoreC + uSunDir * vSize * 1.5, uSunDir);
   s.rim = rim;
   s.trans = trans;
   s.spec = spec;

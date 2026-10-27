@@ -397,7 +397,7 @@ export function buildBirdGeometry() {
       const n = [Math.sin(a), Math.cos(a), 0.3];
       ring.push(B.v([base[0] + Math.sin(a) * 0.012, base[1] + Math.cos(a) * 0.01, base[2]], n, { aB: [2, 0, 0, 0] }));
     }
-    for (let k = 0; k < 4; k++) B.tri(ring[k], ring[(k + 1) % 4], t);
+    for (let k = 0; k < 4; k++) B.tri(ring[k], t, ring[(k + 1) % 4]);
   }
   // tail: long, narrow, slightly spread fan (both faces)
   {

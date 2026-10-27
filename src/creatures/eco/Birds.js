@@ -374,9 +374,15 @@ export class BirdSystem {
   }
 
   _perchPos(b, info, out) {
-    const o = b.off;
-    const h = info.lift - info.curve * (o.x * o.x + 0.3 * o.z * o.z) + 0.07 * b.scale;
-    return out.copy(b.roost.pos).addScaledVector(info.up, h).addScaledVector(info.right, o.x).addScaledVector(info.fwd, o.z);
+    const o = b.off, w = b.roost;
+    let h;
+    if (w.model?.prof && w.L) {
+      // a whale: sit on its real back (superellipse section, girth), nestled in the fur, riding the body bob
+      const pr = w.model.prof(clamp(0.55 + o.z / w.L, 0.05, 0.95)); // 0.55 = WhaleModel T_ORIGIN
+      const u = Math.min(1, Math.abs(o.x) / Math.max(pr.hw, 1e-3));
+      h = pr.top * Math.pow(1 - Math.pow(u, 2.25), 1 / 2.25) + pr.cy + w.model.u.uFurLen.value * 0.6 + (w.anim?.bodyBob ?? 0) + 0.08 * b.scale;
+    } else h = info.lift - info.curve * (o.x * o.x + 0.3 * o.z * o.z) + 0.07 * b.scale;
+    return out.copy(w.pos).addScaledVector(info.up, h).addScaledVector(info.right, o.x).addScaledVector(info.fwd, o.z);
   }
 
   _pickPerch(b, roosts, time, dt) {

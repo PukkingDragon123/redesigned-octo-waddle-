@@ -18,6 +18,7 @@ export class Ambience {
     this.t = 0;
     this.rng = makeRng((sys.seed || 1) * 13 + 5);
     this.nextThunder = 8;
+    this.weatherOn = -1;
     this.nextTwinkle = 1;
     this.nextBird = 2;
     this.gust = 0;
@@ -188,6 +189,14 @@ export class Ambience {
         const d = 1500 + r() * 4500;
         sys.sfx('thunder', { position: { x: L.x + Math.cos(a) * d, y: L.y + 200 + r() * 400, z: L.z + Math.sin(a) * d }, gain: 0.5 + 0.4 * s.storm });
       }
+    }
+    // weather gate: thunder still on its way when the storm ends is muted with it
+    // (set on change only: with nothing playing through it the gate's params are not processed)
+    const wx = s.storm > 0.05 ? 1 : 0;
+    if (wx !== this.weatherOn) {
+      this.weatherOn = wx;
+      glide(sys.bus.weather.gain, wx, now, 0.3);
+      glide(sys.bus.weatherWet.gain, wx, now, 0.3);
     }
 
     // inside a cloud: a soft hush (the muffling itself is a bus filter)

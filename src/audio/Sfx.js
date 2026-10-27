@@ -374,6 +374,7 @@ export class Sfx {
     const end = t0 + roll + 1;
     // direction only: distance is handled here (crack fades faster than rumble)
     const ctx = this.ctx;
+    const bus = this.sys.bus;
     const input = this._gain(1, nodes);
     if (pos) {
       const p = ctx.createPanner();
@@ -384,12 +385,12 @@ export class Sfx {
         p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z;
       } else p.setPosition(pos.x, pos.y, pos.z);
       input.connect(p);
-      p.connect(this.sys.bus.sfx);
+      p.connect(bus.weather);
       nodes.push(p);
-    } else input.connect(this.sys.bus.sfx);
+    } else input.connect(bus.weather);
     const w = this._gain(0.4, nodes);
     input.connect(w);
-    w.connect(this.sys.bus.worldWet);
+    w.connect(bus.weatherWet);
     const amp = this._gain(gain, nodes);
     amp.connect(input);
     const crackG = 0.9 / Math.pow(1 + d / 500, 1.5);
@@ -431,7 +432,7 @@ export class Sfx {
   _lightningCrack(t, gain, pitch, pos) {
     const nodes = [];
     const end = t + 2.2;
-    const out = this._out(t, pos, nodes, { ref: 80, airK: 600, wet: 0.5 });
+    const out = this._out(t, pos, nodes, { ref: 80, airK: 600, wet: 0.5, weather: true });
     const amp = this._gain(gain * 1.0, nodes);
     amp.connect(out);
     const n = this._noise('white', t, t + 0.6, nodes);

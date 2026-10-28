@@ -12,7 +12,7 @@ for (const ch of list) {
   page.on('console', (m) => { if (m.type() === 'error' || m.text().includes('script error')) errs.push(m.text().slice(0, 300)); });
   page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
   const t0 = Date.now();
-  await page.goto(`http://127.0.0.1:5173/?debug&chapter=${ch}&auto&dt=0.05&warp=${warp}&frames=1`, { waitUntil: 'load' });
+  await page.goto(`${process.env.BASE || 'http://127.0.0.1:5173/'}?debug&chapter=${ch}&auto&dt=0.05&warp=${warp}&frames=1`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__skysongError || (window.__skysong && window.__skysong.halted), null, { timeout: 900000, polling: 500 }).catch((e) => errs.push('timeout'));
   const st = await page.evaluate(() => {
     const g = window.__skysong; if (!g || !g.story) return { err: window.__skysongError };

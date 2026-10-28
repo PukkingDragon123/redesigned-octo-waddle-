@@ -281,7 +281,9 @@ vec3 waterSubmerge(vec3 col, vec3 P) {
   float dd = max(d, 0.0);
   vec3 Td = exp(-uWaterAbsorb * (dd * 1.15 + 0.4));
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
-  float k = uWaterParams.x * sunUp * smoothstep(0.1, 1.4, dd) * exp(-dd * 0.05);
+  // filaments finer than a pixel would alias into a regular net: fade them with distance
+  float far = 1.0 - smoothstep(30.0, 110.0, length(P - uCamPos));
+  float k = uWaterParams.x * sunUp * smoothstep(0.1, 1.4, dd) * exp(-dd * 0.05) * far;
   // focusing moves light around rather than adding it: dim between the filaments
   float cs = k > 0.002 ? (waterCaustics(P, dd) * 1.5 - 0.32) * k : 0.0;
   vec3 lit = col * Td * (1.0 + cs);
@@ -290,7 +292,7 @@ vec3 waterSubmerge(vec3 col, vec3 P) {
 /** In-scattered light of the water column toward the viewer along rd, at a given depth. */
 vec3 waterFogColor(vec3 rd, float depth) {
   float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-  vec3 c = uWaterTint * mix(0.28, 1.35, up * up);
+  vec3 c = uWaterTint * mix(0.4, 1.5, up * up);
   vec3 sr = waterSunRefract();
   float toward = pow(max(dot(rd, -sr), 0.0), 5.0);
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);

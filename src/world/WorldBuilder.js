@@ -24,9 +24,9 @@ const SHAPES = { stack: stackShape, coil: coilShape, ammonite: ammoniteShape, pe
 // the flora biome of each chapter, and its accent trees ({ kind, max, per: m2 of meadow per tree })
 const BIOME = { cradle: 'lagoon', valleys: 'reach', krill: 'shoals', forest: 'forest', song: 'golden', night: 'night', storm: 'storm', falcon: 'storm', wall: 'storm', oasis: 'oasis' };
 const TREES = {
-  cradle: { kind: 'coil', max: 3, per: 3500 }, valleys: { kind: 'coil', max: 3, per: 4000 }, krill: { kind: 'coil', max: 1, per: 6000 },
-  forest: { kind: 'giantFern', max: 4, per: 2500, spacing: 45 }, song: { kind: 'coil', max: 2, per: 4000 }, night: { kind: 'coil', max: 1, per: 6000 },
-  storm: null, falcon: null, wall: null, oasis: { kind: 'blossom', max: 4, per: 2500 },
+  cradle: { kind: 'coil', max: 3, per: 3500, groves: 3 }, valleys: { kind: 'coil', max: 3, per: 4000, groves: 4 }, krill: { kind: 'coil', max: 1, per: 6000, groves: 2 },
+  forest: { kind: 'giantFern', max: 4, per: 2500, spacing: 45, groves: 5 }, song: { kind: 'coil', max: 2, per: 4000, groves: 3 }, night: { kind: 'coil', max: 1, per: 6000, groves: 3 },
+  storm: { kind: 'pine', max: 1, per: 8000, groves: 1 }, falcon: { kind: 'pine', max: 1, per: 8000, groves: 1 }, wall: null, oasis: { kind: 'blossom', max: 4, per: 2500, groves: 5 },
 };
 const FLORA_NEAR = 520, TREES_NEAR = 1900;
 const _v = new Vector3(), _w = new Vector3();
@@ -544,7 +544,7 @@ export class WorldBuilder {
     }
     let tc = rec.opts?.trees === false ? null : (rec.opts?.giant ? { kind: 'giantFern', max: 3, per: 2000, spacing: 45 } : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null));
     // spires and stacks wear wind-bent pines; storms leave only the hardiest
-    if (rec.kind === 'stack' && !rec.opts?.giant) tc = { kind: 'pine', max: rec.chapter === 'storm' || rec.chapter === 'falcon' ? 1 : 3, per: 900, spacing: 9 };
+    if (rec.kind === 'stack' && !rec.opts?.giant) tc = { kind: 'pine', max: rec.chapter === 'storm' || rec.chapter === 'falcon' ? 1 : 3, per: 900, spacing: 9, groves: rec.R > 15 ? 1 : 0 };
     if (tc && !volcanic && needsTrees) {
       const ts = populateTrees(S, tc.kind, rec.seed, tc);
       // giant fiddleheads are solid enough to bump into, and bird-reptiles perch on their coils
@@ -571,6 +571,7 @@ export class WorldBuilder {
       if (ts.count) {
         // coilwings roost in the crowns
         for (const [key, list] of ts.items) {
+          if (key.startsWith('grove')) continue;
           const Hh = key.startsWith('gfern') ? 66 : key.startsWith('giantCoil') ? 120 : key.startsWith('pine') ? 14 : key.startsWith('blossom') ? 16 : key.startsWith('palm') ? 14 : 20;
           for (const it of list) {
             _w.setFromMatrixPosition(it.m).add(rec.pos);
@@ -581,8 +582,8 @@ export class WorldBuilder {
         // far painted impostors for every tree (they take over where the 3D trees fade out)
         const imp = this._impostors(rec.chapter);
         for (const [key, list] of ts.items) {
-          const kind = key.startsWith('pine') ? 'pine' : key.startsWith('blossom') ? 'blossom' : key.startsWith('gfern') || key.startsWith('giantCoil') ? 'giant' : key.startsWith('palm') ? 'palm' : 'coil';
-          const H = kind === 'giant' ? 110 : kind === 'pine' ? 16 : kind === 'blossom' ? 18 : 22;
+          const kind = key.startsWith('pine') ? 'pine' : key.startsWith('blossom') ? 'blossom' : key.startsWith('gfern') || key.startsWith('giantCoil') ? 'giant' : key.startsWith('palm') ? 'palm' : key.startsWith('grove') ? 'fern' : 'coil';
+          const H = kind === 'giant' ? 110 : kind === 'pine' ? 16 : kind === 'blossom' ? 18 : kind === 'fern' ? 4 : 22;
           for (const it of list) {
             _w.setFromMatrixPosition(it.m).add(rec.pos);
             const sc = _v.setFromMatrixScale(it.m).x;

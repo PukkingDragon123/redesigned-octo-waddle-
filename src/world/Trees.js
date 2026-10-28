@@ -11,7 +11,7 @@
 //   motherTree     the Mother Tree on the central coiled island of the Oasis
 //   giantFern      tree-sized fiddleheads (the Coil Forest)
 //   impostor       far painted billboard of any of the above
-import { Color } from 'three';
+import { Color, Vector3 } from 'three';
 import { rng, lerp, clamp, TAU } from '../core/math.js';
 import { SLOT } from './Painted.js';
 import { FloraGeo, FloraSet, SPECIES, FLORA_PAL } from './Flora.js';
@@ -266,6 +266,7 @@ SPECIES.impostor = (kind, H) => {
     palm: [SLOT.palm, C('#5a8a3a').multiplyScalar(0.7), 0.92, 0.6],
     blossom: [SLOT.blossom, C('#e0a8b8').multiplyScalar(0.75), 0.68, 0.7],
     giant: [SLOT.leafB, C('#3f6f58').multiplyScalar(0.7), 0.78, 0.55],
+    fern: [SLOT.leafC, C('#4a7a4a').multiplyScalar(0.7), 0.6, 0.75],
   }[kind] || [SLOT.leafA, C('#4f7a44').multiplyScalar(0.7), 0.62, 0.62];
   const ch = { base: [0, 0, 0], L: H * look[2], az: 0, tilt: 0, curl: 0, kind: 0 };
   g.bill(ch, { s: 1, size: H * look[3], slot: look[0], col: look[1], acc: look[1].clone().multiplyScalar(1.4), flex: 0 });
@@ -301,6 +302,20 @@ export function populateTrees(S, kind, seed, opts = {}) {
       const v = Math.floor(r() * 4);
       const pal = TREE_PALS[v % TREE_PALS.length];
       set.add(`coil-${v}`, () => SPECIES.coilTree(9700 + v, 22, pal), p, lerp(0.6, 1.4, r()), r() * TAU, inst(r));
+    }
+  }
+  // groves of tall fiddleheads: alien vegetation masses that still read from far away
+  const nG = opts.groves ?? 0;
+  if (nG > 0) {
+    const gs = thin(S.sample(nG * 4, r), 26, grid).slice(0, nG);
+    const pals = [FLORA_PAL.fern, FLORA_PAL.fernTeal, FLORA_PAL.fernRose];
+    for (const sm of gs) {
+      const n = 3 + Math.floor(r() * 4);
+      for (let i = 0; i < n; i++) {
+        const v = Math.floor(r() * 3), pk = Math.floor(r() * 3);
+        const p = sm.p.clone().add(new Vector3((r() - 0.5) * 10, -0.3, (r() - 0.5) * 10));
+        set.add(`grove-${v}-${pk}`, () => Object.assign(SPECIES.fiddlehead(1200 + v, 4, pals[pk]), { fade: [1200, 1700], shadow: true }), p, lerp(1.8, 4.2, Math.pow(r(), 1.3)), r() * TAU, inst(r));
+      }
     }
   }
   return set;

@@ -69,10 +69,15 @@ uniform sampler2D tSrc;
 uniform sampler2D tDepth;
 uniform vec3 uSunScreen;
 uniform float uAspect;
+uniform mat4 uInvProj;
+uniform mat4 uCamWorld;
 varying vec2 vUv;
 void main() {
   float d = texture2D(tDepth, vUv).r;
-  float sky = step(0.99999, d);
+  // open sky only: the sea is drawn after the opaque pass, so its pixels have no depth here
+  vec4 vp = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 rd = mat3(uCamWorld) * normalize(vp.xyz / vp.w);
+  float sky = step(0.99999, d) * smoothstep(-0.005, 0.02, rd.y);
   vec3 c = texture2D(tSrc, vUv).rgb;
   vec2 dv = vUv - uSunScreen.xy; dv.x *= uAspect;
   float fall = smoothstep(0.75, 0.0, length(dv));
@@ -133,9 +138,8 @@ void main() {
   float sunUp = smoothstep(-0.02, 0.2, uSunDir.y);
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   const int N = 20;
-  float acc = 0.0;
+  vec3 acc = vec3(0.0);
   float dt = tEnd / float(N);
-  float sigma = dot(uWaterAbsorb, vec3(0.15, 0.55, 0.3));
   for (int i = 0; i < N; i++) {
     float t = (float(i) + jit) * dt;
     vec3 X = uCamPos + rd * t;
@@ -145,10 +149,11 @@ void main() {
     float n1 = texture2D(uNoise, S / 9.0 + vec2(uTime * 0.012, uTime * 0.007)).g;
     float n2 = texture2D(uNoise, S / 3.7 - vec2(uTime * 0.02, -uTime * 0.013)).b;
     float shaft = pow(smoothstep(0.45, 0.95, n1 * 0.75 + n2 * 0.4), 2.0);
-    acc += shaft * exp(-sigma * (depth * 1.2 + t)) * dt;
+    // sunlight down to the sample, then back along the view: red is gone within metres
+    acc += shaft * exp(-uWaterAbsorb * (depth * 1.2 + t)) * dt;
   }
-  float phase = 0.5 + 0.8 * pow(max(dot(rd, -sr), 0.0), 3.0);
-  gl_FragColor = vec4(vec3(acc * 0.06 * phase * sunUp), 1.0);
+  float phase = 0.4 + 1.2 * pow(max(dot(rd, -sr), 0.0), 3.0);
+  gl_FragColor = vec4(acc * phase * sunUp, 1.0);
 }
 `;
 
@@ -291,7 +296,7 @@ void main() {
   col *= 1.0 + ringLight * 0.06;
 
   // Inside a cloud: a soft luminous veil that thickens toward the edges of view.
-  if (uInCloud > 0.0) {
+  if (uInCloud > 0.0 && uUnderwater < 0.5) {
     float vn = vnoise(uv * 3.0 + uTime * 0.05) * 0.5 + 0.5;
     float veil = uInCloud * (0.55 + 0.35 * vn);
     col = mix(col, uCloudVeil, clamp(veil, 0.0, 0.95));
@@ -349,7 +354,10 @@ export class PostFX {
     this.up.material.transparent = true;
     this.rayMask = new FullscreenPass({
       vertexShader: FS_VERT, fragmentShader: RAYMASK,
-      uniforms: { tSrc: { value: null }, tDepth: { value: null }, uSunScreen: { value: new Vector3() }, uAspect: { value: 1 } },
+      uniforms: {
+        tSrc: { value: null }, tDepth: { value: null }, uSunScreen: { value: new Vector3() }, uAspect: { value: 1 },
+        uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() },
+      },
     });
     this.rayBlur = new FullscreenPass({
       vertexShader: FS_VERT, fragmentShader: RAYBLUR,
@@ -412,7 +420,7 @@ export class PostFX {
   updateSun(camera) {
     const v = this._v.copy(G.uSunDir.value).multiplyScalar(5000).add(camera.position);
     v.project(camera);
-    const camDir = camera.getWorldDirection(new Vector3());
+    const camDir = camera.getWorldDirection(this._v3);
     const facing = camDir.dot(G.uSunDir.value);
     const vis = Math.max(0, Math.min(1, (facing - 0.1) * 2.5)) * Math.max(0, Math.min(1, (G.uSunDir.value.y + 0.04) * 10));
     const s = this.composite.uniforms.uSunScreen.value;
@@ -470,11 +478,13 @@ export class PostFX {
       this.rayBlur.uniforms.tSrc.value = this.rayA.texture;
       this.rayBlur.render(renderer, this.rayB);
       this.composite.uniforms.tRays.value = this.rayB.texture;
-      const wt = G.uWaterTint.value;
-      this.composite.uniforms.uShaftCol.value.setRGB(0.35 + wt.r * 4, 0.45 + wt.g * 4, 0.45 + wt.b * 4).multiply(G.uSunColor.value).multiplyScalar(0.5);
+      // scattering of the sunlight toward the eye (the per-channel loss is already in the shafts)
+      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.0045 * (1 - G.uStorm.value * 0.7));
     } else if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
       this.rayMask.uniforms.tSrc.value = src;
       this.rayMask.uniforms.tDepth.value = sceneRT.depthTexture;
+      this.rayMask.uniforms.uInvProj.value.copy(camera.projectionMatrixInverse);
+      this.rayMask.uniforms.uCamWorld.value.copy(camera.matrixWorld);
       this.rayMask.render(renderer, this.rayA);
       this.rayBlur.uniforms.tSrc.value = this.rayA.texture;
       this.rayBlur.render(renderer, this.rayB);

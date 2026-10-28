@@ -337,8 +337,12 @@ vec3 kelvinWake(vec2 p, int tr, float n) {
 
 vec2 casUv(vec2 p, vec4 c) { return vec2(dot(p, c.xy), dot(p, vec2(-c.y, c.x))); }
 
-vec4 ssr(vec3 P, vec3 R, float jit, int steps) {
-  float t = 0.8 + jit * 0.8;
+// Screen-space reflection: march the reflected ray in growing steps until it crosses behind the
+// opaque depth, then bisect the crossing. blur > 0 averages a small footprint (rough or distant).
+vec4 ssr(vec3 P, vec3 R, float jit, int steps, float blur) {
+  float t = 0.8 + jit * 0.25;
+  float tPrev = 0.0;
+  bool prevFront = true;
   for (int i = 0; i < 28; i++) {
     if (i >= steps) break;
     vec3 Q = P + R * t;
@@ -349,10 +353,11 @@ vec4 ssr(vec3 P, vec3 R, float jit, int steps) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
     float sz = sceneDepthAt(uv);
     float rz = -vq.z;
-    if (rz > sz && sz < uNearFar.y * 0.9 && rz < sz + t * 0.3 + 2.0) {
-      // refine between the last two samples
-      float a = t / 1.32, b = t;
-      for (int j = 0; j < 5; j++) {
+    bool front = rz <= sz;
+    if (!front && prevFront && sz < uNearFar.y * 0.9 && rz < sz + max(t - tPrev, 1.0) * 1.5 + 1.0) {
+      // bisect between the last point in front and this one behind
+      float a = tPrev, b = t;
+      for (int j = 0; j < 6; j++) {
         float m = 0.5 * (a + b);
         vec4 vm = viewMatrix * vec4(P + R * m, 1.0);
         vec4 cm = uProj * vm;
@@ -360,9 +365,17 @@ vec4 ssr(vec3 P, vec3 R, float jit, int steps) {
         if (-vm.z > sceneDepthAt(um)) { b = m; uv = um; } else a = m;
       }
       vec2 eg = smoothstep(0.0, 0.08, uv) * smoothstep(1.0, 0.92, uv);
-      float conf = eg.x * eg.y * (1.0 - float(i) / float(steps + 1) * 0.3);
-      return vec4(texture2D(uSceneTex, uv).rgb, conf);
+      float conf = eg.x * eg.y;
+      vec3 c = texture2D(uSceneTex, uv).rgb;
+      if (blur > 0.0) {
+        vec2 o = blur / uResolution;
+        c = c * 0.4 + 0.15 * (texture2D(uSceneTex, uv + vec2(o.x, o.y)).rgb + texture2D(uSceneTex, uv + vec2(-o.x, o.y)).rgb
+                            + texture2D(uSceneTex, uv + vec2(o.x, -o.y)).rgb + texture2D(uSceneTex, uv - o).rgb);
+      }
+      return vec4(c, conf);
     }
+    prevFront = front;
+    tPrev = t;
     t *= 1.32;
   }
   return vec4(0.0);
@@ -429,8 +442,8 @@ void main() {
     float env = exp(-pow((r - rc) / wdt, 2.0));
     if (env < 0.003) continue;
     float kk = 6.2831 / (1.4 + age * 0.35 + rg.w * 0.4);
-    float A = rg.w * 0.35 / (1.0 + age * 0.6) / sqrt(1.0 + r * 0.25);
-    float dh = A * kk * cos(kk * (r - 2.0 * cg * age)) * env;
+    float A = rg.w * 0.12 / (1.0 + age * 0.6) / sqrt(1.0 + r * 0.25);
+    float dh = clamp(A * kk, 0.0, 0.45) * cos(kk * (r - 2.0 * cg * age)) * env;
     vec2 dir = dv / max(r, 1e-3);
     hx += dir.x * dh;
     hz += dir.y * dh;
@@ -496,7 +509,8 @@ void main() {
 
   vec2 suv = gl_FragCoord.xy / uResolution;
   float surfZ = vViewZ;
-  float jit = ign(gl_FragCoord.xy);
+  // white-noise jitter (interleaved gradient noise would print its lattice into reflections)
+  float jit = hash12(gl_FragCoord.xy + fract(uTime) * 17.0) * 0.5;
   vec3 col;
   vec4 dbg = vec4(0.0);
 
@@ -510,7 +524,7 @@ void main() {
     float F = seaFresnel(nv) / (1.0 + rough * 4.0 * (1.0 - nv));
     vec3 env = skyEnv(R, seaEnvLod(s2));
     if (uOcean.w > 0.5 && farK < 0.99) {
-      vec4 ss = ssr(P, R, jit, int(uOcean.w));
+      vec4 ss = ssr(P, R, jit, int(uOcean.w), rough * 40.0);
       env = mix(env, ss.rgb, ss.a * smoothstep(0.35, 0.05, rough));
     }
     float shadow = sampleShadow(P + vec3(0.0, 0.3, 0.0), vec3(0.0, 1.0, 0.0));
@@ -639,9 +653,9 @@ void main() {
         through = texture2D(uSceneTex, ruv).rgb;
       }
     }
-    // outside Snell's window the surface is a rippled mirror of the darker water below
+    // outside Snell's window the surface is a rippled silvery mirror of the lit water below
     vec3 Rd = reflect(I, Nd);
-    vec3 below = waterFogColor(Rd, max(uSeaLevel - P.y, 0.0) + 22.0) * (0.55 + 0.45 * smoothstep(-1.0, 0.0, Rd.y));
+    vec3 below = waterFogColor(Rd, max(uSeaLevel - P.y, 0.0) + 4.0) * 1.15;
     below = below * Tp + fogc * (1.0 - Tp);
     col = through * (1.0 - F) + below * F;
     float foamU = clamp(crestFoam * uFoamCtl.x + simFoam, 0.0, 1.0);

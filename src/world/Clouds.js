@@ -390,6 +390,8 @@ export class Clouds {
 
   /** Is a world point inside a cloud? Returns 0..1 (cheap: near clusters only). */
   densityAt(p) {
+    // under the sea there is no cloud (sea-fog puffs dip below the surface)
+    if (p.y < G.uSeaLevel.value - 0.2) return 0;
     let best = 0;
     const d = this.data;
     const drift = this.uniforms.uDrift.value;

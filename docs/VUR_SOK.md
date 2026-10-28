@@ -1,0 +1,155 @@
+# Vur Sok: the redesign contract
+
+SKYSONG now takes place on **Vur Sok**, an ocean planet. There are no floating islands: spiral islands rise
+from a living ocean, some still forming. The herd of winged whales flies low over the sea, and the calf can
+dive beneath the surface to feast on fish. This document is the shared design and interface contract for
+everyone building it. Read it fully before touching code.
+
+## 1. Art direction (supersedes the earlier anime direction where they conflict)
+
+- **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and
+  Monster Hunter creature design: believable anatomy, functional organs, rich material detail
+  (keratin, scars, barnacles, wet skin), painterly lighting. Not photoreal mush and not flat anime.
+- **Spirals are the planet's signature**: coiled islands, helical sea stacks, ammonite-like ridges,
+  spiral atolls, spiral-twisted tree trunks, spiral crests on animals, the spiral galaxy at night,
+  the spiral bubble-net hunt. Use them deliberately, not as random decoration.
+- **Mix 2D with 3D** for the environment: 3D forms (rock, trunks, whales) with hand-painted 2D elements
+  (foliage cards, grass tufts, distant painted backdrop layers), so the world reads like a living painting.
+- Restraint: no excessive bloom, no random glowing decorations. Natural light sources only
+  (sun, moons, lightning, bioluminescent plankton at night, lava glow in forming islands).
+- Detail budget: "super detailed" means layered detail at every distance (silhouette, mid forms, fine
+  surface), not noise everywhere. Every material gets macro/meso/micro variation.
+
+## 2. World conventions
+
+- **Sea level is y = 0.** World units are metres. Gravity is down (-y).
+- The herd's normal flight altitude is **20-120 m** above the sea. The migration route (MigrationPath)
+  keeps the herd over open water and between islands. Whales may dive below y = 0 to feed.
+- Chapters keep their ids, order, `start` arc lengths, `time` presets and `mood` names (audio depends on
+  them). New display names and themes:
+
+| # | id | name | theme |
+|---|---|---|---|
+| 0 | cradle | Dawn Lagoon | dawn inside a sheltering spiral atoll, glassy water, the herd resting on the surface |
+| 1 | valleys | The Spiral Reach | an archipelago of coiled islands and helical sea stacks, waterfalls into the sea |
+| 2 | krill | The Feasting Shoals | open sea with huge fish bait balls; the herd dives and lunges; bubble-net spirals |
+| 3 | forest | The Coil Forest | giant spiral-trunk trees on coiled islands, bird-reptile rookeries |
+| 4 | song | The Herd Song | golden hour, a ring of sea stacks around calm water |
+| 5 | night | Night Passage | bioluminescent sea, spiral galaxy and moons, glowing plankton wakes |
+| 6 | storm | The Storm | towering waves, spray, rain, lightning |
+| 7 | falcon | The Falcon | stormy dawn over heaving sea, the storm falcon hunts |
+| 8 | wall | The Fog Wall | a sea-fog bank (whiteout), following mother's voice |
+| 9 | oasis | The Oasis | a vast spiral atoll: turquoise lagoon, the Mother Tree on the central coiled island, countless fish and whales |
+
+## 3. Ownership (who edits what; never edit files you do not own)
+
+| Owner | Files |
+|---|---|
+| **ocean** | `src/world/Ocean.js` (new, replaces CloudSea), `src/world/CloudSea.js` (may delete after Ocean exists), `src/render/PostFX.js`, `src/render/Globals.js`, `src/render/shaders/common.js`, `src/world/Sky.js`, `src/world/Atmosphere.js`, `src/world/Clouds.js`, `src/render/Particles.js`, `src/dev/ocean.js` (new) |
+| **world** | `src/world/Islands.js`, `src/world/Trees.js`, `src/world/WorldBuilder.js`, `src/world/MigrationPath.js`, `src/world/Water.js`, `src/world/Landmarks.js`, `src/render/materials.js`, new files under `src/world/` (e.g. `Spirals.js`, `Painted.js`, `Backdrop.js`), `src/dev/islands.js`, `src/dev/world.js` |
+| **whales** | `src/creatures/WhaleModel.js`, `src/creatures/whaleShaders.js`, `src/creatures/WhaleTypes.js`, `src/creatures/WhaleAnimator.js`, `src/creatures/Whale.js` (model/LOD parts only), new files under `src/creatures/whale/`, `src/dev/whale.js`, `src/dev/fly.js` |
+| **wildlife** | `src/creatures/Ecosystem.js`, everything under `src/creatures/eco/`, new species files, `src/dev/ecosystem.js` |
+| **herd** | `src/game/Herd.js`, new `src/game/WhalePhysics.js`, new `src/game/HerdBehaviors.js`, `src/dev/herd.js` (new) |
+| **lead** | `src/game/Game.js`, `src/game/Story.js`, `src/game/PlayerController.js`, `src/game/CameraRig.js`, `src/game/SonicBoom.js`, `src/game/Weather.js`, `src/game/SongGame.js`, `src/game/Menu.js`, `src/core/*`, `src/render/Engine.js`, `src/main.js`, `src/audio/*`, `src/creatures/Falcon.js`, `src/creatures/falcon/*` |
+
+Need a change in a file you do not own? Make your module work without it (defensive `?.` calls,
+fallbacks) and describe the exact change in your final report; the lead applies it.
+
+Shared GLSL helpers you need but do not own: put them in your own module (e.g. `src/world/shaders/foliage.js`).
+Only the ocean owner edits `common.js` and `Globals.js`.
+
+## 4. Interfaces
+
+### 4.1 Ocean (`game.ocean`, owner: ocean)
+```js
+const ocean = new Ocean(game);        // adds itself to the scene/passes; lead swaps it in for CloudSea in Game.js
+ocean.level                           // 0
+ocean.heightAt(x, z)                  // CPU wave height at the current time, matching the shader to ~5 cm
+ocean.normalAt(x, z, out)             // CPU surface normal
+ocean.setSeaState(k, { dur })         // 0 glassy .. 0.3 calm .. 0.6 lively .. 1 storm; eased over dur seconds
+ocean.splash(pos, strength, radius)   // foam ring + spray burst + wave ring (whale lunges, breaches, slaps)
+ocean.wake(pos, vel, width)           // per-frame wake contribution for things moving at the surface
+ocean.setQuality(q)                   // 0..1 like the old cloud sea
+ocean.enabled
+ocean.uniforms                        // exposed for debug
+```
+- Globals the ocean adds to `G`: `uSeaLevel`, `uSeaState`, `uUnderwater` (0..1 camera submersion),
+  `uWaterTint` (absorption colour), plus whatever it needs. Every ShaderMaterial built with
+  `Object.assign({}, G, ...)` gets them automatically.
+- `common.js` gains `waterColumnFog(col, P)` or folds it into `applyFog` so geometry below y = 0 seen from
+  above is tinted by the water column, and an underwater branch when the camera is submerged. Caustics on
+  submerged surfaces and shallow sea floors. Keep `applyFog(col, P)`'s signature.
+- PostFX gains an underwater mode (fog, colour absorption, light shafts, Snell's window when looking up).
+- Night: bioluminescent plankton in wakes, splashes and breaking crests.
+- Storm (sea state 1): 6-12 m swells, wind-blown spray, foam streaks.
+
+### 4.2 World (`story.world`, owner: world)
+Keep the existing public API that Story uses (all must keep working):
+`build(onProgress)`, `buildChapter(id)`, `built`, `done`, `spawns`, `distance(p, maxCheck)`, `collide(p, r, out)`,
+`raycast(from, to)`, `nearestWaterfall(p)`, `updateVisibility(s)`, `waterfalls`, `lakes`, `motherTree`,
+`songCenter`, `lightningSpots`, `archInfo`, `islands`.
+New:
+- `world.perches`: `[{ p: Vector3, n: Vector3, chapter }]` rock tops, ledges and branches where bird-reptiles land.
+- `world.seabedAt(x, z)`: height of the sea floor (shallow reefs and lagoons around islands; -200 in open sea).
+- `world.spawns.fish`: `[{ pos, species, count, chapter }]` with species `'glintfin' | 'spiralback' | 'lanternjack'`.
+- `world.spawns.reptiles`: `[{ pos, species, count, chapter }]` with species `'skimmer' | 'coilwing'`.
+- Keep `spawns.plankton` (night sea glow) if useful; drop `krill`, `rays`, `jellies`, `birds` spawns.
+- The MigrationPath keeps chapter `start` values and the total length (~11.8 km); POINTS move to sea-level
+  altitudes (20-120 m; the Feasting Shoals path at 15-30 m so the herd skims the sea).
+
+### 4.3 Whales (owner: whales)
+Keep every API the game uses: `new WhaleModel(genome)`; `group`; `bones` with the existing names
+(root, spine1, spine2, tail1..3, fluke, chest, neck, head, jaw, finR1..3, finL1..3, rearR, rearL; add more freely);
+`boneAbs`; `meshes` (shadow casters) and `castShadows(shadows)`; `prof(t) -> { hw, top, bot, cy, z }`;
+`eyes.{R,L}.{ mesh, u.uLids, u.uGaze, u.uPupil }`; `fins.{R,L}`, `flukes`, `rear`; `u` uniforms the animator drives
+(`uSac, uThroat, uVib, uGill, uBreath, uAirflow, uInertia`, add more); `L`; the geometry cache.
+`setFurShells(n)` and `maxShells` stay callable (no-ops are fine if fur is gone).
+Whale (entity) keeps `nearestOnBody(p, out)` (body-axis collision proxy) and its physics API.
+WhaleAnimator must add:
+- `anim.bump(worldDir, strength)`: a body squash-and-stretch / jiggle response on a spring (strength 0..2),
+  a blink and a surprised-then-happy expression; called by the collision solver on every whale contact.
+- `anim.gesture(name)` for social play: `'tailSlap'`, `'finSlap'`, `'spyhop'`, `'nuzzle'`, `'happyWiggle'`,
+  `'breachArch'`, `'rollOver'`; each a short layered pose the herd behaviours trigger.
+WhaleTypes keeps its exports (`CALF`, `MOTHER`, `ELDER`, `ADULTS`, `CALVES`). `ADULTS[0]` becomes **the alpha**:
+largest male, torn wing membrane, notched fluke, scars. Genome fields for variants: `scars`, `barnacles`,
+`tornWing: 'L' | 'R' | null`, `notchedFluke`, `alpha`.
+
+### 4.4 Wildlife (`story.eco`, owner: wildlife)
+Keep the facade names the game calls: `update(dt)`, `eat(mouthPos, r, dt, owner)` (returns how much was eaten),
+`nearestSwarm(pos)` (nearest fish school: `{ pos, dist, ... }`), `scatter(center, radius, strength, speed)`,
+`threat`, `songFocus`, `songRadius`, `feeders`, `roosts`, `clear()`, `prune(center, radius)`.
+New: `addFishSchool(pos, species, count, opts)`, `addReptileFlock(pos, species, count, opts)`,
+`perches` (set by the game from `world.perches`), `ocean` (set to `game.ocean`; fall back to a flat sea at y = 0).
+Species:
+- **glintfin**: small silver schooling fish in thousands; bait balls that tighten and flash when threatened.
+- **spiralback**: mid-size banded fish that swim in twisting spiral columns; leap clear of the water in arcs.
+- **lanternjack**: large solitary/paired predator fish with fin-lures; patrols below bait balls, breaches.
+- **skimmer**: bird-reptile, pterosaur-like with a spiral head crest; skims the sea, plunges for fish, nests on ledges.
+- **coilwing**: small four-winged feathered lizard in flocks; murmurations around spires, roosts in trees and on whales.
+Fish are visible from above through the water and all around when the calf dives. Whales and bird-reptiles eat them.
+
+### 4.5 Herd physics and behaviours (owner: herd)
+- `WhalePhysics`: collisions between **all** whales (calf, playmates, adults, gathering whales): capsule/body-axis
+  contacts via `nearestOnBody`, mass by size (calves bounce off adults, adults barely move), restitution
+  (bouncy but soft), friction, angular response (a glancing bump spins/rolls), and `anim.bump` on contact.
+  Players feel it: bump into mother, she sways and turns to look; bump a playmate, both bounce and it chases you.
+- `HerdBehaviors`: smarter social life: play (calves bump-tag, chase, roll together, breach together),
+  care (mother nuzzles, escorts, lifts the calf to the surface), adults (spyhop, tail slaps, fin slaps,
+  synchronized breaching, resting log-like at the surface), reactions to the player (bump back playfully, follow
+  the calf's lead, answer gestures), and the **spiral bubble-net hunt** at the Feasting Shoals.
+  Behaviours steer whales through Herd and must never break the story's control (`motherScript`, herd modes).
+
+## 5. Technical rules
+
+- Three.js 0.186, WebGL2, only custom `ShaderMaterial`s; global uniforms from `G` via `Object.assign({}, G, {...})`.
+- Shadow casters re-render with a `DEPTH_PASS` define: fragment shaders early-return and never sample the
+  shadow map there; alpha-tested casters must still discard in that pass.
+- Passes: shadow -> opaque MSAA HDR (`engine.scene`) -> transparent (`engine.sceneT`, sorted by renderOrder;
+  the old cloud sea was renderOrder -100) -> PostFX. `G.uDepthTex` is the resolved opaque depth.
+- `Engine.precompile` compiles everything behind the title; do not create materials lazily mid-game.
+- Budgets at 1080p "high" on a mid-range discrete GPU: 60 fps; under 600 draw calls and 4 M triangles per frame;
+  each system under ~3 ms CPU per frame. Use instancing, LOD and impostors.
+- No per-frame allocations in hot loops. No `Math.random()` in anything that must be deterministic per seed.
+- Debug: `?debug&test=<dev scene>` runs your dev scene (src/dev/*.js); tools in README "Headless checks".
+  Headless rendering is SwiftShader: slow, so test with small viewports and few frames.
+- Do not commit; the lead commits. Report what you built, how to view it, measured costs, and open issues.

@@ -20,7 +20,7 @@ import { G } from '../render/Globals.js';
 import { clamp, damp, lerp, smoothstep, rng, TAU, dirFromYawPitch, easeInOut } from '../core/math.js';
 
 const _mOff = new Vector3();
-const OPTIONAL = import.meta.glob(['../audio/AudioSystem.js', '../creatures/Ecosystem.js', '../creatures/Falcon.js']);
+const OPTIONAL = import.meta.glob(['../audio/AudioSystem.js', '../creatures/Ecosystem.js', '../creatures/Falcon.js', './Activities.js']);
 const SAVE_KEY = 'skysong.save';
 
 class VoiceStub {
@@ -179,6 +179,14 @@ export class Story {
       }
     } catch (e) { console.warn('[skysong] ecosystem unavailable', e); this.eco = null; }
     try {
+      // things to do while flying: catching bugs, tricks, slaps and spouts (src/game/Activities.js)
+      const m = OPTIONAL['./Activities.js'];
+      if (m) {
+        const { Activities } = await m();
+        this.activities = new Activities(g, this);
+      }
+    } catch (e) { console.warn('[skysong] activities unavailable', e); this.activities = null; }
+    try {
       const m = OPTIONAL['../creatures/Falcon.js'];
       if (m) {
         const { Falcon } = await m();
@@ -259,6 +267,7 @@ export class Story {
     herd.formationTight = 0;
     herd.stopPlay();
     herd.stopBubbleNet?.();
+    this.activities?.reset?.();
     this.feastInvite = false;
     herd.care.mode = 'lead';
     this.protecting = false;
@@ -1264,6 +1273,7 @@ export class Story {
       this.menuShot(this.menuT);
     }
     this.updateCalf(dt);
+    this.activities?.update?.(dt);
     this.herd.update(dt);
     for (const w of this.herd.whales) if (w !== this.herd.calf) waterStep(w, dt, g, { onSplash: this._onSplash });
     for (const w of this.gatheringOn ? this.gathering : []) waterStep(w, dt, g);

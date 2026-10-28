@@ -112,6 +112,25 @@ detail realistic add shaders like tiny glades etc"*
 | world2 (world polish) | the rest of src/world/ (WorldBuilder, Islands, Spirals, Seabed, Flora, Painted, Backdrop, Trees, Landmarks, MigrationPath, Water, Clouds, shaders/), src/render/materials.js, src/flora/, src/dev/islands.js, src/dev/world.js, src/dev/flora.js |
 | lead | src/game/ (Game, Story, Weather, Swim, CameraRig, Menu, PlayerController, SonicBoom, SongGame, Script), src/audio/, src/core/, src/main.js, Falcon files, README.md, docs/ |
 
+### 0.5 Make it a whole life, cinematic and never boring (newest)
+User: *"make game don't feel boring and use new font more fantasy and cool ... add more controls and things to
+do while flying like a flying bug you can catch and eat, or cinematic camera scene moments, a lot of them; the
+intro shows you starting this season's migration; add underwater too, make underwater have a really cool
+underwater effect and absolutely stunning fauna like kelps etc and weird fishes, crabs, alien Avatar-like, you
+can eat, interact with etc; make it have like skip to you more grown too; make this game show the whole life
+cycle of this creature: singing, mating, birthing and rest; make it super cool, interactive, not boring, and
+polish; have some text, cinematic, but make it feel cinematic."*
+
+Three builders work on this in parallel:
+
+| Role | Owns |
+|---|---|
+| story (life cycle, cinematics, title cards, fonts) | src/game/Story.js, Script.js, CameraRig.js, Menu.js, SongGame.js, Weather.js, new src/game/Cinematics.js and src/game/life/, src/world/MigrationPath.js, src/creatures/WhaleTypes.js, src/audio/moods.js, index.html, src/main.js |
+| moves (controls, tricks, flying bugs) | src/core/Input.js, src/game/PlayerController.js, src/game/SonicBoom.js, new src/game/Activities.js (already hooked: Story creates it and calls update(dt) and reset()), new src/game/Moves.js, new src/creatures/bugs/, src/dev/bugs.js, src/audio/Sfx.js, src/audio/AudioSystem.js |
+| underwater (effects, fauna, kelp forests) | src/creatures/Ecosystem.js, src/creatures/eco/, src/dev/ecosystem.js, src/world/Ocean.js, src/world/Seabed.js, src/render/PostFX.js, src/render/Particles.js, src/flora/, src/dev/ocean.js, new src/dev/underwater.js |
+
+Everything else belongs to the lead. Never edit files you do not own; put needed changes in your report.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

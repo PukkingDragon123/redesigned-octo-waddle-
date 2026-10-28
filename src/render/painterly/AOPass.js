@@ -282,6 +282,8 @@ void main() {
   float zp = texelFetch(tZPrev, clamp(ivec2(puv * uHalf), ivec2(0), hmax), 0).r;
   float valid = 1.0 - smoothstep(0.015, 0.05, abs(zp - pc.w) / pc.w);
   vec3 hist = texture(tHist, puv).rgb;
+  // never let a bad value live on in the history (comparisons with NaN are false)
+  if (!all(greaterThanEqual(hist, vec3(-0.5))) || !all(lessThanEqual(hist, vec3(1.5)))) hist = cur;
   vec3 mn = cur, mx = cur;
   for (int j = -1; j <= 1; j++) {
     for (int i = -1; i <= 1; i++) {
@@ -390,10 +392,13 @@ void main() {
   vec2 nn = texelFetch(tRaw, clamp(b, ivec2(0), hmax), 0).zw;
   o = vec4(nn * 0.5 + 0.5, sqrt(max(1.0 - dot(nn, nn), 0.0)), 1.0);
 #else
+  vec3 m = mix(vec3(1.0), uTint, k) * (1.0 + uBounce.rgb * bounce);
 #if AO_DEBUG == 0
   if (k < 0.002 && bounce * uBounce.r < 0.002) discard;
+  // a non-finite multiplier would poison the HDR frame (and bloom would spread it): drop it
+  if (!(m.r >= 0.0 && m.g >= 0.0 && m.b >= 0.0 && m.r < 8.0 && m.g < 8.0 && m.b < 8.0)) discard;
 #endif
-  o = vec4(mix(vec3(1.0), uTint, k) * (1.0 + uBounce.rgb * bounce), 1.0);
+  o = vec4(m, 1.0);
 #endif
 }
 `;

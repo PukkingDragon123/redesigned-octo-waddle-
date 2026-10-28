@@ -1,7 +1,8 @@
 // Dev scene: the painterly passes (src/render/painterly) on spiral islands, whales, the sea and
 // clouds. The passes are wired into the running engine at runtime (no engine file is touched):
 // the AO runs as the first engine mid pass (after the opaque pass, before the transparent one),
-// and PostFX's final composite is redirected into the painterly LDR target, then painted.
+// and PostFX's final composite lands in the painterly LDR target, then gets painted (through
+// PostFX's own `post.painterly` hook when present, else by redirecting its screen target).
 //
 // ?debug&test=painterly&view=coast|whale|face|wide|title|cliff|stack&time=morning
 //   &pp=0|1            the whole painterly chain off / on (default on)
@@ -11,7 +12,7 @@
 //   &dof=0|gameplay|title|cinematic   depth of field preset (default off, title view: title)
 //   &q=<0..1>          quality (default 1)
 //   &split=<x>         left of x shows the unprocessed frame (before/after in one image)
-//   &dbg=1             Kuwahara debug (r: radius, g: anisotropy, b: fine-detail measure)
+//   &dbg=1             Kuwahara debug (r: radius, g: anisotropy, b: highlight kept from the filter)
 //   &orbit=<deg/s>     orbit the camera around its target (temporal stability checks)
 //   &ocean=1           the real Ocean instead of the placeholder sea (slow headless)
 //   &shells=N          whale fur shells (fewer is faster headless)

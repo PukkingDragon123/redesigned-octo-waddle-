@@ -32,7 +32,7 @@ export default async function (game) {
     seabed.addShelf(sp.pos[0], sp.pos[2], sp.shape.footprint, { R: sp.shape.R, seed: sp.pos[0] + 3, beach: volcanic ? 0.7 : 0.45, volcanic, shelf: sp.shape.R > 100 ? 90 : 55 });
   }
   seabed.addAtoll(-650, -120, { a: 150, b: 0.07, turns: 1.2, rimW: 34, seed: 4, rot: 1.0 });
-  for (const m of seabed.buildFor(seabed.features)) { root.add(m); }
+  for (const m of await seabed.buildFor(seabed.features)) { root.add(m); }
   for (const sp of specs) {
     const isl = buildIsland({ shape: sp.shape, style: sp.style, seed: sp.pos[0] * 7 + sp.pos[2] });
     const m = useLod && isl.far ? isl.far : isl.mesh;

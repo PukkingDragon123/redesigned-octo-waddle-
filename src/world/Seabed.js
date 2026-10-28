@@ -182,24 +182,29 @@ export class Seabed {
     return h;
   }
 
-  _dominant(x, z) {
+  /** Height and the dominant (highest) feature at a world point. */
+  sample(x, z, out) {
+    out.h = DEEP; out.f = null;
     const l = this.grid.get(Math.floor(x / CELL) * 100003 + Math.floor(z / CELL));
-    if (!l) return null;
-    let best = null, bh = -1e9;
-    for (const f of l) {
+    if (!l) return out;
+    let bh = -1e9;
+    for (let i = 0; i < l.length; i++) {
+      const f = l[i];
       const dx = x - f.x, dz = z - f.z;
       if (dx * dx + dz * dz > f.R * f.R) continue;
       const v = f.height(dx, dz);
-      if (v > bh) { bh = v; best = f; }
+      out.h = out.h === DEEP ? Math.max(out.h, v) : smax(out.h, v, 3);
+      if (v > bh) { bh = v; out.f = f; }
     }
-    return best;
+    return out;
   }
 
   /**
    * Build the meshes covering a set of features (world-aligned tiles; a tile is built once).
-   * Returns an array of Meshes (one per tile batch) to add to a chapter group.
+   * Returns an array of Meshes to add to a chapter group. `slice` (async) is awaited between tiles
+   * so long builds stay time-sliced.
    */
-  buildFor(features, built = new Set(), opts = {}) {
+  async buildFor(features, built = new Set(), opts = {}, slice = null) {
     const T = opts.tile ?? 192;
     const step = opts.step ?? 4;
     const keys = new Set();
@@ -214,25 +219,30 @@ export class Seabed {
     const pos = [], col = [], mat = [], ext = [], idx = [];
     const out = { r: 0, g: 0, b: 0, sand: 1, kind: 0, grass: 0 };
     const n = Math.round(T / step);
+    const smp = { h: 0, f: null };
+    const fs = [];
     for (const k of keys) {
       const [ti, tj] = k.split(',').map(Number);
       // skip tiles with nothing above the deep floor
       const hs = new Float32Array((n + 1) * (n + 1));
+      fs.length = 0;
       let any = false;
       for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
         const x = ti * T + i * step, z = tj * T + j * step;
-        const h = this.heightAt(x, z);
-        hs[j * (n + 1) + i] = h;
-        if (h > -110) any = true;
+        this.sample(x, z, smp);
+        hs[j * (n + 1) + i] = smp.h;
+        fs.push(smp.f);
+        if (smp.h > -110) any = true;
       }
       built.add(k);
+      if (slice) await slice();
       if (!any) continue;
       const base = pos.length / 3;
       for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
         const x = ti * T + i * step, z = tj * T + j * step;
         const h = hs[j * (n + 1) + i];
         pos.push(x, Math.max(h, -130), z);
-        const f = this._dominant(x, z);
+        const f = fs[j * (n + 1) + i];
         if (f) f.paint(x - f.x, z - f.z, h, out);
         else paintLow(out, h, 0, 0, false, x, z);
         col.push(out.r, out.g, out.b);

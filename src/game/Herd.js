@@ -145,11 +145,13 @@ export class Herd {
   }
 
   /** Shared steering options (no per-frame object literals). */
-  _opts(arrive, minSpeed = 0, touch = null) {
+  _opts(arrive, minSpeed = 0, touch = null, maxPitch = 0.6, pitchGain = 0.8) {
     const o = this._so;
     o.arrive = arrive;
     o.minSpeed = minSpeed;
     o.touch = touch;
+    o.maxPitch = maxPitch;
+    o.pitchGain = pitchGain;
     return o;
   }
 
@@ -402,7 +404,7 @@ export class Herd {
     if (this.motherScript) {
       // the story is directing her (demonstrations, cinematics)
       const r = this.motherScript(m, dt);
-      if (r && r.target) this.steer(m, r.target, r.speed ?? 8, dt, this._opts(r.arrive ?? 8, r.minSpeed ?? 0));
+      if (r && r.target) this.steer(m, r.target, r.speed ?? 8, dt, this._opts(r.arrive ?? 8, r.minSpeed ?? 0, null, r.maxPitch ?? 0.6, r.pitchGain ?? 0.8));
       m.drive.lookAt = r?.lookAt ?? calf.pos;
       if (r?.face) {
         _v.copy(r.face).sub(m.pos);

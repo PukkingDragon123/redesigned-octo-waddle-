@@ -14,7 +14,7 @@
 //
 // `point` passed to callbacks is a scratch vector: clone it to keep it. No per-frame allocations.
 import { Vector3 } from 'three';
-import { clamp } from '../core/math.js';
+import { clamp, smoothstep } from '../core/math.js';
 
 const MAX_IDS = 128; // whales the pair cache can track (herd 12 + Oasis gathering 19 = 31)
 const N_PROF = 13; // radius samples along the axis
@@ -152,6 +152,7 @@ class Contact {
     this.tdir = new Vector3();
     this.resting = false;
     this.touch = false;
+    this.since = 99; // seconds since this pair last touched
   }
 }
 
@@ -418,10 +419,14 @@ export class WhalePhysics {
       c.jn = 0;
       c.jt = 0;
       c.resting = this.restT[c.pair] > 0.5;
+      c.since = this.time - this.touchT[c.pair];
       // will they touch during this step? (speculative contact: no tunnelling at dt = 0.05)
       c.touch = c.gap <= 0 || vn * dt < -c.gap;
       if (!c.touch) { c.target = -Infinity; continue; }
-      if (vn < -this.bounceSpeed && !c.resting) c.target = -e * vn;
+      // a pair that touched a moment ago (a spring holding them together, a shove) does not
+      // bounce again: no chattering, the contact settles
+      const fresh = smoothstep(0.25, 1.4, c.since);
+      if (vn < -this.bounceSpeed && !c.resting && fresh > 0) c.target = -e * fresh * vn;
       else c.target = c.gap > 0 ? -c.gap / dt : 0;
       // bounce channels never push into the contact
       const ka = A.kick.dot(c.n);
@@ -474,7 +479,7 @@ export class WhalePhysics {
       const A = c.A, B = c.B;
       // resting bookkeeping
       const vrel = _d.copy(A.w.vel).sub(B.w.vel).length();
-      const was = now - this.touchT[c.pair] < 0.4;
+      const was = c.since < 0.4;
       if (!was) this.restT[c.pair] = 0;
       this.restT[c.pair] = vrel < 0.6 ? this.restT[c.pair] + dt : 0;
       this.touchT[c.pair] = now;
@@ -491,7 +496,8 @@ export class WhalePhysics {
         this._kick(A, c.n, c.jn * A.invM);
         this._kick(B, c.n, -c.jn * B.invM);
       }
-      const event = !c.resting && ((!was && approach > 0.05) || (was && approach > 2.5 && now - this.eventT[c.pair] > 0.4));
+      // events: a new contact, or a hard knock after the pair came apart (not a body pushing on)
+      const event = !c.resting && ((c.since > 1.2 && approach > 0.05) || (c.since > 0.15 && approach > 2.5 && now - this.eventT[c.pair] > 0.6));
       if (!event) continue;
       this.eventT[c.pair] = now;
       this.stats.events++;

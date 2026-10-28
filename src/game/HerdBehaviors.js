@@ -197,7 +197,7 @@ export class HerdBehaviors {
   // ---- choosing -------------------------------------------------------------------------------
   _choose(w) {
     const h = this.herd, r = this.r, B = w.beh, mode = h.mode, u = this._u;
-    B.cd = w.isCalf ? lerp(4, 10, r()) : lerp(10, 30, r());
+    B.cd = w.isCalf ? lerp(4, 10, r()) : lerp(14, 40, r());
     if (mode !== 'travel' && mode !== 'rest' && mode !== 'feed') return;
     const calf = h.calf;
     const types = w.role === 'calf' ? CALF_TYPES : ADULT_TYPES;
@@ -214,8 +214,8 @@ export class HerdBehaviors {
       mate = this._freeNear(w, h.adults, 150);
       u[0] = mode === 'travel' ? 0.35 : 0; // roll over
       u[1] = this.playing && calf.pos.distanceTo(w.pos) < 90 && calf.vel.length() < 11 ? 0.25 : 0; // curious
-      u[2] = this.low ? 0.3 : 0; // surface slap
-      u[3] = this.low && mate ? 0.3 : 0; // synchronized breach
+      u[2] = this.low ? 0.22 : 0; // surface slap
+      u[3] = this.low && mate ? 0.16 : 0; // synchronized breach
     }
     for (let i = 0; i < types.length; i++) sum += u[i];
     if (sum <= 0) return;
@@ -232,7 +232,8 @@ export class HerdBehaviors {
       return;
     }
     if (type === 'rollTogether') {
-      const other = mate && w.pos.distanceTo(mate.pos) < 60 ? mate : (w.parent && !w.parent.beh?.type && w.parent.beh?.netI < 0 ? w.parent : null);
+      const par = w.parent && w.parent !== h.mother && !w.parent.beh?.type && w.parent.beh?.netI < 0 ? w.parent : null;
+      const other = mate && w.pos.distanceTo(mate.pos) < 60 ? mate : par;
       if (!other) return;
       const G = { type: 'roll', members: [other, w], lead: other, rolled: -1, done: false, side: r() < 0.5 ? 1 : -1 };
       this.start(w, 'rollTogether', 13, other, G);
@@ -423,9 +424,9 @@ export class HerdBehaviors {
     // back in the sea: a few seconds at the surface (Swim.js already threw the crash splash)
     B.pt += dt;
     _v.copy(w.pos).addScaledVector(w.fwd, 10);
-    _v.y = sea - w.radius * 0.2;
+    _v.y = sea - w.radius * 0.5;
     this._steer(w, _v, 3, dt, 4);
-    this.ballast(w, sea - w.radius * 0.2, dt, 0.6);
+    this.ballast(w, sea - w.radius * 0.5, dt, 0.6);
     if (B.pt > 3) { B.phase = 3; return false; }
     return true;
   }
@@ -436,7 +437,7 @@ export class HerdBehaviors {
     const depth = this._depth(w);
     if (B.phase === 0) {
       _v.copy(w.pos).addScaledVector(w.fwd, w.L * 1.5);
-      _v.y = sea - w.radius * 0.1;
+      _v.y = sea - w.radius * 0.5;
       this._steer(w, _v, w.isCalf ? 8 : 7, dt, 6, 3, 1.3, 0.8);
       if (Math.abs(depth) < w.radius * 0.9) { B.phase = 1; B.pt = 0; B.k = 0; }
       return B.t < 18;
@@ -444,9 +445,9 @@ export class HerdBehaviors {
     // at the surface: slow, hold the waterline, gesture
     B.pt += dt;
     _v.copy(w.pos).addScaledVector(w.fwd, 8);
-    _v.y = sea - w.radius * 0.15;
+    _v.y = sea - w.radius * 0.5;
     this._steer(w, _v, 1.5, dt, 6);
-    this.ballast(w, sea - w.radius * 0.15, dt, 0.8);
+    this.ballast(w, sea - w.radius * 0.5, dt, 0.8);
     if (B.pt > B.k) {
       if (B.phase > 2) return false;
       const x = this.r();
@@ -508,7 +509,7 @@ export class HerdBehaviors {
     _v.x += Math.sin(w.phase * 0.03 + w.genome.seed) * 6;
     _v.z += Math.cos(w.phase * 0.025 + w.genome.seed) * 6;
     const sea = this.sea(_v.x, _v.z);
-    const restY = sea - w.radius * 0.28;
+    const restY = sea - w.radius * 0.4;
     _v.y = restY;
     const flat = Math.hypot(_v.x - w.pos.x, _v.z - w.pos.z);
     const depth = this._depth(w);
@@ -554,7 +555,7 @@ export class HerdBehaviors {
       this._steer(w, _v, calf.vel.length() + 5, dt, 0.5, 5, 1.0, 0.7, 0, calf);
       w.drive.lookAt = calf.pos;
       w.drive.excite = 1;
-      if (B.flag || B.t > 3.5) { B.phase = 1; B.pt = B.t; B.flag = false; w.barrelRoll(this.r() < 0.5 ? 1 : -1); }
+      if (B.flag || B.t > 6) { B.phase = 1; B.pt = B.t; B.flag = false; w.barrelRoll(this.r() < 0.5 ? 1 : -1); }
       return true;
     }
     _v.copy(w.pos).sub(calf.pos).normalize();
@@ -816,7 +817,9 @@ export class HerdBehaviors {
     const sea = this.sea(center.x, center.z);
     this.net = {
       center: new Vector3().copy(center), schoolY: Math.min(center.y, sea - 5), sea, depthY: sea - 18,
-      active: true, phase: 'gather', t: 0, cycle: 0, members, R0: 32, R1: 9, T: 18, w: 0.36,
+      active: true, phase: 'gather', t: 0, cycle: 0, members, T: 18, w: 0.3,
+      // room for every body on the ring, the spiral closes until they nearly touch
+      R0: 30 + members.length * 2.5, R1: Math.max(10, members.length * 2), Rl: Math.max(5, members.length * 1.3),
       a0: r() * TAU, dir: r() < 0.5 ? 1 : -1, ecoT: 0,
     };
     members.forEach((w, i) => {
@@ -903,13 +906,15 @@ export class HerdBehaviors {
     const c = N.center;
     const base = N.a0 + (B.netI / n) * TAU;
     const depth = this._depth(w);
+    // three depth layers, so neighbours on the ring pass over and under each other
+    const layer = -(B.netI % 3) * 8;
     _look.copy(c);
     _look.y = N.schoolY;
     w.drive.lookAt = _look;
     if (N.phase === 'gather') {
-      _v.set(c.x + Math.cos(base) * N.R0, N.depthY, c.z + Math.sin(base) * N.R0);
+      _v.set(c.x + Math.cos(base) * N.R0, N.depthY + layer, c.z + Math.sin(base) * N.R0);
       const d = this._steer(w, _v, 9, dt, 10, 2, 1.4, 0.8, 0.5);
-      if (depth > 0.5) this.ballast(w, N.depthY, dt, 0.8);
+      if (depth > 0.5) this.ballast(w, N.depthY + layer, dt, 0.8);
       if (d < 18 && depth > 6) B.k = 1;
       w.drive.mouth = damp(w.drive.mouth, 0, 3, dt);
       w.drive.feed = damp(w.drive.feed, 0, 3, dt);
@@ -921,17 +926,19 @@ export class HerdBehaviors {
       const R = lerp(N.R0, N.R1, easeInOut(k));
       const ang = base + N.dir * N.w * N.t;
       const lead = N.dir * 0.55;
-      const y = lerp(N.depthY, N.depthY + 5, k);
+      const y = lerp(N.depthY + layer, N.depthY + 5 + layer * 0.5, k);
       _v.set(c.x + Math.cos(ang + lead) * R, y, c.z + Math.sin(ang + lead) * R);
       this._steer(w, _v, Math.max(4, N.w * R * 1.25), dt, 2, 3, 1.3, 0.8, 0.35);
       if (depth > 0.3) this.ballast(w, y, dt, 0.9);
       this._bubbles(w, dt, 10);
+      // where the curtain breaks the surface: a ring of froth tracing the spiral
+      this._froth(w, dt, sea);
       return true;
     }
     if (N.phase === 'lunge') {
       if (B.phase === 0) {
         // up through the fish, mouths wide, all together
-        _v.set(c.x + Math.cos(base) * 2.5, sea + w.L * 0.8, c.z + Math.sin(base) * 2.5);
+        _v.set(c.x + Math.cos(base) * N.Rl, sea + w.L * 0.8, c.z + Math.sin(base) * N.Rl);
         this._steer(w, _v, 15, dt, 1, 10, 2.2, 1.2, 0.2);
         if (depth > 0) w.vel.y += 6 * dt;
         w.drive.effort = 1;
@@ -942,6 +949,7 @@ export class HerdBehaviors {
           B.phase = 1;
           B.pt = 0;
           w.anim?.gesture?.('breachArch');
+          this._note(`${w.name} lunges out`);
           if (this.r() < 0.35) this.voice(w, 'answer', 4);
         }
         if (N.t > 9) B.phase = 1;
@@ -963,9 +971,9 @@ export class HerdBehaviors {
     }
     // after the lunge: lie at the surface, breathe (Swim.js spouts after the dive), mouths close
     const ang = base + 0.4;
-    _v.set(c.x + Math.cos(ang) * N.R0 * 0.7, sea - w.radius * 0.2, c.z + Math.sin(ang) * N.R0 * 0.7);
+    _v.set(c.x + Math.cos(ang) * N.R0 * 0.7, sea - w.radius * 0.5, c.z + Math.sin(ang) * N.R0 * 0.7);
     this._steer(w, _v, 3, dt, 8, 0, 0.9, 0.6, 0.6);
-    this.ballast(w, sea - w.radius * 0.2, dt, 0.7);
+    this.ballast(w, sea - w.radius * 0.5, dt, 0.7);
     w.drive.mouth = damp(w.drive.mouth, 0, 2, dt);
     w.drive.feed = damp(w.drive.feed, 0, 2, dt);
     if (N.phase === 'lunge' && B.phase < 2) B.phase = 2;
@@ -978,8 +986,10 @@ export class HerdBehaviors {
     const i = this.herd.calves.indexOf(w);
     const ang = N.a0 + 0.6 + i * 0.5;
     const R = N.R0 + 18;
-    _v.set(N.center.x + Math.cos(ang) * R, N.sea + 2.5, N.center.z + Math.sin(ang) * R);
+    const floatY = N.sea - w.radius * 0.5;
+    _v.set(N.center.x + Math.cos(ang) * R, floatY, N.center.z + Math.sin(ang) * R);
     this._steer(w, _v, 5, dt, 8, 0, 0.9, 0.6, 0.6);
+    if (this._depth(w) > -w.radius) this.ballast(w, floatY, dt, 0.7);
     w.drive.lookAt = N.center;
     w.drive.excite = damp(w.drive.excite, 0.6, 1, dt);
     if (Math.abs(this._depth(w)) < w.radius * 2.5) {
@@ -1015,6 +1025,36 @@ export class HerdBehaviors {
       em.sizeEnd = em.size * 1.6;
       em.alpha = 0.75;
       mist.emit(em);
+    }
+  }
+
+  /** Bubbles breaking the surface above a circling whale: soft froth puffs and a little foam. */
+  _froth(w, dt, sea) {
+    const B = w.beh, r = this.r;
+    B.aux.y = (B.aux.y || 0) + dt * 4;
+    B.aux.z = (B.aux.z || 0) + dt;
+    const mist = this.game.mist;
+    const em = this._em;
+    while (B.aux.y >= 1) {
+      B.aux.y -= 1;
+      if (!mist) continue;
+      em.pos.set(w.pos.x + (r() - 0.5) * 4, sea + 0.3, w.pos.z + (r() - 0.5) * 4);
+      em.vel.set((r() - 0.5) * 0.6, 0.15, (r() - 0.5) * 0.6);
+      em.life = 3 + r() * 1.5;
+      em.size = 1.0 + r() * 0.6;
+      em.sizeEnd = 2.6 + r() * 1.2;
+      em.alpha = 0.38;
+      em.drag = 3;
+      em.gravity = 0;
+      em.kind = 0;
+      em.fadeIn = 0.3;
+      mist.emit(em);
+    }
+    em.drag = 0.9; em.gravity = -1.6; em.kind = 4; em.fadeIn = 0.1;
+    if (B.aux.z > 1.4) {
+      B.aux.z = 0;
+      _v2.set(w.pos.x, sea, w.pos.z);
+      this.game.ocean?.splash?.(_v2, 0.15, 2.5 + w.L * 0.06);
     }
   }
 

@@ -85,6 +85,14 @@ export class Herd {
     this.behaviors = new HerdBehaviors(this);
   }
 
+  get _sf() {
+    return this.__sf || (this.__sf = { pos: new Vector3(), fwd: new Vector3(), right: new Vector3(), up: new Vector3() });
+  }
+
+  get _so() {
+    return this.__so || (this.__so = { arrive: 20, minSpeed: 0, touch: null });
+  }
+
   add(w, role) {
     w.role = role;
     this.whales.push(w);
@@ -117,8 +125,32 @@ export class Herd {
   }
 
   slotWorld(slot, s = this.s, out = new Vector3()) {
-    const f = this.path.frameAt(s + slot.z);
+    const f = this._frameAt(s + slot.z, this._sf);
     return out.copy(f.pos).addScaledVector(f.right, slot.x).addScaledVector(f.up, slot.y);
+  }
+
+  /** The path frame at s without allocating (like MigrationPath.frameAt), written into F. */
+  _frameAt(s, F) {
+    const path = this.path;
+    path.pointAt(s, F.pos);
+    const ahead = s + 1 <= path.length ? s + 1 : s - 1;
+    path.pointAt(ahead, F.fwd).sub(F.pos);
+    if (ahead < s) F.fwd.negate();
+    F.fwd.normalize();
+    F.right.set(-F.fwd.z, 0, F.fwd.x);
+    if (F.right.lengthSq() < 1e-8) F.right.set(1, 0, 0);
+    F.right.normalize();
+    F.up.crossVectors(F.right, F.fwd).normalize();
+    return F;
+  }
+
+  /** Shared steering options (no per-frame object literals). */
+  _opts(arrive, minSpeed = 0, touch = null) {
+    const o = this._so;
+    o.arrive = arrive;
+    o.minSpeed = minSpeed;
+    o.touch = touch;
+    return o;
   }
 
   get anchor() {
@@ -208,7 +240,7 @@ export class Herd {
     this.s += this.speed * (1 - wait * 0.92) * dt;
     this.s = Math.min(this.s, this.path.length - 20);
 
-    const f = this.path.frameAt(this.s);
+    const f = this._frameAt(this.s, this.frame && this.frame.own ? this.frame : { pos: new Vector3(), fwd: new Vector3(), right: new Vector3(), up: new Vector3(), own: true });
     this.frame = f;
     const fearAll = this.mode === 'protect' ? 0.7 : this.mode === 'shield' ? 0.4 : 0;
     const B = this.behaviors;
@@ -249,7 +281,7 @@ export class Herd {
         const rad = 70 + (idx % 2) * 18;
         target = _ring.copy(this.songCenter).add(_v2.set(Math.cos(a) * rad, (idx % 3 - 1) * 10, Math.sin(a) * rad));
         this._lift(w, target);
-        const dist = this.steer(w, target, 6, dt, { arrive: 30 });
+        const dist = this.steer(w, target, 6, dt, this._opts(30));
         if (dist < 25) {
           // hover and face the centre
           _v2.copy(this.songCenter).sub(w.pos);
@@ -267,7 +299,7 @@ export class Herd {
         const dir = _dir.set(Math.cos(th) * Math.sin(phi), Math.cos(phi) * 0.7, Math.sin(th) * Math.sin(phi));
         target = _ring.copy(this.protectCenter).addScaledVector(dir, rad);
         this._lift(w, target);
-        const dist = this.steer(w, target, 9, dt, { arrive: 20 });
+        const dist = this.steer(w, target, 9, dt, this._opts(20));
         if (dist < 18) {
           w.ctl.targetYaw = Math.atan2(dir.x, dir.z);
           w.ctl.targetPitch = clamp(dir.y, -0.4, 0.4);
@@ -276,21 +308,21 @@ export class Herd {
       } else if (this.mode === 'feed' && this.feedHook) {
         const ft = this.feedHook(w);
         if (ft) {
-          this.steer(w, ft, 11, dt, { arrive: 4, minSpeed: 6 });
+          this.steer(w, ft, 11, dt, this._opts(4, 6));
           const near = w.pos.distanceTo(ft) < 40;
           w.drive.feed = damp(w.drive.feed, near ? 1 : 0, 3, dt);
           w.drive.mouth = w.drive.feed;
         } else {
           target = this._lift(w, this.slotWorld(slot, this.s, _ring).add(drift));
-          this.steer(w, target, this.speed + 2, dt, { arrive: 40, minSpeed: this.speed * 0.6 });
+          this.steer(w, target, this.speed + 2, dt, this._opts(40, this.speed * 0.6));
         }
       } else if (this.mode === 'rest' || this.mode === 'sleep') {
         target = this._lift(w, this.slotWorld(slot, this.s, _ring).add(drift.multiplyScalar(0.4)));
-        this.steer(w, target, 3, dt, { arrive: 30 });
+        this.steer(w, target, 3, dt, this._opts(30));
         w.drive.sleep = this.mode === 'sleep' ? 1 : 0;
       } else {
         target = this._lift(w, this.slotWorld(slot, this.s, _ring).add(drift));
-        this.steer(w, target, this.speed + 3, dt, { arrive: 50, minSpeed: this.speed * 0.7 });
+        this.steer(w, target, this.speed + 3, dt, this._opts(50, this.speed * 0.7));
         w.drive.feed = damp(w.drive.feed, 0, 2, dt);
         w.drive.mouth = damp(w.drive.mouth, 0, 3, dt);
       }
@@ -370,7 +402,7 @@ export class Herd {
     if (this.motherScript) {
       // the story is directing her (demonstrations, cinematics)
       const r = this.motherScript(m, dt);
-      if (r && r.target) this.steer(m, r.target, r.speed ?? 8, dt, { arrive: r.arrive ?? 8, minSpeed: r.minSpeed ?? 0 });
+      if (r && r.target) this.steer(m, r.target, r.speed ?? 8, dt, this._opts(r.arrive ?? 8, r.minSpeed ?? 0));
       m.drive.lookAt = r?.lookAt ?? calf.pos;
       if (r?.face) {
         _v.copy(r.face).sub(m.pos);
@@ -381,7 +413,7 @@ export class Herd {
     if (this.mode === 'gather' && this.songCenter) {
       // beside the calf in the ring, facing the centre
       target = _ring.copy(this.songCenter).add(_v.set(-28, 4, 46));
-      this.steer(m, target, 6, dt, { arrive: 25 });
+      this.steer(m, target, 6, dt, this._opts(25));
       m.drive.lookAt = calf.pos;
       return;
     }
@@ -390,7 +422,7 @@ export class Herd {
       const inside = calf.pos.distanceTo(this.protectCenter) < 30;
       target = _ring.copy(this.protectCenter).add(_v.set(-6, 2, 0));
       if (inside) target.lerp(calf.pos, 0.3);
-      const away = this.steer(m, target, 9, dt, { arrive: 12, minSpeed: 0 });
+      const away = this.steer(m, target, 9, dt, this._opts(12));
       // once she holds her place in the shelter she turns to face her calf
       _v.copy(calf.pos).sub(m.pos);
       if (away < 14 && _v.length() > 6) m.ctl.targetYaw = Math.atan2(_v.x, _v.z);
@@ -404,7 +436,7 @@ export class Herd {
       const wdir = _v.copy(this.game.wind.base).normalize();
       target = _ring.copy(calf.pos).addScaledVector(wdir, -14);
       target.y += 2;
-      this.steer(m, target, Math.max(8, calfSpeed + 3), dt, { arrive: 8, minSpeed: 2 });
+      this.steer(m, target, Math.max(8, calfSpeed + 3), dt, this._opts(8, 2));
       m.drive.lookAt = calf.pos;
       return;
     }
@@ -414,7 +446,7 @@ export class Herd {
       // she holds her place in the herd, leaning toward her calf (chasing the calf, who nestles
       // against her, made the pair drift away from the herd)
       target = this.slotWorld(m.slot, this.s, _ring).lerp(calf.pos, 0.25);
-      this.steer(m, target, 3, dt, { arrive: 14 });
+      this.steer(m, target, 3, dt, this._opts(14));
       m.drive.lookAt = calf.pos;
       m.drive.sleep = this.mode === 'sleep' ? 1 : damp(m.drive.sleep, 0, 1, dt);
       return;
@@ -427,14 +459,14 @@ export class Herd {
     else if (care.mode === 'wait' && d < 28) care.mode = 'lead';
     if (care.mode === 'fetch') {
       target = this._lift(m, _ring.copy(calf.pos).add(_v.set(0, 4, 0)));
-      this.steer(m, target, 16, dt, { arrive: 20, minSpeed: 4 });
+      this.steer(m, target, 16, dt, this._opts(20, 4));
       if (care.callT <= 0) { this.voiceHooks?.(m, 'answer'); care.callT = 5; }
       m.drive.lookAt = calf.pos;
       m.drive.happy = damp(m.drive.happy, 0, 1, dt);
     } else if (care.mode === 'wait') {
       // hover near her slot facing the calf, calling gently
       target = this._lift(m, this.slotWorld(m.slot, this.s, _ring).lerp(calf.pos, 0.35));
-      this.steer(m, target, 4, dt, { arrive: 25 });
+      this.steer(m, target, 4, dt, this._opts(25));
       if (d < 120) {
         _v.copy(calf.pos).sub(m.pos);
         m.ctl.targetYaw = Math.atan2(_v.x, _v.z);
@@ -444,13 +476,13 @@ export class Herd {
     } else {
       // lead: ahead of the calf, beside the route, matching its pace
       const ahead = clamp(this.calfS + 18, this.s - 40, this.s + 30);
-      target = this.path.frameAt(ahead).pos.addScaledVector(f.right, -10);
+      target = this.path.pointAt(ahead, _ring).addScaledVector(f.right, -10);
       target.y += 4;
       // drift toward the calf's line so she stays visible
       target.lerp(_v.copy(calf.pos).addScaledVector(calf.fwd, 22), 0.35);
       this._lift(m, target);
       const pace = Math.max(this.speed, Math.min(calfSpeed, 14)) + 1;
-      this.steer(m, target, pace, dt, { arrive: 25, minSpeed: this.speed * 0.5 });
+      this.steer(m, target, pace, dt, this._opts(25, this.speed * 0.5));
       m.drive.lookAt = Math.sin(this.time * 0.35) > -0.2 ? calf.pos : null;
     }
   }
@@ -475,7 +507,7 @@ export class Herd {
         // swim up to the player, chirp and spin, then dart away
         target = _ring.copy(calf.pos).addScaledVector(calf.fwd, 10);
         target.y += 2;
-        const d = this.steer(c, target, Math.max(10, calf.vel.length() + 5), dt, { arrive: 6 });
+        const d = this.steer(c, target, Math.max(10, calf.vel.length() + 5), dt, this._opts(6));
         c.drive.lookAt = calf.pos;
         c.drive.happy = 1;
         c.drive.excite = 1;
@@ -488,7 +520,7 @@ export class Herd {
         }
       } else if (P.mode === 'flee') {
         // lead the player on a chase, weaving
-        const d = this.steer(c, P.goal, 13 + Math.sin(P.t * 2) * 2, dt, { arrive: 10, minSpeed: 6 });
+        const d = this.steer(c, P.goal, 13 + Math.sin(P.t * 2) * 2, dt, this._opts(10, 6));
         c.drive.lookAt = calf.pos;
         c.drive.excite = 1;
         if (d < 25 || P.t > 9) {
@@ -505,7 +537,7 @@ export class Herd {
           this.onCaught?.(c);
         }
       } else if (P.mode === 'chase') {
-        this.steer(c, calf.pos, Math.max(9, calf.vel.length() * 0.9), dt, { arrive: 4, touch: calf });
+        this.steer(c, calf.pos, Math.max(9, calf.vel.length() * 0.9), dt, this._opts(4, 0, calf));
         c.drive.lookAt = calf.pos;
         if (P.t > 6) { P.mode = 'flee'; P.t = 0; }
       }
@@ -519,7 +551,7 @@ export class Herd {
     if (this.mode === 'protect' && this.protectCenter) target.copy(this.protectCenter).addScaledVector(c.slotOffset, 0.6);
     if (this.mode === 'gather' && this.songCenter) { target.copy(par.pos).addScaledVector(par.fwd, 6); target.y -= 6; }
     this._lift(c, target);
-    this.steer(c, target, Math.max(4, par.vel.length() + 3), dt, { arrive: 10, minSpeed: 0 });
+    this.steer(c, target, Math.max(4, par.vel.length() + 3), dt, this._opts(10));
     c.drive.lookAt = Math.sin(c.phase * 0.4) > 0.3 ? calf.pos : par.pos;
     c.drive.fear = damp(c.drive.fear, this.mode === 'protect' ? 0.9 : 0, 1, dt);
   }

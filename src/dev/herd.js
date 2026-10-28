@@ -1,7 +1,7 @@
 // Dev scene: the herd's bodies and social life over the sea of Vur Sok.
 // ?debug&test=herd                     the whole herd travelling low over the sea; a scripted calf runs
 //                                      into its mother, a playmate and the alpha in turn (bouncy contacts)
-//   &calf=bump|follow|idle|roll|hum    the calf's autopilot (default bump)
+//   &calf=bump|follow|idle|roll|hum|dive  the calf's autopilot (default bump; dive: under until its air runs low)
 //   &mode=travel|rest|feed             the herd mode (default travel)   &speed=<m/s> herd speed (default 4)
 //   &s=<arc length>                    where on the migration path (default 300; &net defaults to 2700)
 //   &net                               the spiral bubble-net hunt beneath a fish school (Feasting Shoals)
@@ -111,12 +111,14 @@ export default async function (game) {
     if (calfMode === 'bump') {
       const o = auto.target;
       if (auto.phase === 'approach') {
+        // (dev) the target stays put for the demo: no new games while the calf comes in
+        if (auto.t < dt * 1.5 && o.beh && o.beh.type !== 'chasePlayer' && o.beh.type !== 'bumpBack') { herd.behaviors.end(o); o.beh.cd = 25; }
         // aim at the body's flank (between the axis middle and the head)
         o.nearestOnBody(calf.pos, tgt);
         tgt.addScaledVector(o.fwd, o.L * 0.08);
         steerOpts.touch = o;
         steerOpts.minSpeed = o.isCalf ? 6 : 8;
-        herd.steer(calf, tgt, o.isCalf ? 8 : 10, dt, steerOpts);
+        herd.steer(calf, tgt, o.isCalf ? 10 : 11, dt, steerOpts);
         if (auto.t > 14) { auto.phase = 'back'; auto.t = 0; }
       } else {
         away.copy(calf.pos).sub(o.pos).setY(0).normalize();
@@ -125,8 +127,21 @@ export default async function (game) {
         steerOpts.touch = null;
         steerOpts.minSpeed = 2;
         herd.steer(calf, tgt, 6, dt, steerOpts);
-        if (auto.t > 2.8) { auto.k = (auto.k + 1) % order.length; auto.target = order[auto.k]; auto.phase = 'approach'; auto.t = 0; }
+        if (auto.t > 2.2) { auto.k = (auto.k + 1) % order.length; auto.target = order[auto.k]; auto.phase = 'approach'; auto.t = 0; }
       }
+      return;
+    }
+    if (calfMode === 'dive') {
+      // beside mother for 4 s, then down under the sea and held there until the air runs low
+      const sea = herd.seaY(calf.pos.x, calf.pos.z);
+      const under = auto.t > 4 && auto.t < 26;
+      tgt.copy(calf.pos).addScaledVector(mom.fwd, 20);
+      tgt.y = under ? sea - 7 : Math.max(mom.pos.y - 2, herd.floorY(calf, tgt.x, tgt.z));
+      steerOpts.touch = mom;
+      steerOpts.minSpeed = 2;
+      herd.steer(calf, tgt, 7, dt, steerOpts);
+      if (under && calf.water && calf.water.depth > 1) calf.vel.y -= (calf.phys.sink + 3.2 + (calf.pos.y - tgt.y) * 0.8) * dt * 0.9;
+      if (auto.t > 40) auto.t = 0;
       return;
     }
     // follow / roll / hum: fly beside the mother
@@ -165,13 +180,13 @@ export default async function (game) {
       want3.copy(mom.pos).addScaledVector(mom.right, mom.L * 1.4).add(away.set(0, 6, 0));
     } else {
       // side: frame the calf and whoever it is running into
-      wantL.copy(calf.pos).lerp(o.pos, 0.45);
+      wantL.copy(calf.pos).lerp(o.pos, o.isCalf ? 0.45 : 0.25);
       const sep = calf.pos.distanceTo(o.pos);
       away.copy(o.pos).sub(calf.pos).setY(0);
       if (away.lengthSq() < 1e-3) away.set(1, 0, 0);
       away.normalize().set(-away.z, 0, away.x);
-      want3.copy(wantL).addScaledVector(away, 22 + o.L * 0.9 + sep * 0.6);
-      want3.y += 7 + o.L * 0.2;
+      want3.copy(wantL).addScaledVector(away, 9 + o.L * 0.55 + sep * 0.5);
+      want3.y += 3 + o.L * 0.15;
     }
     if (!camInit) { cp.copy(want3); cl.copy(wantL); camInit = true; }
     cp.lerp(want3, 1 - Math.exp(-dt * 2));
@@ -185,6 +200,8 @@ export default async function (game) {
   window.__herdTrace = trace;
   let traceT = 0;
   game.devUpdate = (dt) => {
+    // Game.warp simulates without aging particles: age them here so warped shots show the present
+    if (game.frame === 0) { game.mist.update(dt); game.glow.update(dt); }
     traceT += dt;
     if (traceT > 0.5) {
       traceT = 0;

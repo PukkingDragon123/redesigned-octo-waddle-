@@ -1,30 +1,33 @@
-// The migration route: one seamless spline from the Dawn Cradle to the Oasis, with chapters
+// The migration route: one seamless spline from the Dawn Lagoon to the Oasis, with chapters
 // (regions) along its arc length. Everything in the world is placed relative to this path.
 import { CatmullRomCurve3, Vector3 } from 'three';
 import { clamp } from '../core/math.js';
 
+// Vur Sok: the route skims the sea (y = 0) at 15-110 m, weaving between the spiral islands. The
+// x/z course and the total arc length (~12.09 km) are those of the original route, so every chapter
+// keeps its start; only the altitudes changed (the Feasting Shoals run at 15-30 m over the water).
 const POINTS = [
-  [0, 150, 0], [60, 156, -480], [-30, 150, -980],
-  [-150, 138, -1450], [-120, 120, -1860], [30, 146, -2260],
-  [170, 168, -2700], [230, 176, -3200], [130, 166, -3700],
-  [-40, 146, -4150], [-180, 140, -4600], [-150, 152, -5050],
-  [0, 205, -5450], [90, 222, -5820], [70, 212, -6220],
-  [-60, 186, -6700], [-130, 160, -7200], [-40, 150, -7700],
-  [100, 166, -8200], [170, 196, -8700], [90, 212, -9200],
-  [0, 262, -9600], [-20, 322, -10000], [-30, 332, -10500],
-  [0, 322, -11200], [20, 316, -11800],
+  [0, 8, 0], [60, 22, -480], [-30, 45, -981],
+  [-150, 70, -1451], [-120, 40, -1861], [30, 46, -2261],
+  [170, 20, -2702], [230, 17, -3202], [130, 24, -3702],
+  [-40, 70, -4153], [-180, 85, -4603], [-150, 75, -5053],
+  [0, 55, -5454], [90, 50, -5824], [70, 45, -6224],
+  [-60, 55, -6704], [-130, 80, -7205], [-40, 95, -7705],
+  [100, 100, -8205], [170, 110, -8706], [90, 70, -9206],
+  [0, 55, -9606], [-20, 65, -10007], [-30, 70, -10507],
+  [0, 60, -11207], [20, 55, -11808],
 ];
 
 export const CHAPTERS = [
-  { id: 'cradle', name: 'Dawn Cradle', start: 0, time: 'dawn', mood: 'dawn' },
-  { id: 'valleys', name: 'Floating Valleys', start: 900, time: 'morning', mood: 'flight' },
-  { id: 'krill', name: 'Krill Fields', start: 2600, time: 'noon', mood: 'krill' },
-  { id: 'forest', name: 'Cloud Forest', start: 3900, time: 'afternoon', mood: 'forest' },
+  { id: 'cradle', name: 'Dawn Lagoon', start: 0, time: 'dawn', mood: 'dawn' },
+  { id: 'valleys', name: 'The Spiral Reach', start: 900, time: 'morning', mood: 'flight' },
+  { id: 'krill', name: 'The Feasting Shoals', start: 2600, time: 'noon', mood: 'krill' },
+  { id: 'forest', name: 'The Coil Forest', start: 3900, time: 'afternoon', mood: 'forest' },
   { id: 'song', name: 'The Herd Song', start: 5400, time: 'golden', mood: 'song' },
   { id: 'night', name: 'Night Passage', start: 6250, time: 'night', mood: 'night' },
   { id: 'storm', name: 'The Storm', start: 6950, time: 'storm', mood: 'storm' },
   { id: 'falcon', name: 'The Falcon', start: 8350, time: 'stormDawn', mood: 'danger' },
-  { id: 'wall', name: 'The Cloud Wall', start: 9350, time: 'stormDawn', mood: 'cloudwall' },
+  { id: 'wall', name: 'The Fog Wall', start: 9350, time: 'stormDawn', mood: 'cloudwall' },
   { id: 'oasis', name: 'The Oasis', start: 9950, time: 'oasis', mood: 'oasis' },
 ];
 

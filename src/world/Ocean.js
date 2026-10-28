@@ -47,8 +47,8 @@ const MAXW = 64;
 
 // Sea state keys: 0 glassy, 0.3 calm, 0.6 lively, 1 storm (6-12 m swells).
 const KEYS = [0, 0.3, 0.6, 1];
-const HS = [0.035, 0.55, 1.9, 7.6]; // significant height of the wind sea (m)
-const TP = [2.4, 5.4, 8.4, 13.0]; // peak period (s)
+const HS = [0.035, 0.6, 2.2, 9.0]; // significant height of the wind sea (m)
+const TP = [2.4, 5.2, 7.6, 10.5]; // peak period (s)
 const HSW = [0.14, 0.42, 0.85, 2.4]; // swell height (m)
 const CHOP = [0.55, 0.85, 1.0, 1.1];
 const FOAMJ = [-0.4, 0.18, 0.42, 0.66]; // Jacobian below which crests break into foam
@@ -195,7 +195,9 @@ varying vec2 vGrid;
 varying float vViewZ;
 varying float vShelter;
 varying float vDispY;
+varying float vCrest;
 varying float vSpacing;
+uniform float uCrestNorm;
 
 vec2 casUv(vec2 p, vec4 c) { return vec2(dot(p, c.xy), dot(p, vec2(-c.y, c.x))); }
 float shelterAt(vec2 p) {
@@ -213,8 +215,10 @@ void main() {
   float sp = aSpacing;
   vec3 D = vec3(0.0);
   D += textureLod(uA0, casUv(grid, uCas[0]), max(log2(sp / uCas[0].z), 0.0)).xyz;
-  D += textureLod(uA1, casUv(grid, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
-  D += textureLod(uA2, casUv(grid, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
+  vec3 D12 = textureLod(uA1, casUv(grid, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
+  D12 += textureLod(uA2, casUv(grid, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
+  D += D12;
+  vCrest = D12.y * uCrestNorm;
   float sh = shelterAt(grid);
   D *= sh;
   if (uSimXf.w > 0.0) {
@@ -266,7 +270,10 @@ varying vec2 vGrid;
 varying float vViewZ;
 varying float vShelter;
 varying float vDispY;
+varying float vCrest;
 varying float vSpacing;
+uniform vec2 uFoamJ;
+uniform int uDebug;
 
 vec2 casUv(vec2 p, vec4 c) { return vec2(dot(p, c.xy), dot(p, vec2(-c.y, c.x))); }
 
@@ -349,7 +356,10 @@ void main() {
 
   // normal of the displaced (trochoidal) surface
   float jx = max(1.0 + dxx, 0.15), jz = max(1.0 + dzz, 0.15);
+  float Jt = (1.0 + dxx) * (1.0 + dzz) - dxz * dxz;
   float J = max(jx * jz - dxz * dxz, 0.05);
+  // crests breaking right now (the whole sea's compression), on top of the lingering foam
+  crestFoam = max(crestFoam, clamp((uFoamJ.x - Jt) * uFoamJ.y, 0.0, 1.0) * sh);
   vec3 N = normalize(vec3(hz * dxz - hx * jz, J, dxz * hx - hz * jx));
   float s2 = 0.5 * (vx + vz) + cap;
 
@@ -362,6 +372,7 @@ void main() {
   float surfZ = vViewZ;
   float jit = ign(gl_FragCoord.xy);
   vec3 col;
+  vec4 dbg = vec4(0.0);
 
   if (uUnderwater < 0.5) {
     // ================================ seen from above ================================
@@ -396,10 +407,12 @@ void main() {
     // light scattered up out of the water; thin crests glow turquoise when backlit
     vec3 Lh = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(1e-4));
     float toward = pow(clamp(dot(-V, Lh) * 0.5 + 0.5, 0.0, 1.0), 4.0);
-    float crest = clamp(vDispY / max(uSeaFar.z * 2.2, 0.06) + 0.15, 0.0, 1.0);
+    // thin water near the tops of the short wind waves, backlit; strongest with a low sun
+    float crest = smoothstep(0.2, 1.8, vCrest);
     float face = pow(1.0 - nv, 2.0);
     float sunUp = smoothstep(-0.05, 0.2, uSunDir.y);
-    float sss = (crest * crest * toward * (0.35 + face) * 1.4 + crest * 0.12) * sunUp * mix(0.35, 1.0, shadow);
+    float lowSun = mix(1.0, 0.45, smoothstep(0.3, 0.8, uSunDir.y));
+    float sss = crest * toward * (0.25 + face * 1.6) * sunUp * lowSun * mix(0.35, 1.0, shadow);
     sss *= (1.0 - farK);
     vec3 body = uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) + uSeaScatter * sss;
 
@@ -426,8 +439,8 @@ void main() {
     float shore = 0.0;
     if (!open) {
       float wz = max(sceneZ - surfZ, 0.0);
-      float wash = 0.5 + 0.5 * sin(uTime * 1.3 - wz * 3.0 + lace * 9.0);
-      shore = smoothstep(0.9, 0.0, wz) * (0.55 + 0.45 * wash) * uFoamCtl.z;
+      float churn = texture2D(uNoise, p / 4.3 + vec2(uTime * 0.03, -uTime * 0.021)).g;
+      shore = smoothstep(0.75, 0.0, wz) * (0.45 + 0.55 * churn) * uFoamCtl.z;
       cover += shore;
     }
     float foamA = smoothstep(1.0 - cover, 1.25 - cover * 0.6, bubbles * 0.7 + lace * 0.45) * min(cover * 3.0, 1.0);
@@ -436,6 +449,7 @@ void main() {
     foamLit += uMoonColor * uNight * 0.5;
     vec3 foamCol = foamLit * mix(0.78, 0.95, bub2);
     col = mix(col, foamCol * (1.0 - f) + C * f, foamA);
+    dbg = vec4(bubbles, lace, foamA, 0.0);
 
     // night: plankton flare where the water is churned
     float glow = (simGlow * 1.2 + crestFoam * 0.25 + shore * 0.5 + simFoam * 0.3) * uWaterParams.z;
@@ -477,6 +491,12 @@ void main() {
     col = mix(col, fogc * 0.6 + uWaterTint * 0.4, foamU * 0.5);
     col += vec3(0.08, 0.55, 0.85) * (simGlow + crestFoam * 0.2) * uWaterParams.z * 0.6;
   }
+  if (uDebug == 1) col = vec3(crestFoam, simFoam, 0.0);
+  else if (uDebug == 2) col = vec3(Jt * 0.5, J * 0.5, 0.0);
+  else if (uDebug == 3) col = N * 0.5 + 0.5;
+  else if (uDebug == 4) col = vec3(sqrt(s2) * 4.0, patchy * 0.5, vCrest * 0.25 + 0.5);
+  else if (uDebug == 5) col = vec3(vDispY * 0.1 + 0.5);
+  else if (uDebug == 6) col = dbg.xyz;
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -717,6 +737,21 @@ export class Ocean {
     active.sort((a, b) => b.A - a.A);
     this.chop = keyed(CHOP, s);
     this.foamJ = keyed(FOAMJ, s);
+    // each cascade breaks at its share of the whole sea's compression
+    let sigT = 0, m12 = 0;
+    for (const c of this.cascades) {
+      let v = 0;
+      for (const w of c.waves) v += (w.A * w.k) ** 2 * 0.5;
+      c.sig = c.def.disp ? this.chop * Math.sqrt(v) : 0;
+      sigT += c.sig * c.sig;
+      if (c.def.disp && c.def.L < 1000) for (const w of c.waves) m12 += w.A * w.A * 0.5;
+    }
+    sigT = Math.sqrt(sigT);
+    for (const c of this.cascades) c.foamJ = 1 - (1 - this.foamJ) * (sigT > 0 ? c.sig / sigT : 1);
+    if (this.uniforms) {
+      this.uniforms.uCrestNorm.value = 1 / Math.max(Math.sqrt(m12), 0.01);
+      this.uniforms.uFoamJ.value.set(this.foamJ, 2.5);
+    }
     this.rms = Math.sqrt(m0);
     this.Hs = Hs;
     // capillary ripples below the smallest cascade
@@ -790,6 +825,9 @@ export class Ocean {
       uWindDir: { value: new Vector2(Math.sin(WIND0), Math.cos(WIND0)) },
       uDrift: { value: new Vector2() },
       uMeshEdge: { value: 7600 },
+      uCrestNorm: { value: 1 },
+      uFoamJ: { value: new Vector2(0.3, 3) },
+      uDebug: { value: 0 },
     });
     this.material = new ShaderMaterial({
       vertexShader: OCEAN_VERT,
@@ -1102,7 +1140,7 @@ export class Ocean {
       // big breakers leave foam longer than small ones
       const tau = decayBase * (c.def.L > 1000 ? 1.4 : c.def.L > 100 ? 1 : 0.55);
       m.uDecay.value = Math.exp(-dt / tau);
-      m.uFoamJ.value.set(this.foamJ, 2.2);
+      m.uFoamJ.value.set(c.foamJ ?? this.foamJ, 2.2);
       c.pass.render(r, dst);
     }
     const [c0, c1, c2, c3] = this.cascades;

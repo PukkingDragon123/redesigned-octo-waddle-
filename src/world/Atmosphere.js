@@ -283,7 +283,7 @@ export class Atmosphere {
     G.uSeaScatter.value.copy(p.seaScatter).multiply(sc).multiplyScalar(0.18);
     // under water the light is scattered by the column itself: brighter and greener than the deep
     const wr = lerp(p.sea.r, p.seaScatter.r, 0.35), wg = lerp(p.sea.g, p.seaScatter.g, 0.35), wb = lerp(p.sea.b, p.seaScatter.b, 0.35);
-    G.uWaterTint.value.setRGB(wr * inR * 1.6, wg * inG * 1.6, wb * inB * 1.6);
+    G.uWaterTint.value.setRGB(wr * inR * 0.7, wg * inG * 0.7, wb * inB * 0.7);
     const cl = p.clarity * murk;
     G.uWaterAbsorb.value.set(0.3 * (0.8 + 0.2 * cl), 0.06 * cl, 0.038 * cl);
     G.uWaterParams.value.z = p.plankton;

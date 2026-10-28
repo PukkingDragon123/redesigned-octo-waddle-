@@ -172,6 +172,41 @@ export function computeNormals(pos, idx) {
 }
 
 /**
+ * Mean-curvature proxy per vertex: (average neighbour - vertex) . normal, divided by the mean edge
+ * length and smoothed once. Positive in creases and hollows, negative on ridges, lips and corners.
+ */
+export function computeCurvature(pos, nor, idx) {
+  const nV = pos.length / 3;
+  const sx = new Float32Array(nV), sy = new Float32Array(nV), sz = new Float32Array(nV);
+  const cnt = new Float32Array(nV), len = new Float32Array(nV);
+  for (let t = 0; t < idx.length; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = idx[t + e], b = idx[t + ((e + 1) % 3)];
+      const dx = pos[b * 3] - pos[a * 3], dy = pos[b * 3 + 1] - pos[a * 3 + 1], dz = pos[b * 3 + 2] - pos[a * 3 + 2];
+      const l = Math.hypot(dx, dy, dz);
+      sx[a] += dx; sy[a] += dy; sz[a] += dz; cnt[a]++; len[a] += l;
+      sx[b] -= dx; sy[b] -= dy; sz[b] -= dz; cnt[b]++; len[b] += l;
+    }
+  }
+  const k = new Float32Array(nV);
+  for (let i = 0; i < nV; i++) {
+    if (!cnt[i]) continue;
+    const c = cnt[i], ml = len[i] / c || 1;
+    k[i] = (sx[i] * nor[i * 3] + sy[i] * nor[i * 3 + 1] + sz[i] * nor[i * 3 + 2]) / c / ml;
+  }
+  // one smoothing pass over the edges
+  const acc = new Float32Array(nV), w = new Float32Array(nV);
+  for (let t = 0; t < idx.length; t += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = idx[t + e], b = idx[t + ((e + 1) % 3)];
+      acc[a] += k[b]; w[a]++; acc[b] += k[a]; w[b]++;
+    }
+  }
+  for (let i = 0; i < nV; i++) k[i] = w[i] ? k[i] * 0.5 + 0.5 * acc[i] / w[i] : k[i];
+  return k;
+}
+
+/**
  * Lathe: horizontal rings stacked from yBot to the rim, then an optional cap.
  * spec: {
  *   ys: array of ring heights (bottom -> top), segs,
@@ -325,28 +360,34 @@ export function finishGeometry(mesh, paint, opts = {}) {
   const pos = new Float32Array(mesh.p);
   const idx = nV > 65535 ? new Uint32Array(mesh.idx) : new Uint16Array(mesh.idx);
   const nor = computeNormals(pos, idx);
+  const curv = computeCurvature(pos, nor, idx);
   const col = new Float32Array(nV * 3);
   const mat = new Float32Array(nV * 4);
-  const ext = new Float32Array(nV * 2);
+  const ext = new Float32Array(nV * 3);
   const out = { r: 0.5, g: 0.5, b: 0.5, grass: 0, sand: 0, kind: 0, heat: 0, ao: 1, strata: 0 };
   const P = new Vector3(), N = new Vector3();
   for (let i = 0; i < nV; i++) {
     P.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
     N.set(nor[i * 3], nor[i * 3 + 1], nor[i * 3 + 2]);
     out.grass = 0; out.sand = 0; out.kind = 0; out.heat = 0;
-    out.ao = mesh.ao[i];
+    // crevices darken (cavity AO), convex edges wear pale
+    const k = curv[i];
+    const cavity = smoothstep(0.04, 0.32, k), edge = smoothstep(0.04, 0.3, -k);
+    out.ao = mesh.ao[i] * (1 - 0.55 * cavity);
     out.strata = mesh.s[i];
-    paint(P, N, mesh.s[i], mesh.ao[i], mesh.t[i], out, i);
+    out.edge = edge;
+    out.cavity = cavity;
+    paint(P, N, mesh.s[i], out.ao, mesh.t[i], out, i);
     col[i * 3] = out.r; col[i * 3 + 1] = out.g; col[i * 3 + 2] = out.b;
     mat[i * 4] = out.grass; mat[i * 4 + 1] = out.sand; mat[i * 4 + 2] = out.kind; mat[i * 4 + 3] = out.heat;
-    ext[i * 2] = out.ao; ext[i * 2 + 1] = out.strata;
+    ext[i * 3] = out.ao; ext[i * 3 + 1] = out.strata; ext[i * 3 + 2] = out.edge;
   }
   const geo = new BufferGeometry();
   geo.setAttribute('position', new BufferAttribute(pos, 3));
   geo.setAttribute('normal', new BufferAttribute(nor, 3));
   geo.setAttribute('color', new BufferAttribute(col, 3));
   geo.setAttribute('aMat', new BufferAttribute(mat, 4));
-  geo.setAttribute('aExt', new BufferAttribute(ext, 2));
+  geo.setAttribute('aExt', new BufferAttribute(ext, 3));
   geo.setIndex(new BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   geo.computeBoundingBox();

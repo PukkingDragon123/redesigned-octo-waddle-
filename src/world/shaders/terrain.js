@@ -13,12 +13,12 @@ export const SEA_DECL = /uniform\s+float\s+uSeaState\b/.test(UNIFORMS) ? '' : 'u
 export const TERRAIN_VERT = /* glsl */ `
 ${UNIFORMS}
 attribute vec4 aMat;
-attribute vec2 aExt;
+attribute vec3 aExt;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec3 vColor;
 varying vec4 vMat;
-varying vec2 vExt;
+varying vec3 vExt;
 void main() {
   vec3 transformed = position;
   vec3 n = normal;
@@ -65,7 +65,7 @@ varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec3 vColor;
 varying vec4 vMat;
-varying vec2 vExt;
+varying vec3 vExt;
 
 vec4 triN(vec3 p, vec3 w, float s) {
   return texture2D(uNoise, p.zy * s) * w.x + texture2D(uNoise, p.xz * s) * w.y + texture2D(uNoise, p.xy * s + 0.37) * w.z;
@@ -106,6 +106,7 @@ void main() {
 
   float meadowIn = vMat.x, sandIn = vMat.y, kind = vMat.z, heat = vMat.w;
   float cav = vExt.x;
+  float edgeW = vExt.z;
   float steep = 1.0 - smoothstep(0.45, 0.8, N.y);
 
   vec4 nM = triN(P, w, 1.0 / 95.0);
@@ -157,6 +158,10 @@ void main() {
   float joint = smoothstep(0.06, 0.0, edgeD) * mesoF * jointMask + smoothstep(0.03, 0.0, bigEdge) * steep * 0.9;
   rock *= 1.0 - joint * 0.45;
 
+  // edge wear: convex lips and corners chipped pale (geometric), plus the lit lip of each facet
+  float lip = smoothstep(0.12, 0.02, edgeD) * (1.0 - smoothstep(0.02, 0.0, edgeD)) * mesoF * 0.5;
+  float wear = clamp(edgeW * (0.6 + 0.6 * nm.b) + lip * (1.0 - joint), 0.0, 1.0);
+  rock = mix(rock, mix(rock, vec3(luma(rock)), 0.35) * 1.38, wear * 0.55);
   // rain streaks down steep faces (tiger stripes on limestone), rust seeps
   float streakA = texture2D(uNoise, vec2(P.z / 7.0, P.y / 75.0)).b;
   float streakB = texture2D(uNoise, vec2(P.x / 7.0 + 0.5, P.y / 75.0)).b;

@@ -24,9 +24,9 @@ const noise = new Noise(4242);
 // value structure comes from band contrast, not brightness.
 const hexes = (a, k = 1) => a.map((h) => new Color(h).multiplyScalar(k));
 export const ROCK = {
-  banded: { kind: 0, bands: hexes(['#b8a283', '#8f7f70', '#c4ad8b', '#7d7286', '#a57d5f', '#8d8c86', '#bb9c78', '#6b6578', '#a99377'], 0.62) },
+  banded: { kind: 0, bands: hexes(['#b3a184', '#9a8b78', '#bfae90', '#8c8590', '#a88f74', '#94918a', '#b6a083', '#7f7a84', '#a39580'], 0.62) },
   limestone: { kind: 0, bands: hexes(['#bdb4a2', '#a69c89', '#c6bca8', '#958c7c', '#b2a58e', '#a39b8f', '#8e877b'], 0.6) },
-  warm: { kind: 0, bands: hexes(['#b98b64', '#9e7056', '#c79f78', '#86695a', '#b0866a', '#927b72', '#a9744f'], 0.62) },
+  warm: { kind: 0, bands: hexes(['#b38f6e', '#9c7c66', '#c2a181', '#8c7568', '#ad8b70', '#968379', '#a57f62'], 0.62) },
   basalt: { kind: 1, bands: hexes(['#4d5059', '#3f4149', '#58534f', '#474a50', '#5f5b58', '#3b3c40'], 0.85) },
   volcanic: { kind: 1, bands: hexes(['#2f2e32', '#39373b', '#262528', '#48413e', '#5b4038', '#333034'], 0.9) },
 };
@@ -69,6 +69,8 @@ export function rockPainter(style) {
     else if (volcanic) out.sand = smoothstep(2.0, 0.8, P.y) * smoothstep(0.5, 0.8, N.y) * smoothstep(-5, -1, P.y);
     out.heat = style.heat ? style.heat(P) : 0;
     if (out.heat > 0) { const h = out.heat; out.r = lerp(out.r, 0.06, h * 0.5); out.g = lerp(out.g, 0.05, h * 0.5); out.b = lerp(out.b, 0.05, h * 0.5); }
+    // moss and lichen gather in the crevices above the spray
+    if (out.cavity > 0.05 && P.y > 6 && !volcanic) out.grass = Math.max(out.grass, out.cavity * 0.55 * meadow * smoothstep(0.1, 0.5, N.y + 0.3));
     out.ao = ao;
     out.strata = s;
   };
@@ -321,7 +323,7 @@ export function coilShape(o) {
   };
   const sideW = (y, top, w) => {
     const u = clamp(y / Math.max(top, 1), 0, 1);
-    let k = lerp(1.06, 0.9, Math.pow(u, 0.9));
+    let k = lerp(1.08, o.topK ?? 0.8, Math.pow(u, 1.1));
     if (y < 0) k *= 1 + 0.42 * smoothstep(0, -14, y);
     k *= notch(y, o.notch ?? 0.12, 1.2, 2.2);
     return w * k;
@@ -441,6 +443,136 @@ export function coilShape(o) {
       if (horn) {
         const pr = horn.build(det);
         mesh.append(pr.mesh);
+      }
+      return { mesh, rim };
+    },
+  };
+}
+
+// ---- archetype: upright ammonite --------------------------------------------------------------
+/**
+ * A rock shell standing on edge in the sea: a whorl swept along a logarithmic spiral in a vertical
+ * plane, ribbed and keeled like an ammonite, its outer whorl arching into the water.
+ * o: { R (outer radius), b, turns, whorl (radial half-height / rho), thick (half-width / rho),
+ *      yc (height of the coil centre), yaw (plane orientation), ribs (per turn), seed }
+ */
+export function ammoniteShape(o) {
+  const seed = o.seed ?? 1;
+  const Rout = o.R ?? 80;
+  const b = o.b ?? 0.18;
+  const turns = o.turns ?? 2.3;
+  const phi1 = turns * TAU;
+  const a = Math.max(2.5, Rout / Math.exp(b * phi1));
+  // the aperture (outer end) points down into the sea
+  const rot = -Math.PI / 2 - phi1 + (o.apertureTilt ?? 0.5);
+  const sp = new LogSpiral({ a, b, phi0: 0.4, phi1, dir: 1, rot });
+  const wU = o.whorl ?? 0.36, wS = o.thick ?? 0.42;
+  const yc = o.yc ?? Rout * 0.36;
+  const yaw = o.yaw ?? 0;
+  const nPl = new Vector3(Math.cos(yaw), 0, Math.sin(yaw)); // plane normal (horizontal)
+  const hPl = new Vector3(-Math.sin(yaw), 0, Math.cos(yaw)); // in-plane horizontal axis
+  const ribsPerTurn = o.ribs ?? 16;
+  const ribF = (phi) => Math.pow(0.5 + 0.5 * Math.cos(phi * ribsPerTurn), 6);
+  const scaleAt = (phi) => smoothstep(sp.phi0, sp.phi0 + 1.2, phi) * 0.85 + 0.15;
+  const M = 30;
+  const prof = new Float32Array(M * 2);
+  const P2 = { x: 0, z: 0 }, T2 = { x: 0, z: 0 };
+  const fp = new Vector3(), fs = new Vector3(), fu = new Vector3();
+  const sArc = (phi) => (Math.sqrt(1 + b * b) / b) * (sp.rho(phi) - sp.rho(sp.phi0));
+  const L = sArc(phi1);
+  // arc-length parameterisation
+  const phiAtT = (t) => Math.log((sp.rho(sp.phi0) + t * (sp.rho(phi1) - sp.rho(sp.phi0))) / a) / b;
+  const frame = (t) => {
+    const phi = phiAtT(t);
+    sp.point(phi, P2);
+    // in-plane coordinates (x2 = P2.x horizontal, y2 = P2.z vertical)
+    fp.copy(hPl).multiplyScalar(P2.x).add(fu.set(0, P2.z + yc, 0));
+    // outward in-plane normal: from the coil centre through the point
+    const l = Math.hypot(P2.x, P2.z) || 1;
+    fu.copy(hPl).multiplyScalar(P2.x / l);
+    fu.y = P2.z / l;
+    fu.normalize();
+    fs.copy(nPl);
+    return { p: fp, s: fs, u: fu };
+  };
+  const profile = (t) => {
+    const phi = phiAtT(t);
+    const rho = sp.rho(phi);
+    const k = scaleAt(phi);
+    const rib = ribF(phi);
+    const hu = rho * wU * k, hs = rho * wS * k;
+    for (let i = 0; i < M; i++) {
+      const al = (i / M) * TAU;
+      const c = Math.cos(al), sn = Math.sin(al);
+      let ex = Math.sign(c) * Math.pow(Math.abs(c), 0.62), ey = Math.sign(sn) * Math.pow(Math.abs(sn), 0.75);
+      // flanks bulge with the ribs; the outer side carries a keel; the inner side rests flat
+      // ribs rise across the flanks toward the keel
+      const flank = Math.max(0, 1 - Math.abs(ey) * 0.8) * smoothstep(-0.6, 0.6, sn);
+      let rs = hs * (1 + 0.16 * rib * (0.3 + 0.7 * flank));
+      let ru = hu * (1 + 0.1 * rib * smoothstep(-0.2, 0.8, sn));
+      if (sn > 0) ru *= 1 + 0.2 * Math.exp(-(((al - Math.PI / 2) / 0.22) ** 2)); // keel
+      else ru *= 0.86;
+      const nz = 1 + 0.07 * noise.noise3(t * L / 16 + seed, c * 1.5, sn * 1.5) + 0.035 * noise.noise3(t * L / 5, c * 4 + seed, sn * 4)
+        + 0.03 * terrace(noise.noise3(t * L / 9, c * 2.5, sn * 2.5 + seed) * 3, 0.6);
+      prof[i * 2] = ex * rs * nz;
+      prof[i * 2 + 1] = ey * ru * nz;
+    }
+    return prof;
+  };
+  const tmpP = new Vector3();
+  let _x2 = 0, _y2 = 0, _zp = 0, _best = 1e9;
+  const arm = (phi, dPerp) => {
+    const rho = sp.rho(phi);
+    const k = scaleAt(phi);
+    const d = Math.max(dPerp - rho * wU * k * 1.1, Math.abs(_zp) - rho * wS * k * 1.08);
+    if (d < _best) _best = d;
+  };
+  const dist = (x, y, z) => {
+    tmpP.set(x, y, z);
+    _x2 = tmpP.dot(hPl); _y2 = y - yc; _zp = tmpP.dot(nPl);
+    _best = 1e9;
+    sp.arms(_x2, _y2, arm);
+    return _best * 0.92;
+  };
+  // the shell sits in a mound of its own fallen rock: a low stack under the coil
+  const base = o.base === false ? null : stackShape({
+    R: Rout * 0.42, H: Math.max(6, yc - Rout * 0.42), lobes: 2, lobeAmp: 0.25, twist: 0.2, topFrac: 0.75, bulge: 0.0,
+    seed: seed + 5, cap: 'dome', capH: 3, notch: 0.14, massive: 0.4,
+  });
+  const baseOff = new Vector3().copy(hPl).multiplyScalar(-Rout * 0.08);
+  const footprint = (x, z) => {
+    let d = dist(x, 0, z) - 6;
+    if (base) d = Math.min(d, base.footprint(x - baseOff.x, z - baseOff.z));
+    return d;
+  };
+  const distAll = (x, y, z) => {
+    let d = dist(x, y, z);
+    if (base) d = Math.min(d, base.dist(x - baseOff.x, y, z - baseOff.z));
+    return d;
+  };
+  return {
+    type: 'ammonite', R: Rout * (1 + wU) + 4, H: yc + Rout * (1 + wU * 1.2), yBot: -20, dist: distAll, footprint, spiral: sp, yc, nPl, hPl,
+    build(det = 1) {
+      const n = clamp(Math.round(L / (2.4 / det)), 40, 900);
+      const mesh = new RockMesh();
+      const res = sweep(frame, profile, {
+        n, closed: true,
+        strata: (t, k, P, aa, bb) => bb * 0.9 + t * 40,
+        tag: (t, k) => (k > M * 0.15 && k < M * 0.35 ? LEDGE : 0),
+        cavity: (t, k) => (k > M * 0.62 && k < M * 0.88 ? 0.72 : 1),
+        capStart: true, capEnd: true,
+      }, mesh);
+      // rims along the keel (the shell's crest) for vines and lips
+      const rim = [];
+      for (let i = 0; i <= n; i += Math.max(1, Math.round(4 * det))) {
+        const v = res.rows[i][Math.round(M * 0.25)];
+        const px = mesh.p[v * 3], py = mesh.p[v * 3 + 1], pz = mesh.p[v * 3 + 2];
+        if (py < 8) continue;
+        for (const sg of [-1, 1]) rim.push({ x: px + nPl.x * sg * 2, y: py - 1, z: pz + nPl.z * sg * 2, ox: nPl.x * sg, oz: nPl.z * sg, t: i / n });
+      }
+      if (base) {
+        const bb = base.build(det);
+        mesh.append(bb.mesh, baseOff.x, 0, baseOff.z);
       }
       return { mesh, rim };
     },

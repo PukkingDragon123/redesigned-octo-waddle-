@@ -64,6 +64,7 @@ export default async function (game) {
   const ocean = game.ocean && game.ocean instanceof Ocean ? game.ocean : new Ocean(game);
   game.ocean = ocean;
   if (p.has('state')) ocean.setSeaState(+p.get('state'), { dur: 0.01 });
+  if (p.has('odebug')) ocean.uniforms.uDebug.value = +p.get('odebug');
   if (!p.has('time')) game.atmosphere.set('noon');
 
   // test objects

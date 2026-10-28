@@ -192,9 +192,9 @@ void main() {
   // eroded into ragged, brushy wisps (inner puffs melt into each other)
   // (film pass: wide, soft falloffs so overlapping puffs melt into one billowing mass, and the
   // outline is a soft, slightly torn edge rather than a chain of round lobes)
-  float erode = (n1 - 0.55) * mix(0.3, 0.6, vPeriph) + (bB - 0.5) * mix(0.3, 0.7, vPeriph) + (n2 - 0.5) * 0.18;
+  float erode = (n1 - 0.55) * mix(0.3, 0.7, vPeriph) + (bB - 0.5) * mix(0.3, 0.8, vPeriph) + (n2 - 0.5) * 0.18;
   float edge = r2 + erode;
-  float a = smoothstep(1.0, mix(0.0, 0.12, vPeriph), edge) * vAlpha;
+  float a = smoothstep(1.0, 0.0, edge) * vAlpha;
   // the condensation level: the base of the cloud is flat and a little crisper
   float baseY = vBase + (bA - 0.5) * 0.05;
   a *= smoothstep(baseY - 0.04, baseY + 0.05, cl.y);

@@ -425,7 +425,7 @@ export const AO_DEFAULTS = {
   fadeEnd: 2200,
   strength: 0.9,
   litFloor: 0.5, // how much occlusion still shows in full sun (0: ambient only, 1: everywhere)
-  tint: new Color(0.47, 0.48, 0.6), // the shade colour full occlusion multiplies toward
+  tint: new Color(0.5, 0.52, 0.57), // the shade colour full occlusion multiplies toward (cool, never violet)
   bounce: 0.7, // warm bounce in shaded creases next to sunlit surfaces (0 off)
   bounceColor: new Color(1.0, 0.62, 0.36),
   sharp: 4.0e4, // bilateral plane-distance sharpness

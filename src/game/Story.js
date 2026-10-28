@@ -19,6 +19,7 @@ import { ADULTS, CALVES } from '../creatures/WhaleTypes.js';
 import { G } from '../render/Globals.js';
 import { clamp, damp, lerp, smoothstep, rng, TAU, dirFromYawPitch, easeInOut } from '../core/math.js';
 
+const _mOff = new Vector3();
 const OPTIONAL = import.meta.glob(['../audio/AudioSystem.js', '../creatures/Ecosystem.js', '../creatures/Falcon.js']);
 const SAVE_KEY = 'skysong.save';
 
@@ -250,6 +251,7 @@ export class Story {
     herd.feedHook = null;
     herd.formationTight = 0;
     herd.stopPlay();
+    herd.stopBubbleNet?.();
     herd.care.mode = 'lead';
     this.protecting = false;
     for (const w of herd.whales) {
@@ -598,7 +600,9 @@ export class Story {
   }
 
   *chapter_krill() {
-    const herd = this.herd, mom = herd.mother, calf = herd.calf;
+    // The Feasting Shoals: the herd drops to the sea, the adults ring a glintfin bait ball with a spiral
+    // bubble net and lunge up through it together, and the mother takes her calf down to feast.
+    const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
     herd.mode = 'travel';
     herd.targetSpeed = 6;
     yield 6;
@@ -608,34 +612,71 @@ export class Story {
       const n = this.eco?.nearestSwarm?.(w.pos);
       return n && n.dist < 400 ? n.pos : null;
     };
-    // the mother demonstrates a lunge through a swarm near the calf
-    const sw = () => this.eco?.nearestSwarm?.(calf.pos);
-    let demo = 0;
+    const school = () => this.eco?.nearestSwarm?.(calf.pos);
+    const first = school();
+    if (first) herd.startBubbleNet?.(first.pos.clone());
+    // the mother shows how: down beneath the fish, then up through them with her mouth wide
+    const tgt = new Vector3(), look = new Vector3();
+    let phase = 0, phaseT = g.time;
+    const next = (p) => { phase = p; phaseT = g.time; };
     herd.motherScript = (m) => {
-      const n = sw();
+      const n = school();
       if (!n) return null;
-      if (demo === 0) {
-        const near = m.pos.distanceTo(n.pos) < 30;
-        m.drive.feed = near ? 1 : 0;
-        m.drive.mouth = m.drive.feed;
-        return { target: n.pos.clone().add(new Vector3(0, 0, 0)), speed: 10, arrive: 2, minSpeed: 7, lookAt: n.pos };
+      const surf = seaHeight(g, n.pos.x, n.pos.z);
+      look.copy(n.pos);
+      if (phase === 0) {
+        // glide in low over the shoal
+        tgt.copy(n.pos).setY(surf + 6);
+        if (m.pos.distanceTo(tgt) < 16 || g.time - phaseT > 16) next(1);
+        return { target: tgt, speed: 9, arrive: 6, lookAt: look };
       }
+      if (phase === 1) {
+        // dive beneath the bait ball
+        tgt.copy(n.pos).y -= 10;
+        if (m.pos.y < n.pos.y - 5 || g.time - phaseT > 9) next(2);
+        return { target: tgt, speed: 8, arrive: 3, minSpeed: 5, lookAt: look };
+      }
+      if (phase === 2) {
+        // the lunge: up through the fish and out into the air
+        const near = m.pos.distanceTo(n.pos) < 20;
+        m.drive.feed = near ? 1 : 0.4;
+        m.drive.mouth = m.drive.feed;
+        tgt.copy(n.pos).setY(surf + 14);
+        if (m.pos.y > surf + 4 || g.time - phaseT > 8) { m.drive.feed = 0; m.drive.mouth = 0; next(3); }
+        return { target: tgt, speed: 13, arrive: 1, minSpeed: 10, lookAt: tgt };
+      }
+      // then beside her calf: following it down when it dives, waiting at the surface when it does not
       m.drive.feed = 0;
       m.drive.mouth = 0;
-      return { target: calf.pos.clone().add(new Vector3(-9, 2, 6)), speed: 6, arrive: 10, lookAt: calf.pos };
+      const deep = (this.calfWater?.depth ?? -9) > 1;
+      tgt.copy(calf.pos).add(_mOff.set(-7, deep ? -1 : 3, 5));
+      if (!deep) tgt.y = Math.max(tgt.y, seaHeight(g, tgt.x, tgt.z) + 2);
+      return { target: tgt, speed: deep ? 7 : 6, arrive: 8, lookAt: calf.pos };
     };
-    yield 14;
-    demo = 1;
+    yield* until(() => phase === 3, 40);
+    // her invitation: a call, and again while the calf stays up in the air
     this.voiceCall(mom, 'answer');
     const eaten0 = this.eaten;
-    yield* until(() => this.eaten - eaten0 > 12, 50);
-    if (this.eaten - eaten0 > 12) {
+    const t0 = g.time;
+    let lastCall = g.time;
+    yield* until(() => {
+      if (g.time - lastCall > 9 && (this.calfWater?.depth ?? -9) < 0) { lastCall = g.time; this.voiceCall(mom, 'answer'); }
+      return this.eaten - eaten0 > 14 || g.time - t0 > 75;
+    }, 80);
+    if (this.eaten - eaten0 > 14) {
       mom.drive.happy = 1;
       this.voiceCall(mom, 'answer');
+      this.audio.stinger?.('discover');
     }
+    yield 6;
+    // a last rising lunge from the adults, then everyone surfaces, breathes and lifts off
+    herd.stopBubbleNet?.();
     herd.motherScript = null;
-    yield 20;
+    herd.feedHook = null;
+    this.voiceCall(herd.elder, 'answer');
     herd.mode = 'travel';
+    herd.targetSpeed = 6;
+    yield 10;
     herd.targetSpeed = 8;
     yield () => herd.s > this.path.chapters[3].start;
   }
@@ -1415,6 +1456,8 @@ export class Story {
     a.update(dt);
     const calf = this.herd.calf;
     const wf = this.world.nearestWaterfall(calf.pos);
+    const cam = g.engine.camera.position;
+    const camH = cam.y - seaHeight(g, cam.x, cam.z);
     a.setAmbience?.({
       wind: clamp(0.25 + g.wind.strength / 18, 0, 1),
       rain: this.weather.rain,
@@ -1424,6 +1467,10 @@ export class Story {
       waterfall: wf && wf.dist < 400 ? { pos: wf.wf.userData.lip.clone().add(new Vector3(0, -Math.min(wf.wf.userData.drop * 0.5, 80), 0)), gain: 1 - wf.dist / 400 } : null,
       night: G.uNight.value,
       birds: this.chapterIndex >= 0 && this.chapterIndex < 4 ? 0.4 : this.chapterIndex === 9 ? 0.7 : 0.1,
+      // the sea below: louder as the camera comes down to it, muffled once it slips under
+      sea: 1 - smoothstep(8, 260, camH),
+      seaState: clamp(g.ocean?.seaState ?? 0.25 + this.weather.level * 0.7, 0, 1),
+      under: clamp(-camH / 1.2, 0, 1),
     });
     if (this.state === 'play') {
       const ch = this.path.chapters[this.chapterIndex];

@@ -156,7 +156,7 @@ export class Menu {
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
     this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 300, spacing: 0.32 });
-    this.subtitle = new TextItem('a journey home across the sky', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
+    this.subtitle = new TextItem('a journey home across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
   }

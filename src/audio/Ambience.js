@@ -1,6 +1,6 @@
 // Ambience: wind with gusts, a rush of air that rises with speed, rain, a storm bed with
-// distant thunder, the hush inside clouds, a positional waterfall, night twinkles and
-// birdsong. Layers are created lazily when they become audible and stopped when silent.
+// distant thunder, the hush inside clouds, a positional waterfall, night twinkles,
+// birdsong, and the sea: swells washing and breaking below, the muffled deep beneath them. Layers are created lazily when they become audible and stopped when silent.
 // setAmbience() only merges numbers; the audio graph is touched at most ~12 times a second.
 import { clamp, lerp, smoothstep, glide, setAt, rampAt, expAt, disconnect, stopAt, startAt, finite, makeRng } from './util.js';
 import { chordTones } from './theory.js';
@@ -11,7 +11,7 @@ export class Ambience {
   constructor(sys) {
     this.sys = sys;
     this.ctx = sys.ctx;
-    this.s = { wind: 0.3, rain: 0, storm: 0, speed: 0, inCloud: 0, waterfall: null, night: 0, birds: 0 };
+    this.s = { wind: 0.3, rain: 0, storm: 0, speed: 0, inCloud: 0, waterfall: null, night: 0, birds: 0, sea: 0, seaState: 0.3, under: 0 };
     this.wf = { x: 0, y: 0, z: 0, gain: 0, on: false };
     this.L = {};
     this.acc = 0;
@@ -23,12 +23,13 @@ export class Ambience {
     this.nextBird = 2;
     this.gust = 0;
     this.gustT = 0;
+    this.nextBubble = 1;
   }
 
   set(a) {
     if (!a || typeof a !== 'object') return;
     const s = this.s;
-    for (const k of ['wind', 'rain', 'storm', 'inCloud', 'night', 'birds']) if (k in a) s[k] = clamp(finite(+a[k], s[k]));
+    for (const k of ['wind', 'rain', 'storm', 'inCloud', 'night', 'birds', 'sea', 'seaState', 'under']) if (k in a) s[k] = clamp(finite(+a[k], s[k]));
     if ('speed' in a) s.speed = clamp(finite(+a.speed, s.speed), 0, 400);
     if ('waterfall' in a) {
       const w = a.waterfall;
@@ -207,7 +208,60 @@ export class Ambience {
       src.connect(bp); bp.connect(out); out.connect(amb);
       return { out, nodes: [out, src, bp], srcs: [src] };
     });
-    sys._setCloud(s.inCloud, now);
+    // under the sea the world muffles much further than in a cloud
+    sys._setCloud(Math.max(s.inCloud, s.under * 1.25), now);
+
+    // the sea: swells wash in on a slow uneven rhythm (two incommensurate periods),
+    // each crest opening the low wash and breaking into a hiss of foam
+    const up = 1 - s.under;
+    const st = s.seaState;
+    const sw = 0.5 + 0.32 * Math.sin(this.t * (0.72 + 0.3 * st)) + 0.18 * Math.sin(this.t * 0.31 + 1.7);
+    const crest = smoothstep(0.62, 0.95, sw);
+    const seaAmt = s.sea * up;
+    const wash = this._level('seaWash', seaAmt * (0.08 + 0.1 * st) * (0.45 + 0.55 * sw), now, 0.35, () => {
+      const out = this._gain();
+      const nodes = [out];
+      const srcs = [];
+      const lps = [];
+      for (const pan of [-0.5, 0.5]) {
+        const src = this._loop('brown', 0.9 + this.rng() * 0.2);
+        const lp = this._filter('lowpass', 500, 0.5);
+        const p = this.ctx.createStereoPanner();
+        p.pan.value = pan;
+        src.connect(lp); lp.connect(p); p.connect(out);
+        nodes.push(src, lp, p);
+        srcs.push(src);
+        lps.push(lp);
+      }
+      out.connect(amb);
+      return { out, nodes, srcs, lps };
+    });
+    if (wash) for (const lp of wash.lps) glide(lp.frequency, 320 + 700 * sw + 500 * st, now, 0.3);
+    const foam = this._level('seaFoam', seaAmt * (0.025 + 0.06 * st) * (0.15 + 0.85 * crest), now, 0.2, () => {
+      const out = this._gain();
+      const src = this._loop('pink', 1.05);
+      const bp = this._filter('bandpass', 2600, 0.6);
+      const w = this._gain(0.3);
+      src.connect(bp); bp.connect(out); out.connect(amb); out.connect(w); w.connect(sys.bus.worldWet);
+      return { out, nodes: [out, src, bp, w], srcs: [src], bp };
+    });
+    if (foam) glide(foam.bp.frequency, 1900 + 1400 * crest + 600 * st, now, 0.25);
+
+    // beneath the surface: a deep pressure rumble, the swell felt as a slow throb, and stray bubbles
+    const deep = this._level('deep', s.under * (0.07 + 0.03 * Math.sin(this.t * 0.6)), now, 0.25, () => {
+      const out = this._gain();
+      const src = this._loop('brown', 0.7);
+      const lp = this._filter('lowpass', 170, 0.7);
+      src.connect(lp); lp.connect(out); out.connect(amb);
+      return { out, nodes: [out, src, lp], srcs: [src] };
+    });
+    if (deep && s.under > 0.5) {
+      this.nextBubble -= step;
+      if (this.nextBubble <= 0) {
+        this.nextBubble = 0.25 + r() * 1.6;
+        this._bubble(now, s.under);
+      }
+    }
 
     // waterfall: positional roar
     const wf = this.wf;
@@ -258,6 +312,33 @@ export class Ambience {
         this.nextBird = lerp(7, 1.4, s.birds) * (0.5 + r());
         this._bird(now, s.birds);
       }
+    }
+  }
+
+  /** A bubble rising past: a short sine chirp sweeping up, sometimes a little cluster. */
+  _bubble(now, amt) {
+    const ctx = this.ctx;
+    const sys = this.sys;
+    const r = this.rng;
+    const n = r() < 0.3 ? 2 + Math.floor(r() * 3) : 1;
+    for (let i = 0; i < n; i++) {
+      const t = now + 0.02 + i * (0.04 + r() * 0.07);
+      const f0 = 280 + r() * 700;
+      const d = 0.03 + r() * 0.05;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      const g = this._gain(0);
+      const p = ctx.createStereoPanner();
+      p.pan.value = r() * 1.4 - 0.7;
+      o.connect(g); g.connect(p); p.connect(sys.bus.amb);
+      setAt(o.frequency, f0, t);
+      expAt(o.frequency, f0 * (1.6 + r()), t + d);
+      setAt(g.gain, 0, t);
+      rampAt(g.gain, 0.03 * amt * (0.4 + r() * 0.6), t + 0.004);
+      expAt(g.gain, 0.0001, t + d);
+      startAt(o, t);
+      stopAt(o, t + d + 0.02);
+      o.onended = () => disconnect(o, g, p);
     }
   }
 

@@ -82,6 +82,7 @@ export class Story {
     } catch (e) { /* fonts unavailable: fall back to Georgia */ }
     this.path = new MigrationPath();
     this.world = new WorldBuilder(g, this.path);
+    this.world.setQuality?.({ high: 1, medium: 0.6, low: 0.25 }[g.engine.qualityName] ?? 1);
     // the cradle first, so the menu has a world to look at; the rest grows behind it
     await this.world.buildChapter('cradle');
     this.herd = new Herd(g, this.path, this.world);
@@ -169,6 +170,9 @@ export class Story {
         this.eco.roosts = [this.herd.elder, ...this.herd.adults.filter((w) => w.role === 'adult').slice(0, 3)];
         // adults lunging with open mouths really eat (the calf feeds through eat() below)
         this.eco.feeders = this.herd.adults;
+        // fish swim under the real sea; bird-reptiles land on the world's perches (the array grows as chapters build)
+        this.eco.ocean = g.ocean;
+        this.eco.perches = this.world.perches;
       }
     } catch (e) { console.warn('[skysong] ecosystem unavailable', e); this.eco = null; }
     try {
@@ -541,10 +545,8 @@ export class Story {
       if (this.spawned.has(id) || !this.world.done.has(id)) continue;
       this.spawned.add(id);
       const sp = this.world.spawns;
-      for (const k of sp.krill.filter((s) => s.chapter === id)) this.eco.addKrillSwarm?.(k.pos, k.count);
-      for (const k of sp.rays.filter((s) => s.chapter === id)) this.eco.addRaySchool?.(k.pos, k.count);
-      for (const k of sp.jellies.filter((s) => s.chapter === id)) this.eco.addJellies?.(k.pos, 160, k.count);
-      for (const k of sp.birds.filter((s) => s.chapter === id)) this.eco.addFlock?.(k.pos, k.count);
+      for (const k of sp.fish?.filter((s) => s.chapter === id) || []) this.eco.addFishSchool?.(k.pos, k.species, k.count);
+      for (const k of sp.reptiles?.filter((s) => s.chapter === id) || []) this.eco.addReptileFlock?.(k.pos, k.species, k.count);
     }
   }
 
@@ -1253,6 +1255,17 @@ export class Story {
       const next = this.path.chapters[this.chapterIndex + 1];
       if (next && this.herd.s >= next.start && this.state === 'play') this.enterChapter(this.chapterIndex + 1);
     }
+    // alien plants recoil from whales passing low over them
+    const fl = this.world.flora;
+    if (fl) {
+      const D = this._floraD || (this._floraD = []);
+      D.length = 0;
+      const near = (w) => { if (D.length < 8 && w.pos.y < 70 && w.pos.distanceToSquared(cam) < 160000) D.push(w); };
+      for (const w of this.herd.whales) near(w);
+      if (this.gatheringOn) for (const w of this.gathering) near(w);
+      fl.update?.(dt, { disturbers: D });
+    }
+    this.world.update?.(dt);
     this.world.updateVisibility(this.state === 'menu' ? 60 : this.herd.s);
     this.updateAudio(dt);
     // big whales part the clouds
@@ -1408,7 +1421,6 @@ export class Story {
     }
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});
     // cloud sea wakes when skimming
-    g.cloudSea.uniforms.uTrailOn.value = calf.pos.y < 130 ? 1 : 0;
   }
 
   /** Blossom petals from the Oasis trees, drifting on the breeze around the calf. */

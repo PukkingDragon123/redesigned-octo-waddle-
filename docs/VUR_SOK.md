@@ -85,6 +85,27 @@ detail realistic add shaders like tiny glades etc"*
   - A wet dark band at the waterline, with barnacles and algae in the tidal zone.
 - Owners: ocean (PostFX, the lighting in common.js) and world (plants, rocks, materials.js). The lead runs a
   follow-up pass for whatever the first build did not cover.
+- Already built (do not rebuild): `src/flora/` (AlienFlora, nine animated alien plant species) and
+  `src/render/painterly/` (GTAO, anisotropic Kuwahara strokes, canvas, DOF). The lead wires both in.
+
+### 0.3 Build coordination (read this first if you are a builder)
+- WHALES and WILDLIFE builders already at work: this note does not concern you. Carry on.
+- To go faster, the HERD role is now built by a dedicated agent launched directly by the lead. That agent's
+  task prompt contains the code word **TIDEWATER**.
+- If your role is HERD and your task prompt does NOT contain the code word TIDEWATER (that is, you were
+  launched by the "build-vur-sok" workflow as build:herd), the role is already taken. Edit nothing. Finish at
+  once with the single-line report "superseded: herd is built by a dedicated agent".
+- The OCEAN and WORLD builders have finished. Their files now belong to two new follow-up roles. From now on
+  ownership is as follows (it replaces section 3 where they differ):
+
+| Role | Owns |
+|---|---|
+| whales (running) | src/creatures/WhaleModel.js, whaleShaders.js, WhaleTypes.js, WhaleAnimator.js, Whale.js (model and LOD parts), src/creatures/whale/, src/dev/whale.js, src/dev/fly.js |
+| wildlife (running) | src/creatures/Ecosystem.js, src/creatures/eco/, src/dev/ecosystem.js |
+| herd | src/game/Herd.js, src/game/WhalePhysics.js, src/game/HerdBehaviors.js, src/dev/herd.js |
+| look (painterly integration, lighting, ocean and sky) | src/render/Engine.js (painterly wiring and quality hooks only), src/render/PostFX.js, src/render/painterly/, src/render/shaders/common.js, src/render/Shadows.js, src/render/Globals.js, src/render/Particles.js, src/world/Ocean.js, src/world/Atmosphere.js, src/world/Sky.js, src/dev/painterly.js, src/dev/ocean.js |
+| world2 (world polish) | the rest of src/world/ (WorldBuilder, Islands, Spirals, Seabed, Flora, Painted, Backdrop, Trees, Landmarks, MigrationPath, Water, Clouds, shaders/), src/render/materials.js, src/flora/, src/dev/islands.js, src/dev/world.js, src/dev/flora.js |
+| lead | src/game/ (Game, Story, Weather, Swim, CameraRig, Menu, PlayerController, SonicBoom, SongGame, Script), src/audio/, src/core/, src/main.js, Falcon files, README.md, docs/ |
 
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 

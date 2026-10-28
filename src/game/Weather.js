@@ -189,7 +189,6 @@ export class Weather {
     this.level = damp(this.level, this.storm, 0.25, dt);
     const L = this.level;
     g.atmosphere.stormBoost = L * 0.85;
-    g.cloudSea.uniforms.uStormDark.value = L;
     this.rain = damp(this.rain, L > 0.35 ? smoothstep(0.35, 0.8, L) : 0, 0.5, dt);
     this.rainU.uRain.value = this.rain;
     this.rainMesh.visible = this.rain > 0.01;

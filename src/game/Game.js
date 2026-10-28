@@ -1,13 +1,13 @@
 // Top-level orchestration: owns the engine and the shared world systems, runs the loop,
 // and hands control to either the story (menu -> journey) or a dev test scene.
-import { Vector3 } from 'three';
+import { Vector2, Vector3 } from 'three';
 import { Engine } from '../render/Engine.js';
 import { Input } from '../core/Input.js';
 import { Sky } from '../world/Sky.js';
 import { Atmosphere } from '../world/Atmosphere.js';
 import { G } from '../render/Globals.js';
 import { CameraRig } from './CameraRig.js';
-import { CloudSea } from '../world/CloudSea.js';
+import { Ocean } from '../world/Ocean.js';
 import { Clouds } from '../world/Clouds.js';
 import { Wind } from '../world/Wind.js';
 import { Particles } from '../render/Particles.js';
@@ -36,7 +36,16 @@ export class Game {
     this.atmosphere = new Atmosphere(this.engine, this.sky);
     this.atmosphere.set(this.params.get('time') || 'menu');
     this.wind = new Wind();
-    this.cloudSea = new CloudSea(this.engine);
+    // the living sea of Vur Sok, built before the story (the world registers calm lagoons with it).
+    // Dev scenes get it only when they ask (&ocean), since it is the costliest thing to render.
+    const devScene = this.params.get('test');
+    this.ocean = !devScene || this.params.has('ocean') ? new Ocean(this) : null;
+    // the old cloud sea is gone; its few remaining call sites (dev scenes) find a harmless stand-in
+    this.cloudSea = {
+      enabled: false,
+      setQuality() {},
+      uniforms: { uTrailOn: { value: 0 }, uStormDark: { value: 0 }, uSeaOffset: { value: new Vector2() }, uSteps: { value: 0 } },
+    };
     this.clouds = new Clouds(this);
     this.mist = new Particles(this, { max: 2500, additive: false, name: 'mist', order: 20 });
     this.glow = new Particles(this, { max: 3000, additive: true, name: 'glow', order: 30 });
@@ -62,17 +71,19 @@ export class Game {
       if (this.params.has('nobloom')) this.engine.post.bloomEnabled = false;
       if (this.params.has('norays')) this.engine.post.raysEnabled = false;
       if (this.params.has('noshadow')) this.engine.shadows.enabled = false;
-      if (this.params.has('nosea')) this.cloudSea.enabled = false;
-      if (this.params.has('seasteps')) this.cloudSea.uniforms.uSteps.value = +this.params.get('seasteps');
+      if (this.params.has('nosea') && this.ocean) this.ocean.enabled = false;
     }
   }
 
   applyQuality() {
     const q = this.engine.quality;
-    this.cloudSea.setQuality(q.cloudSteps);
+    this.ocean?.setQuality(q.cloudSteps);
     this.clouds.budget = Math.round(7000 * q.clouds);
     this.furQuality = q.fur;
     this.story?.applyFurQuality?.();
+    const k = { high: 1, medium: 0.6, low: 0.25 }[this.engine.qualityName] ?? 1;
+    this.story?.world?.setQuality?.(k);
+    this.story?.world?.flora?.setQuality?.(Math.max(0.4, k));
   }
 
   /** Steps quality down while frames are slow (never in debug, never after a manual choice). */
@@ -199,7 +210,6 @@ export class Game {
     this.clouds.uniforms.uDrift.value.copy(this.wind.drift);
     this.clouds.update(dt, cam, this.focus);
     G.uInCloud.value = Math.max(G.uInCloud.value * Math.exp(-dt * 3), this.clouds.inCloud);
-    this.cloudSea.uniforms.uSeaOffset.value.set(this.wind.drift.x, this.wind.drift.z);
     this.mist.update(dt);
     this.glow.update(dt);
     this.sky.update(cam);

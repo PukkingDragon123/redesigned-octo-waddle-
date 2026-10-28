@@ -1,5 +1,5 @@
 // Post-processing: restrained bloom, crepuscular rays, sonic-boom pressure distortion,
-// in-cloud veil, colour grading, neutral tone mapping, vignette and dithering.
+// in-cloud veil, white balance, filmic tone mapping, halation, colour grading, vignette and dithering.
 import {
   WebGLRenderTarget, HalfFloatType, LinearFilter, Vector2, Vector3, Vector4, Color, Matrix4,
   AdditiveBlending, NoBlending, RGBAFormat, CustomBlending, AddEquation, ZeroFactor, OneFactor,
@@ -175,6 +175,8 @@ uniform float uExposure;
 uniform vec3 uLift;
 uniform vec3 uGamma;
 uniform vec3 uGain;
+uniform vec3 uWB;          // white balance (linear multipliers, luminance-neutral)
+uniform float uHalation;   // warm halo of film halation around the brightest highlights
 uniform float uSaturation;
 uniform float uContrast;
 uniform float uVignette;
@@ -229,19 +231,20 @@ vec2 lensDrops(vec2 uv, float t, out float rim) {
   return off;
 }
 
-vec3 neutralTonemap(vec3 color) {
-  const float startCompression = 0.8 - 0.04;
-  const float desaturation = 0.15;
-  float x = min(color.r, min(color.g, color.b));
-  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-  color -= offset;
-  float peak = max(color.r, max(color.g, color.b));
-  if (peak < startCompression) return color;
-  float d = 1.0 - startCompression;
-  float newPeak = 1.0 - d * d / (peak + d - startCompression);
-  color *= newPeak / peak;
-  float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
-  return mix(color, vec3(newPeak), g);
+// Filmic tone map: an ACES-like rational curve with a gentle toe (blacks roll in, never crush)
+// and a long soft shoulder. Half per channel (highlights desaturate toward white like film), half
+// on the max channel (mid-tones keep their hue: no orange-to-yellow or blue-to-purple skews).
+float filmCurve(float x) {
+  return (x * (2.51 * x + 0.08)) / (x * (2.43 * x + 0.59) + 0.14);
+}
+vec3 filmCurve3(vec3 x) {
+  return (x * (2.51 * x + 0.08)) / (x * (2.43 * x + 0.59) + 0.14);
+}
+vec3 filmicTonemap(vec3 c) {
+  c = max(c * 0.7, 0.0);
+  float m = max(c.r, max(c.g, c.b));
+  vec3 hp = c * (filmCurve(m) / max(m, 1e-5));
+  return mix(hp, filmCurve3(c), 0.5);
 }
 
 vec3 srgb(vec3 c) {
@@ -305,7 +308,8 @@ void main() {
     col = texture2D(tScene, suv).rgb;
   }
   col *= 1.0 + lensRim * uLens.x * 0.12;
-  col += texture2D(tBloom, suv).rgb * uBloomStrength;
+  vec3 bl = texture2D(tBloom, suv).rgb;
+  col += bl * uBloomStrength + bl * vec3(1.0, 0.42, 0.2) * uHalation;
   if (uUnderwater > 0.5) col += texture2D(tRays, suv).rgb * uShaftCol;
   else col += texture2D(tRays, suv).rgb * uRayStrength * uSunScreen.z;
   col *= 1.0 + ringLight * 0.06;
@@ -323,19 +327,21 @@ void main() {
     vec3 veil = uWaterTint * (0.9 + 0.6 * smoothstep(0.7, 0.0, vUv.y)) + uShaftCol * 6.0;
     col += veil * 0.18 * uUnderwater * smoothstep(0.25, 0.0, lum);
   }
-  col *= uExposure * (1.0 + uFlash * 0.35);
-  col = neutralTonemap(col);
+  col *= uExposure * (1.0 + uFlash * 0.35) * uWB;
+  // contrast in log space around mid grey, before the curve (film-like: no crushed darks)
+  col = 0.18 * pow(max(col, 0.0) / 0.18, vec3(uContrast));
+  col = filmicTonemap(col);
 
-  // Grade: lift / gamma / gain, contrast around mid grey, saturation.
+  // Grade: lift / gamma / gain, saturation (restrained, luminance-preserving).
   col = uGain * (col + uLift * (1.0 - col));
   col = pow(max(col, 0.0), 1.0 / uGamma);
-  col = mix(vec3(0.5), col, uContrast) ;
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(vec3(l), col, uSaturation);
+  col = max(mix(vec3(l), col, uSaturation), 0.0);
 
-  // Vignette (soft and tinted, never a black frame).
+  // Vignette (soft, gently tinted toward the frame's own shade; never a black frame).
   vec2 vd = (vUv - 0.5) * vec2(uAspect, 1.0);
-  float vig = smoothstep(0.35, 1.05, length(vd));
+  float vig = smoothstep(0.4, 1.15, length(vd));
+  vig *= vig * (3.0 - 2.0 * vig);
   col = mix(col, col * uVignetteColor, vig * uVignette);
   // deep blue-teal at the edges under water (a tinted falloff, not a black frame), a touch richer colour
   col = mix(col, col * vec3(0.5, 0.72, 0.9), vig * uUnderwater * 0.7);
@@ -394,6 +400,7 @@ export class PostFX {
         uBloomStrength: { value: 0.08 }, uRayStrength: { value: 0.3 },
         uSunScreen: { value: new Vector3() }, uExposure: G.uExposure,
         uLift: { value: new Vector3(0, 0, 0) }, uGamma: { value: new Vector3(1, 1, 1) }, uGain: { value: new Vector3(1, 1, 1) },
+        uWB: { value: new Vector3(1, 1, 1) }, uHalation: { value: 0.05 },
         uSaturation: { value: 1 }, uContrast: { value: 1 },
         uVignette: { value: 0.35 }, uVignetteColor: { value: new Color(0.75, 0.72, 0.85) },
         uFadeColor: { value: new Color(0, 0, 0) }, uFade: { value: 1 },

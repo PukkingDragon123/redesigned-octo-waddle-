@@ -120,14 +120,15 @@ void main() {
       float slant = 0.03 + 0.025 * hash11(float(k) + 3.1 + uSeed);
       float c = t - tc + (dorsal + 0.3) * slant;
       float edge = (fbm3(q * 38.0 + float(k) * 5.0) - 0.5) * 0.007 + (vnoise(vec2(dorsal * 34.0, float(k) * 3.0)) - 0.5) * 0.004;
-      float b = smoothstep(wdt + 0.0025, wdt - 0.0015, abs(c + edge));
+      // soft-edged painted marks (crisp, evenly spaced bars read as a rib cage from afar)
+      float b = smoothstep(wdt + 0.006, wdt - 0.002, abs(c + edge)) * mix(0.55, 1.0, hk);
       // each bar tapers and breaks up toward the back at its own height
       b *= smoothstep(0.42 + hk * 0.3, 0.08 + hk * 0.15, dorsal + (fbm3(q * 20.0 + float(k)) - 0.5) * 0.25);
       bars = max(bars, b);
     }
     float sp = hash12(floor(vec2(s * perim, t * L) / (L * 0.0026)));
     float breakup = mix(0.72, 1.0, step(0.35, sp));
-    col = mix(col, mix(uMark2, uBelly, 0.25), bars * zone * uAmt.x * 0.9 * breakup);
+    col = mix(col, mix(uMark2, uBelly, 0.25), bars * zone * uAmt.x * 0.6 * breakup);
   }
 
   // ---- the fine network of pale streaks across the dark skin (tulkun) ----

@@ -48,8 +48,9 @@ function addFin(acc, spec, xf, nU, nLoop, extra) {
     let k = 1;
     if (rays.length && spec.scallop) {
       let near = 0;
-      for (const ry of rays) near = Math.max(near, Math.exp(-(((u - ry.u1) / 0.045) ** 2)));
-      k *= 1 - spec.scallop * (1 - near) * smoothstep(0.08, 0.2, u);
+      // a soft, uneven hem between the finger tips (a living membrane, never a saw edge)
+      for (const ry of rays) near = Math.max(near, Math.exp(-(((u - ry.u1) / 0.085) ** 2)));
+      k *= 1 - spec.scallop * (1 - near) * smoothstep(0.08, 0.2, u) * (0.75 + 0.25 * Math.sin(u * 17 + (spec.seed || 1)));
     }
     if (spec.serrate) {
       // irregular points along the trailing edge (humpback flukes)
@@ -178,9 +179,10 @@ export function buildFins(A, bi, boneAbs, res) {
     const xf = new Matrix4().compose(sh, q, new Vector3(1, 1, 1));
     const root = A.spot(W.t, W.m, side);
     addFin(acc, {
-      L, span, chordRoot: W.chordRoot * L, chordMax: W.chordMax * L * A.finScale, armR: W.armR * L,
-      rays: raysWing, tub: calf ? 0 : 9, scallop: calf ? 0.1 : 0.17, sweep: 0.16, droop: 0.02, bulge: 0.05,
-      tipRound: 0.2, camber: 0.075, maxAt: 0.34, tipChord: 0.22, splay: 0.2, side, id: side > 0 ? 0 : 1,
+      // slender, tapering wings: the chord narrows steadily from the hand to a pointed tip
+      L, span, chordRoot: W.chordRoot * L, chordMax: W.chordMax * L * A.finScale * (calf ? 0.94 : 0.84), armR: W.armR * L,
+      rays: raysWing, tub: calf ? 0 : 9, scallop: calf ? 0.025 : 0.05, sweep: 0.18, droop: 0.02, bulge: 0.05,
+      tipRound: 0.16, camber: 0.085, maxAt: 0.3, tipChord: calf ? 0.2 : 0.13, splay: 0.2, side, id: side > 0 ? 0 : 1,
       bones: ['fin' + s + '1', 'fin' + s + '2', 'fin' + s + '3'], parent: 'chest', seed: A.shapeSeed + 3 + side,
       rayW: calf ? 0.016 : 0.0105, rayH: calf ? 0.008 : 0.0055, memT: L * (calf ? 0.005 : 0.0028),
       fur: (u, v, top) => (1 - smoothstep(0.05, 0.16, v)) * (top > 0 ? 1 : 0.5) * (calf ? 1 - smoothstep(0.5, 0.85, u) * 0.7 : 1 - smoothstep(0.35, 0.8, u)) * (calf ? 1.0 : 0.8),
@@ -198,7 +200,7 @@ export function buildFins(A, bi, boneAbs, res) {
     const root = A.spot(R.t, R.m, side);
     addFin(acc, {
       L, span: R.span * L, chordRoot: R.chord * L, chordMax: R.chord * L * 1.15, armR: R.armR * L,
-      rays: [{ u0: 0.38, u1: 0.4, v0: 0.22 }, { u0: 0.66, u1: 0.8, v0: 0.2 }], tub: calf ? 0 : 3, scallop: 0.12, sweep: 0.45,
+      rays: [{ u0: 0.38, u1: 0.4, v0: 0.22 }, { u0: 0.66, u1: 0.8, v0: 0.2 }], tub: calf ? 0 : 3, scallop: 0.05, sweep: 0.45,
       droop: 0.15, tipRound: 0.32, camber: 0.05, maxAt: 0.3, tipChord: 0.35, side, id: side > 0 ? 2 : 3,
       bones: ['rear' + s, 'rear' + s, 'rear' + s], parent: 'spine2', seed: A.shapeSeed + 9 + side,
       rayW: 0.006, rayH: 0.003, memT: L * 0.0022,
@@ -216,7 +218,7 @@ export function buildFins(A, bi, boneAbs, res) {
       ? { u: 0.62, w: 0.13, d: 0.55 } : null;
     addFin(acc, {
       L, span: F.span * L, chordRoot: F.chord * L, chordMax: F.chord * L * 0.98, armR: tail.hw * 0.85,
-      rays: [], tub: 0, scallop: 0, serrate: calf ? 0.05 : 0.12, sweep: 0.62, droop: -0.02, bulge: 0.06,
+      rays: [], tub: 0, scallop: 0, serrate: calf ? 0.03 : 0.07, sweep: 0.62, droop: -0.02, bulge: 0.06,
       tipRound: 0.18, camber: 0.02, maxAt: 0.25, tipChord: 0.4, tipThick: 0.2, splay: 0.05, side, id: side > 0 ? 4 : 5,
       bones: ['tail3', 'fluke', 'fluke' + s], parent: 'tail3', seed: A.shapeSeed + 17 + side, notch, memT: L * 0.004,
       fur: (u, v, top) => (1 - smoothstep(0.04, 0.14, v)) * (1 - smoothstep(0.3, 0.6, u)) * 0.9,

@@ -443,11 +443,12 @@ void main() {
     float saa = fwidth(sn);
     float streak = smoothstep(0.035 + saa, 0.0, abs(sn - 0.5)) * 0.5 * PFADE(90.0);
     slate = mix(slate, slate * 1.4 + 0.025, streak * 0.5 + stepEdge * 0.14);
-    slate = mix(slate, slate * 1.3 + 0.05, edge * 0.5 * (0.5 + 0.5 * mix(0.5, vnoise(q * 200.0), PFADE(200.0))));
+    // a worn, slightly paler lip (kept low: bright rims on every plate read as a rib cage)
+    slate = mix(slate, slate * 1.18 + 0.02, edge * 0.3 * (0.5 + 0.5 * mix(0.5, vnoise(q * 200.0), PFADE(200.0))));
     slate *= 1.0 - crack * 0.65;
     albedo = slate;
-    creaseInk += crack * 0.45 + stepEdge * 0.12 + step(1.5, kind) * 0.3;
-    ao *= (1.0 - crack * 0.5) * mix(1.0, 0.55, step(1.5, kind)) * mix(1.0, 0.8, step(0.5, kind));
+    creaseInk += crack * 0.4 + stepEdge * 0.1 + step(1.5, kind) * 0.12;
+    ao *= (1.0 - crack * 0.45) * mix(1.0, 0.72, step(1.5, kind)) * mix(1.0, 0.88, step(0.5, kind));
     rough = 0.62 - stepEdge * 0.1;
     rim = 0.35;
     #undef PFADE
@@ -523,8 +524,9 @@ void main() {
   s.rim = rim * 0.9;
   vec3 col = stylizedLight(s);
   // a soft painted sheen rather than a plastic coat: broad, gentle, brighter when wet
-  vec3 spec = wetSpecular(N, V, vWorldPos, max(rough, 0.3), s.shadow, ao, f0);
-  col += min(spec, vec3(1.5)) * mix(0.35, 0.8, wet);
+  // (dry skin keeps only a faint satin; the glossy coat is for a whale fresh from the sea)
+  vec3 spec = wetSpecular(N, V, vWorldPos, max(rough, mix(0.4, 0.3, wet)), s.shadow, ao, f0);
+  col += min(spec, vec3(1.2)) * mix(0.2, 0.8, wet);
   col += emis;
   // brush strokes run along the body (t) and wrap around it, mirrored at the midlines
   float sb = vLoft.y < 0.5 ? vLoft.y : 1.0 - vLoft.y;
@@ -572,7 +574,9 @@ void main() {
   }
   // the whole outer wing bends against the stroke (a flexible flipper, stiffest at the root)
   float bend = span * span * (1.0 - chord * 0.3) * float(id < 2);
-  transformed += uFinUp[id] * (belly * uBillow[id] + fl + bend * uBillow[id] * 0.35) * uChord[id];
+  // the soft trailing edge lags the stroke more than the leading-edge arm (a living membrane)
+  float trail = chord * chord * smoothstep(0.1, 0.6, span) * float(id < 2);
+  transformed += uFinUp[id] * (belly * uBillow[id] + fl + (bend * 0.55 + trail * 0.3) * uBillow[id]) * uChord[id];
   #include <skinnormal_vertex>
   #include <skinning_vertex>
   vec4 wp = modelMatrix * vec4(transformed, 1.0);
@@ -657,8 +661,9 @@ void main() {
   vec3 skin = mix(skinBot, skinTop, top);
   // pale flipper markings (the mother's are bold): big white areas spreading from the leading edge
   float markN = fbm2(m * 0.28 + uSeed * 2.0 + id) + (1.0 - smoothstep(0.0, 0.5, uv.y)) * 0.18 + (1.0 - top) * 0.22;
-  // only pale-flippered whales (the mother) carry the white onto the upper side
-  float topK = mix(1.0, smoothstep(0.35, 0.75, uFinMarkAmt), top);
+  // only pale-flippered whales (the mother) carry a little white onto the upper side, and only
+  // near the leading edge: from above a wing reads as the back's own dark skin
+  float topK = mix(1.0, smoothstep(0.35, 0.75, uFinMarkAmt) * 0.45 * (1.0 - smoothstep(0.08, 0.3, uv.y)), top);
   float mark = smoothstep(0.62, 0.67, markN + uFinMarkAmt * 0.3 - 0.12) * topK * smoothstep(0.0, 0.25, uFinMarkAmt);
   skin = mix(skin, uFinMark * (0.92 + 0.12 * fbm2(m * 3.0)), mark);
   // leading-edge tubercles: worn pale knobs, wrinkled skin across the arm
@@ -694,11 +699,13 @@ void main() {
     skin = mix(skin, shell, barn * 0.95);
     hgt += barn * (1.0 - best) * 2.2 - open * 0.8;
   }
-  // membrane: thin dark skin with veins following the rays, lighter toward the trailing edge
-  // the membrane is thin dorsal skin: the back's colour, a little warmer and lighter toward the edge
-  vec3 memBase = mix(uBack * 1.15, uMembrane, 0.32);
-  vec3 memCol = mix(memBase, mix(memBase, uFinTip, 0.6), smoothstep(0.45, 1.0, uv.y) * 0.8 + 0.2 * fbm2(m * 0.7));
-  memCol = mix(memCol, mix(uBelly, memBase, 0.6), (1.0 - top) * 0.35);
+  // membrane: thin living skin that follows the body's countershading: the back's own dark,
+  // mottled colour on top (a touch warmer and lighter where it thins toward the trailing edge),
+  // a paler slate below; never a flat pale sheet
+  vec3 memTop = mix(uBack * 1.08, uMembrane, 0.22) * (0.88 + 0.24 * fbm2(m * 0.45 + uSeed));
+  memTop = mix(memTop, mix(memTop * vec3(1.22, 1.12, 1.1), uFinTip, 0.18), smoothstep(0.5, 1.0, uv.y) * (0.45 + 0.2 * fbm2(m * 0.7)));
+  vec3 memBot = mix(mix(uBelly, uBack, 0.4), uBack * 1.1, mott * 0.5);
+  vec3 memCol = mix(memBot, memTop, top);
   float veinN = vnoise(vec2(m.x * 3.0, m.y * 0.6) + uSeed);
   float vein = smoothstep(0.06, 0.0, abs(veinN - 0.5)) * mem;
   memCol *= 1.0 - vein * 0.25;
@@ -707,12 +714,13 @@ void main() {
   // trailing edge, with soft streaks fanning out along the rays
   float between = mem * (1.0 - ray);
   float stM = brush(vec2(m.x, m.y * 2.0) / (uLen * 0.012) + uSeed * 5.0 + id * 11.0);
-  memCol = mix(memCol, memCol * vec3(1.18, 1.06, 1.02) + vec3(0.03, 0.016, 0.02), between * smoothstep(0.25, 1.0, uv.y) * (0.45 + 0.4 * stM));
-  memCol *= 0.9 + 0.2 * stM;
-  vec3 albedo = mix(memCol, skin, max(max(arm, ray * 0.85), barn));
-  float finInk = smoothstep(0.35, 0.9, ray) * mem * 0.3 + tub * 0.18 * (1.0 - tub) * 4.0 * 0.3;
-  // the trailing edge darkens into a soft drawn hem
-  finInk += smoothstep(0.9, 1.0, uv.y) * mem * 0.4;
+  memCol = mix(memCol, memCol * vec3(1.1, 1.03, 1.0) + vec3(0.012, 0.006, 0.008), between * smoothstep(0.25, 1.0, uv.y) * (0.45 + 0.4 * stM));
+  memCol *= 0.94 + 0.12 * stM;
+  // the finger rays read as gentle ridges of the arm's skin running out through the membrane
+  vec3 albedo = mix(memCol, skin, max(max(arm, ray * 0.6), barn));
+  float finInk = smoothstep(0.45, 0.95, ray) * mem * 0.16 + tub * 0.18 * (1.0 - tub) * 4.0 * 0.3;
+  // the trailing edge: only a faint hem (the membrane thins out, it is not cut from paper)
+  finInk += smoothstep(0.93, 1.0, uv.y) * mem * 0.1;
   // healed scar tissue around the tears
   if (tear > -0.6) albedo = mix(albedo, uBack * 0.55 + vec3(0.1, 0.07, 0.07), smoothstep(-0.6, 0.0, tear) * 0.85);
   N = bumpN(N, vWorldPos, hgt * uLen * 0.0006, 1.0);
@@ -721,18 +729,20 @@ void main() {
   // the shadow lookup follows the true surface (a bumped normal would scatter the offset and
   // speckle the soft penumbra), pushed a little further out on big bodies against acne
   s.shadow = bodyShadow(vWorldPos, Ng);
-  s.rim = 0.6;
+  s.rim = 0.3;
   s.spec = 0.0;
   // thin membrane glows warm when backlit; the arm and rays stay dark against the sun
-  s.trans = mix(0.85, 0.06, max(arm, ray * 0.75));
+  s.trans = mix(0.55, 0.05, max(arm, ray * 0.75));
   s.wrap = 0.3;
   s.ao = mix(1.0, 0.85, arm);
   vec3 col = stylizedLight(s);
   // light through the membrane from the sky side (soft, even when not straight backlit)
   float through = max(dot(-N, uSunDir), 0.0) * between;
-  col += albedo * uSunColor * vec3(1.0, 0.7, 0.62) * through * 0.35 * s.shadow;
-  vec3 spec = wetSpecular(N, V, vWorldPos, max(mix(mix(0.4, 0.5, mem), 0.25, wet), 0.32), s.shadow, 1.0, 0.028);
-  col += min(spec, vec3(1.5)) * mix(0.35, 0.8, wet);
+  col += albedo * uSunColor * vec3(1.0, 0.72, 0.62) * through * 0.3 * s.shadow;
+  // soft against the sky: the thin membrane takes a little of the sky's colour through it
+  col = mix(col, col * 0.75 + uSkyAmbient * albedo * 0.9, between * (1.0 - top) * 0.25);
+  vec3 spec = wetSpecular(N, V, vWorldPos, max(mix(mix(0.5, 0.6, mem), 0.25, wet), 0.4), s.shadow, 1.0, 0.028);
+  col += min(spec, vec3(1.2)) * mix(0.16, 0.7, wet);
   float stF = brush(vec2(m.x, m.y * 1.5) / (uLen * 0.016) + uSeed * 3.0 + id * 7.0);
   col = paintFinish(col, N, Ng, V, s.shadow, mix(stF, stM, 0.4), finInk, 1.0, 1.0);
   col = applyFog(col, vWorldPos);
@@ -1038,6 +1048,9 @@ void main() {
   if (vLen < 0.03) discard;
   float h = vH;
   vec2 fuv = vUv * uFurDensity;
+  // far away the clumps shrink to a few pixels: they melt into an even coat that covers by
+  // height alone, so the fur never shimmers or sparkles at distance
+  float calm = smoothstep(0.22, 0.6, length(fwidth(fuv * 0.2)));
   // locks: each strand belongs to the nearest of a loose lattice of clumps; with height the
   // strands gather toward their lock's axis, so every lock is a soft cone drawn to a point
   vec2 cuv = fuv * 0.2;
@@ -1050,7 +1063,7 @@ void main() {
     float dd = length(cuv - cp);
     if (dd < bd) { bd = dd; cc = cp; crnd = hash12(ck + 11.0 + uSeed); }
   }
-  float lockLen = mix(0.62, 1.0, crnd) * smoothstep(0.02, 0.35, vLen);
+  float lockLen = mix(mix(0.62, 1.0, crnd), 0.72, calm) * smoothstep(0.02, 0.35, vLen);
   if (h > lockLen) discard;
   float hr = h / lockLen;
   // curl: the lock's tip wanders in a small circle
@@ -1072,6 +1085,7 @@ void main() {
   float cov = smoothstep(lockR, lockR * 0.72, r0 + edgeN * (0.4 + hr));
   // dense undercoat close to the skin hides it
   cov = max(cov, smoothstep(0.3, 0.0, h) * smoothstep(0.03, 0.25, vLen));
+  cov = mix(cov, 1.0, calm);
   if (cov < 0.18) discard;
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
@@ -1203,6 +1217,8 @@ varying float vShadow;
 varying float vWet;
 void main() {
   float a = vCard.y, x = vCard.x;
+  // a card only a few pixels wide draws as one soft tuft (the strands would only sparkle)
+  float far = smoothstep(0.25, 0.7, fwidth(x));
   // a lock is a loose bundle of strands: they gather at the root, splay and thin toward the tip,
   // each with its own length and wave; some are missing, so light passes between them
   float N = 4.0 + floor(vSeed * 3.0);
@@ -1221,6 +1237,7 @@ void main() {
   float hw = 0.95 * pow(max(0.0, 1.0 - smoothstep(0.3, 0.95, a)), 0.8);
   cov = max(cov, smoothstep(hw, hw * 0.7, abs(x)) * (0.75 + 0.25 * smoothstep(0.0, 0.2, a)));
   cov *= smoothstep(1.0, 0.85, abs(x) / spread);
+  cov = mix(cov, smoothstep(1.0, 0.55, abs(x) / spread) * smoothstep(1.0, 0.75, a), far);
   if (cov < 0.18) discard;
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);

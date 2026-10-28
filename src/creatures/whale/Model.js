@@ -215,9 +215,9 @@ export class WhaleModel {
       uInertia: { value: new Vector3() },
       uAirflow: { value: new Vector3() },
       // fur (Birds.js reads uFurLen to perch on the back)
-      uFurLen: { value: (this.calf ? 0.036 : 0.017) * L * (g.furScale ?? 1) },
+      uFurLen: { value: 0.017 * L * (g.furScale ?? 1) },
       // strands per metre: coarse enough that each lock reads as a soft painted tuft
-      uFurDensity: { value: (this.calf ? 46 : 10 * Math.sqrt(22 / Math.max(L, 8))) * (g.furDensityScale ?? 1) },
+      uFurDensity: { value: (this.calf ? 64 : 10 * Math.sqrt(22 / Math.max(L, 8))) * (g.furDensityScale ?? 1) },
       uFurShade: { value: g.furShade ?? 0.72 },
       uFurTip: { value: g.furTip ?? 1.12 },
       uBlowLoc: { value: new Vector4(P.blow.t, P.blow.len * 0.5, P.blow.gap, P.blow.splay) },
@@ -371,10 +371,10 @@ export class WhaleModel {
   // ---- fur: shells (instanced per shell) and locks (instanced cards) ---------------------------
   _buildFur() {
     const g = this.g;
-    this.maxShells = this.calf ? 28 : 24;
+    this.maxShells = this.calf ? 20 : 24;
     this.furU = {
       uShellH: { value: new Array(MAX_SHELLS).fill(1) },
-      uCurl: { value: g.furCurl ?? (this.calf ? 0.9 : 0.5) },
+      uCurl: { value: g.furCurl ?? (this.calf ? 0.4 : 0.5) },
       uJiggle: { value: new Vector4() },
       uLockGrow: { value: 1 },
     };
@@ -501,7 +501,7 @@ export class WhaleModel {
     this.locks.geometry.instanceCount = n;
     this.locks.visible = n > 0;
     // fewer, fuller locks keep the silhouette when thinned
-    this.furU.uLockGrow.value = 1 + (1 - Math.max(0.15, this.lockFrac)) * 0.35;
+    this.furU.uLockGrow.value = 1 + (1 - Math.max(0.15, this.lockFrac)) * (this.calf ? 0.12 : 0.35);
   }
 
   setVisible(v) {

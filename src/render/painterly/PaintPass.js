@@ -9,8 +9,8 @@
 //   paint      one full-res pass: anisotropic Kuwahara (kuwahara.js) with a radius that scales with
 //              resolution, eases off near the camera and on isolated fine detail (eyes, specks);
 //              the DOF blend; a painterly grade (split tone, vibrance that calms loud colours, soft
-//              S-curve, coloured blacks and paper white); a screen-stable canvas weave; a soft
-//              tinted edge darkening; dither.
+//              S-curve, coloured blacks and paper white); fine animated film grain; a soft
+//              edge darkening; dither.
 import {
   WebGLRenderTarget, HalfFloatType, FloatType, UnsignedByteType, RGBAFormat, LinearFilter, NearestFilter,
   Vector2, Vector3, Vector4, Color, GLSL3, NoBlending, ClampToEdgeWrapping, Matrix4,
@@ -161,7 +161,7 @@ uniform vec3 uShadeLift;  // the deep shade colour the darkest values lean towar
 uniform vec4 uGradeB;     // x shadow lift, y dark desaturation, z shadow hue lean, w day factor
 uniform vec3 uBlack;
 uniform vec3 uWhite;
-uniform vec4 uGrain;      // x amount, y thread period (px at 1080p), z px scale (height / 1080), w fibre mix
+uniform vec4 uGrain;      // x film grain amount, y grain size (px at 1080p), z px scale (height / 1080), w frame seed
 uniform vec4 uVig;        // x amount, y inner, z outer, w aspect
 uniform vec3 uVigTint;
 uniform vec4 uFade;       // rgb fade colour, a amount (the screen fades end exactly on it)
@@ -220,21 +220,17 @@ vec3 grade(vec3 c) {
   return blk + c * (uWhite - blk);
 }
 
-// Plain-weave canvas height (0..1), fixed to the screen like the canvas under a painting: threads
-// wander and vary in thickness from thread to thread, with fibres and soft sizing blotches.
-float canvas(vec2 p) {
-  vec2 q = p / uGrain.y;
-  vec2 wob = (vec2(pNoise(p * 0.031), pNoise(p * 0.029 + 19.3)) - 0.5) * 1.6;
-  vec2 g = q + wob;
-  float thickX = 0.65 + 0.9 * pHash12(vec2(floor(g.x + 0.5), 3.7));
-  float thickY = 0.65 + 0.9 * pHash12(vec2(floor(g.y + 0.5), 9.1));
-  float tx = pow(0.5 + 0.5 * cos(g.x * 6.2831853), thickX);
-  float ty = pow(0.5 + 0.5 * cos(g.y * 6.2831853), thickY);
-  float over = 0.5 + 0.5 * sin(q.x * 3.14159265) * sin(q.y * 3.14159265);
-  float h = mix(tx * (0.45 + 0.55 * ty), ty * (0.45 + 0.55 * tx), over);
-  float fib = 0.5 * pNoise(vec2(p.x * 0.7, p.y * 0.11) + 7.0) + 0.5 * pNoise(vec2(p.x * 0.11, p.y * 0.7) + 3.0);
-  float blot = pNoise(p * 0.012 + 41.0) * 0.6 + pNoise(p * 0.004 + 11.0) * 0.4;
-  return mix(h, fib, uGrain.w) * 0.8 + blot * 0.2;
+// Fine film grain: a fresh random field every frame (so it never crawls or sits on the screen like
+// a texture), slightly soft (a 2x2 tent of per-cell randoms at about grain size) and triangular in
+// distribution; strongest in the mid-tones, nearly gone in deep shadow and bright highlights.
+float grainCell(vec2 c) { return pHash12(c + uGrain.w); }
+float filmGrain(vec2 p) {
+  vec2 q = p / max(uGrain.y, 0.5);
+  vec2 i = floor(q), f = fract(q);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = mix(mix(grainCell(i), grainCell(i + vec2(1.0, 0.0)), u.x), mix(grainCell(i + vec2(0.0, 1.0)), grainCell(i + vec2(1.0, 1.0)), u.x), u.y);
+  float b = pHash12(p + uGrain.w * 1.7 + 17.0);
+  return (a + b) - 1.0;   // -1..1, triangular-ish
 }
 
 void main() {
@@ -307,9 +303,9 @@ void main() {
     col = mix(src, col, srcA.a);
     if (uDebug < 0.5) {
       col = grade(col);
-      float h = canvas(gl_FragCoord.xy / uGrain.z) - 0.5;
       float l = dot(col, LUMA);
-      col *= 1.0 + h * uGrain.x * (0.55 + (1.0 - l));
+      float gm = smoothstep(0.0, 0.25, l) * (1.0 - 0.6 * smoothstep(0.6, 1.0, l));
+      col += filmGrain(gl_FragCoord.xy / uGrain.z) * uGrain.x * (0.35 + 0.65 * gm);
       vec2 vd = (uv - 0.5) * vec2(uVig.w, 1.0);
       col = mix(col, col * uVigTint, smoothstep(uVig.y, uVig.z, length(vd)) * uVig.x);
     }
@@ -353,40 +349,42 @@ function rt(w, h, type, filter = LinearFilter, format = RGBAFormat) {
 }
 
 export const PAINT_DEFAULTS = {
-  radius: 3.1, // Kuwahara radius in px at 1080p (scaled with the frame height; kept small: crisp, never smeared)
+  // film pass (0.8): the brush filter is only a hint of painted softness on broad shapes; detail stays crisp
+  radius: 1.6, // Kuwahara radius in px at 1080p (scaled with the frame height; kept small: crisp, never smeared)
   refHeight: 1080, // the frame height every size here is given for (tests: crops at 1:1 scale)
   alpha: 0.75, // anisotropy (smaller: longer strokes along edges)
-  mix: 1.0,
+  mix: 0.4,
   // sector variance hardness (higher: crisper but flatter, posterised cells on textured surfaces
   // such as waves and fur; lower: softer strokes that keep the form's texture)
   hardness: 80,
-  texture: 0.34, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
-  bristle: 0.2, // brush-bristle streaks along the strokes
+  texture: 0.8, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
+  bristle: 0, // brush-bristle streaks along the strokes
   bristleLen: 9, // their length (px at 1080p)
   detail: 0.85, // how much small bright detail (eye glints, sparkle) the filter must keep
   nearStart: 3, // metres: from here the filter eases in...
   nearFull: 45, // ...to full strength
   nearScale: 0.3, // filter radius right at the lens
   farScale: 1.15, // radius far away (distant land a touch looser, but no extra far blur)
-  split: 0.45, // split-tone strength
-  vibrance: 0.22,
-  calm: 0.12, // pull back the loudest saturations
-  curve: 0.12, // soft S-curve
-  lift: 0.3, // additive shadow lift (by shadeLift; the light model already fills the shade)
-  hueLean: 0.22, // how far the darks lean toward the shade hue (value preserved)
-  shadeLift: new Color(0.075, 0.062, 0.078), // deep violet-grey: the shadows' shared hue and lift
-  darkCalm: 0.15, // muted (not inky) deep shadows
-  shadeTone: new Color(0.98, 0.98, 1.02), // cool, slightly violet shadows
-  lightTone: new Color(1.05, 1.0, 0.92), // warm highlights
-  black: new Color(0.014, 0.012, 0.02), // painted (never pure) black
-  white: new Color(0.985, 0.97, 0.935), // warm paper white
-  grain: 0.04, // canvas strength
-  thread: 3.4, // canvas thread period (px at 1080p)
-  fibre: 0.4,
-  vignette: 0.22,
-  vigInner: 0.55,
-  vigOuter: 1.2,
-  vigTint: new Color(0.82, 0.76, 0.72), // warm umber edge
+  // the painted grade is now a light film finish over the PostFX grade: neutral, no colour casts
+  split: 0.25, // split-tone strength
+  vibrance: 0.08,
+  calm: 0.1, // pull back the loudest saturations
+  curve: 0.0, // soft S-curve (the filmic tone map already shapes contrast)
+  lift: 0.12, // additive shadow lift (by shadeLift; the light model already fills the shade)
+  hueLean: 0.06, // how far the darks lean toward the shade hue (value preserved)
+  shadeLift: new Color(0.062, 0.068, 0.074), // neutral cool grey: the shadows' shared hue and lift
+  darkCalm: 0.08, // muted (not inky) deep shadows
+  shadeTone: new Color(0.99, 1.0, 1.01), // barely cool shadows
+  lightTone: new Color(1.02, 1.0, 0.975), // barely warm highlights
+  black: new Color(0.012, 0.013, 0.015), // film black (never pure)
+  white: new Color(0.99, 0.985, 0.97), // soft print white
+  grain: 0.022, // film grain amplitude (display units; very light)
+  thread: 1.4, // grain size (px at 1080p)
+  fibre: 0,
+  vignette: 0.16,
+  vigInner: 0.6,
+  vigOuter: 1.25,
+  vigTint: new Color(0.84, 0.82, 0.8), // neutral, barely warm edge
 };
 
 export const DOF_PRESETS = {
@@ -480,7 +478,9 @@ export class PaintPass {
 
   setQuality(q) {
     this.quality = q;
-    this.level = q >= 0.75 ? 2 : q >= 0.4 ? 1 : 0;
+    // film pass: the strokes are only a light softening now (radius ~1.6 px at 1080p), which the
+    // 17-tap kernel covers at every quality; the 33-tap variant stays compiled for the dev scenes
+    this.level = q >= 0.4 ? 1 : 0;
     this.dofGatherPass.uniforms.uTaps.value = q >= 0.75 ? 24 : q >= 0.4 ? 16 : 10;
   }
 
@@ -608,7 +608,9 @@ export class PaintPass {
     U.uGradeB.value.set(p.lift * s, p.darkCalm * s, p.hueLean * s, day);
     U.uBlack.value.set(p.black.r * s, p.black.g * s, p.black.b * s);
     U.uWhite.value.set(1 + (p.white.r - 1) * s, 1 + (p.white.g - 1) * s, 1 + (p.white.b - 1) * s);
-    U.uGrain.value.set(p.grain * s, p.thread, Math.max(res, 0.75), p.fibre);
+    // a new grain field every frame (a seed that never repeats a pattern on consecutive frames)
+    this._grainSeed = ((this._grainSeed || 0) + 37.31) % 997.0;
+    U.uGrain.value.set(p.grain * Math.max(s, 0.5), p.thread, Math.max(res, 0.75), this._grainSeed);
     U.uVig.value.set(p.vignette * s, p.vigInner, p.vigOuter, this.width / this.height);
     U.uVigTint.value.set(p.vigTint.r, p.vigTint.g, p.vigTint.b);
     U.uDofOn.value = dofOn ? 1 : 0;

@@ -32,11 +32,12 @@ export function furAt(A, t, s) {
   // the lion mane over the nape, shoulders and throat sides
   const maneT = smoothstep(M.t0 - 0.03, M.t0 + 0.03, t) * (1 - smoothstep(M.t1 - 0.025, M.t1 + 0.01, t));
   const maneS = 1 - smoothstep(0.28, 0.4, sw);
-  f = Math.max(f, maneT * maneS * lerp(1.0, 2.0, smoothstep(0.38, 0.0, sw)));
+  // (the calf has no mane yet: only a slightly thicker velvet over the nape)
+  f = Math.max(f, maneT * maneS * (A.calf ? lerp(0.62, 0.8, smoothstep(0.38, 0.0, sw)) : lerp(1.0, 2.0, smoothstep(0.38, 0.0, sw))));
   // the dorsal ridge between the plate rows, down to the tail stock
   const ridgeW = P.plates.s0 * 1.05;
   const ridge = (1 - smoothstep(ridgeW * 0.55, ridgeW * 1.15, sw)) * smoothstep(0.05, 0.12, t) * (1 - smoothstep(M.t0 + 0.02, M.t0 + 0.05, t));
-  f = Math.max(f, ridge * lerp(0.75, 1.35, smoothstep(0.1, M.t0, t)));
+  f = Math.max(f, ridge * lerp(0.75, 1.35, smoothstep(0.1, M.t0, t)) * (A.calf ? 0.6 : 1));
   // fringe under the tail stock (ventral keel) and along the upper keel near the flukes
   const keel = (1 - smoothstep(0.035, 0.09, ventral)) * smoothstep(0.02, 0.06, t) * (1 - smoothstep(0.18, 0.26, t));
   f = Math.max(f, keel * 1.2);
@@ -45,14 +46,15 @@ export function furAt(A, t, s) {
   const lm = A.landmarks();
   const sWing = lm.sWing;
   const dW = Math.hypot((t - W.t) / 0.045, (Math.min(Math.abs(s - sWing), Math.abs(s - (1 - sWing)))) / 0.06);
-  f = Math.max(f, (1 - smoothstep(0.6, 1.1, dW)) * 1.1);
+  f = Math.max(f, (1 - smoothstep(0.6, 1.1, dW)) * (A.calf ? 0.6 : 1.1));
   if (A.calf) {
-    // soft down all over (sleeker toward the tail), a fluffy crown and cheeks
-    f = Math.max(f, 0.34 * lerp(0.55, 1, smoothstep(0.12, 0.4, t)));
+    // soft, short down lying close all over (sleeker toward the tail and the belly), a slightly
+    // fuzzier crown: the calf must read as a smooth baby whale, never a ball of fur
+    f = Math.max(f, 0.5 * lerp(0.6, 1, smoothstep(0.12, 0.4, t)) * lerp(0.7, 1, smoothstep(0.48, 0.2, sw)));
     // the crown tuft sits on top of the head behind the eyes (never over the face)
     const tEyes = Math.min(P.eye.t, P.eye2.t);
     const crown = smoothstep(tEyes - 0.07, tEyes - 0.035, t) * (1 - smoothstep(tEyes - 0.03, tEyes - 0.008, t)) * (1 - smoothstep(0.16, 0.28, sw));
-    f = Math.max(f, crown * 1.35);
+    f = Math.max(f, crown * 0.95);
   }
   // bare: the face around and in front of the eyes, lips, rostrum, throat bellows (the calf
   // keeps only a short velvet on the forehead, so its face and eyes read clearly)

@@ -195,7 +195,8 @@ export function buildLocks(A, bodyGeo, bodySkinTris, finGeo, density = 1) {
   };
   const lenK = L * (A.g.lockScale ?? 1);
   // mane: long, thick, falling back and down over the nape, shoulders and throat sides
-  region('mane', calf ? 620 : 2100, (a, b, c) => {
+  // (the calf has no long hair yet: a few short, close-lying tufts that follow the body)
+  region('mane', calf ? 200 : 2100, (a, b, c) => {
     const f = furTri(a, b, c);
     const t = tAt(a);
     return f > 0.9 && t > P.mane.t0 - 0.02 && t < P.mane.t1 ? Math.pow(f, 1.5) : 0;
@@ -204,42 +205,42 @@ export function buildLocks(A, bodyGeo, bodySkinTris, finGeo, density = 1) {
     const along = smoothstep(P.mane.t1, P.mane.t0 + 0.04, t);
     const dorsal = 1 - Math.abs(s - 0.5) * 2;
     return {
-      len: lenK * (calf ? 0.04 : 0.05) * (0.55 + 0.6 * along) * (0.7 + 0.45 * dorsal) * lerp(0.75, 1.25, r()),
-      wid: lenK * (calf ? 0.0095 : 0.011) * lerp(0.7, 1.3, r()),
-      lift: lerp(0.5, 1.0, r()), droop: lerp(0.2, 0.5, r()), curl: lerp(0.1, calf ? 0.6 : 0.4, r()),
+      len: lenK * (calf ? 0.017 : 0.05) * (0.55 + 0.6 * along) * (0.7 + 0.45 * dorsal) * lerp(0.75, 1.25, r()),
+      wid: lenK * (calf ? 0.006 : 0.011) * lerp(0.7, 1.3, r()),
+      lift: calf ? lerp(0.1, 0.3, r()) : lerp(0.5, 1.0, r()), droop: lerp(0.2, 0.5, r()), curl: lerp(0.1, calf ? 0.35 : 0.4, r()),
     };
   });
   // dorsal ridge: a mohawk between the plate rows down to the tail stock
-  region('ridge', calf ? 260 : 520, (a, b, c) => {
+  region('ridge', calf ? 110 : 520, (a, b, c) => {
     const s = sAt(a), t = tAt(a);
     return Math.abs(s - 0.5) < P.plates.s0 * 1.1 && t > 0.06 && t < P.mane.t0 + 0.02 && furTri(a, b, c) > 0.3 ? 1 : 0;
   }, (sm) => ({
-    len: lenK * (calf ? 0.03 : 0.028) * lerp(0.55, 1.0, smoothstep(0.05, P.mane.t0, sm.loft[0])) * lerp(0.75, 1.2, r()),
-    wid: lenK * (calf ? 0.01 : 0.0065) * lerp(0.7, 1.3, r()),
-    lift: lerp(0.55, 0.9, r()), droop: lerp(0.0, 0.25, r()), curl: lerp(0.05, 0.25, r()),
+    len: lenK * (calf ? 0.014 : 0.028) * lerp(0.55, 1.0, smoothstep(0.05, P.mane.t0, sm.loft[0])) * lerp(0.75, 1.2, r()),
+    wid: lenK * (calf ? 0.0055 : 0.0065) * lerp(0.7, 1.3, r()),
+    lift: calf ? lerp(0.15, 0.35, r()) : lerp(0.55, 0.9, r()), droop: lerp(0.0, 0.25, r()), curl: lerp(0.05, 0.25, r()),
   }));
   // fringe under the tail stock
-  region('fringe', calf ? 90 : 260, (a, b, c) => {
+  region('fringe', calf ? 40 : 260, (a, b, c) => {
     const s = sAt(a), t = tAt(a);
     return Math.min(s, 1 - s) < 0.07 && t > 0.025 && t < 0.24 && furTri(a, b, c) > 0.3 ? 1 : 0;
   }, () => ({
-    len: lenK * (calf ? 0.028 : 0.032) * lerp(0.7, 1.2, r()), wid: lenK * 0.007 * lerp(0.7, 1.3, r()),
+    len: lenK * (calf ? 0.014 : 0.032) * lerp(0.7, 1.2, r()), wid: lenK * (calf ? 0.005 : 0.007) * lerp(0.7, 1.3, r()),
     lift: lerp(0.1, 0.3, r()), droop: lerp(0.6, 1.0, r()), curl: lerp(0.05, 0.3, r()),
   }));
   // wing-root tufts
-  region('tuft', calf ? 120 : 220, (a, b, c) => {
+  region('tuft', calf ? 50 : 220, (a, b, c) => {
     const t = tAt(a);
     const f = furTri(a, b, c);
     return Math.abs(t - P.wing.t) < 0.05 && f > 0.6 && Math.abs(sAt(a) - 0.5) > 0.2 ? f : 0;
   }, () => ({
-    len: lenK * (calf ? 0.03 : 0.024) * lerp(0.7, 1.2, r()), wid: lenK * 0.007 * lerp(0.7, 1.3, r()),
-    lift: lerp(0.3, 0.7, r()), droop: lerp(0.2, 0.5, r()), curl: lerp(0.1, 0.35, r()),
+    len: lenK * (calf ? 0.014 : 0.024) * lerp(0.7, 1.2, r()), wid: lenK * (calf ? 0.005 : 0.007) * lerp(0.7, 1.3, r()),
+    lift: calf ? lerp(0.15, 0.35, r()) : lerp(0.3, 0.7, r()), droop: lerp(0.2, 0.5, r()), curl: lerp(0.1, 0.35, r()),
   }));
   if (calf) {
-    // the calf's fluffy crown and cheeks
-    region('crown', 420, (a, b, c) => (furTri(a, b, c) > 1.15 ? 1 : 0), () => ({
-      len: lenK * 0.028 * lerp(0.7, 1.25, r()), wid: lenK * 0.009 * lerp(0.7, 1.3, r()),
-      lift: lerp(0.6, 1.0, r()), droop: lerp(0.0, 0.3, r()), curl: lerp(0.3, 0.8, r()),
+    // the calf's slightly fuzzier crown (short and soft: it must never read as a pom-pom)
+    region('crown', 150, (a, b, c) => (furTri(a, b, c) > 0.88 ? 1 : 0), () => ({
+      len: lenK * 0.016 * lerp(0.7, 1.2, r()), wid: lenK * 0.006 * lerp(0.7, 1.3, r()),
+      lift: lerp(0.3, 0.55, r()), droop: lerp(0.1, 0.35, r()), curl: lerp(0.2, 0.5, r()),
     }));
   }
   // fins: tufts along each wing's leading edge, a fringe along the flukes' leading edges
@@ -257,12 +258,12 @@ export function buildLocks(A, bodyGeo, bodySkinTris, finGeo, density = 1) {
       const samples = sampleTris(finGeo, finGeo.index.count / 3, wfn, Math.round(n * density), r, 'fin');
       for (const sm of samples) cards.push(Object.assign({ region: name }, sm, opts(sm)));
     };
-    finCards('wingLE', calf ? 140 : 260, wingLE, () => ({
-      len: lenK * (calf ? 0.022 : 0.018) * lerp(0.7, 1.2, r()), wid: lenK * 0.0055 * lerp(0.7, 1.3, r()),
+    finCards('wingLE', calf ? 40 : 260, wingLE, () => ({
+      len: lenK * (calf ? 0.01 : 0.018) * lerp(0.7, 1.2, r()), wid: lenK * 0.0055 * lerp(0.7, 1.3, r()),
       lift: lerp(0.15, 0.4, r()), droop: lerp(0.1, 0.3, r()), curl: lerp(0.05, 0.2, r()), finBack: 1,
     }));
-    finCards('flukeLE', calf ? 60 : 160, flukeLE, () => ({
-      len: lenK * (calf ? 0.02 : 0.02) * lerp(0.7, 1.2, r()), wid: lenK * 0.005 * lerp(0.7, 1.3, r()),
+    finCards('flukeLE', calf ? 24 : 160, flukeLE, () => ({
+      len: lenK * (calf ? 0.011 : 0.02) * lerp(0.7, 1.2, r()), wid: lenK * 0.005 * lerp(0.7, 1.3, r()),
       lift: lerp(0.1, 0.3, r()), droop: lerp(0.0, 0.2, r()), curl: lerp(0.05, 0.2, r()), finBack: 1,
     }));
   }

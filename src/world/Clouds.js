@@ -190,23 +190,31 @@ void main() {
   float n2 = texture2D(uNoise, uv * 0.8 + sd * 1.7 + uTime * 0.004).b;
   // soft silhouette: the puff fades out over a wide band; only the outline of the whole cloud is
   // eroded into ragged, brushy wisps (inner puffs melt into each other)
-  float erode = (n1 - 0.55) * mix(0.35, 0.75, vPeriph) + (bB - 0.5) * mix(0.25, 0.6, vPeriph) + (n2 - 0.5) * 0.2;
+  // (film pass: wide, soft falloffs so overlapping puffs melt into one billowing mass, and the
+  // outline is a soft, slightly torn edge rather than a chain of round lobes)
+  float erode = (n1 - 0.55) * mix(0.3, 0.6, vPeriph) + (bB - 0.5) * mix(0.3, 0.7, vPeriph) + (n2 - 0.5) * 0.18;
   float edge = r2 + erode;
-  float a = smoothstep(1.0, mix(0.05, 0.3, vPeriph), edge) * vAlpha;
+  float a = smoothstep(1.0, mix(0.0, 0.12, vPeriph), edge) * vAlpha;
   // the condensation level: the base of the cloud is flat and a little crisper
   float baseY = vBase + (bA - 0.5) * 0.05;
   a *= smoothstep(baseY - 0.04, baseY + 0.05, cl.y);
   if (a < 0.003) discard;
-  // the cloud's own surface normal (an ellipsoid flattened at the base), lightly bumped by the
-  // world-space billows and a little by the puff's roundness
-  vec3 Nc = normalize(cl * vec3(1.0, 1.35, 1.0) + vec3(0.0, 0.22, 0.0));
+  // the cloud's own surface normal, the SAME for every puff at this pixel: the front of the whole
+  // cloud's ellipsoid (flattened at the base) found from the position across the view, so the
+  // light runs continuously over the mass and no puff shades as its own ball; then bumped by
+  // smooth world-space billows and only a whisper of the puff's roundness
+  vec3 across = cl - dot(cl, vBack) * vBack;
+  float zc = sqrt(max(1.0 - dot(across, across), 0.0));
+  vec3 clS = across + vBack * mix(dot(cl, vBack), zc, 0.75);
+  vec3 Nc = normalize(clS * vec3(1.0, 1.35, 1.0) + vec3(0.0, 0.22, 0.0));
   Nc = normalize(mix(Nc, vec3(0.0, -1.0, 0.0), smoothstep(baseY + 0.18, baseY, cl.y) * 0.85));
   vec3 Np = normalize(vRight * uv.x + vUp * uv.y + vBack * (z + 0.2));
-  vec3 N = normalize(Nc * 0.85 + Np * 0.12 + vClusterN * 0.18);
+  vec3 bump = vec3(bA - 0.5, 0.0, bB - 0.5) * 0.3;
+  vec3 N = normalize(Nc + Np * 0.05 + bump);
   float ndl = dot(N, uSunDir);
   // self-shadow through the mass: deeper inside the cloud (toward the sun's far side) is darker
-  float depthSun = clamp(dot(cl, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
-  float light = smoothstep(-0.55, 0.7, ndl) * mix(0.72, 1.0, depthSun) * mix(1.0, vShade, 0.3);
+  float depthSun = clamp(dot(clS, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+  float light = smoothstep(-0.6, 0.75, ndl) * mix(0.74, 1.0, depthSun) * mix(1.0, vShade, 0.08);
   light *= 0.82 + 0.36 * bA;
   light = clamp(mix(light, light * light * (3.0 - 2.0 * light), 0.35), 0.0, 1.0);
   // backlit masses are thick and dim in the middle
@@ -216,7 +224,7 @@ void main() {
   vec3 col = mix(shade, uCloudLit, light);
   col *= mix(0.9, 1.04, N.y * 0.5 + 0.5);
   // billow texture: cauliflower bumps catch the light on the sunny side (world space, continuous)
-  col *= 1.0 + (bB - 0.5) * 0.22 * light;
+  col *= 1.0 + (bB - 0.5) * 0.14 * light;
   col += uSkyAmbient * 0.04;
   col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.6;
   // silver lining only along the outer silhouette of the cloud

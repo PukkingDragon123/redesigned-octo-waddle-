@@ -21,9 +21,11 @@ function preset(o) {
     moonElev: 35, moonAz: 140, moon: C('#7f9cff', 0.0),
     // the second, smaller moon (Ilsa: warm, rose-gold) and the spiral galaxy across the night sky
     moon2Elev: 22, moon2Az: -60, moon2: 0, galaxy: 0,
-    lift: V(0, 0, 0), gamma: V(1, 1, 1), gain: V(1, 1, 1), sat: 1.05, contrast: 1.0,
-    vignette: 0.32, vigColor: C('#b7a9c9'),
-    bloom: 0.06, threshold: 1.25, rays: 0.25,
+    // the grade: white balance (linear, before the filmic curve), lift / gamma / gain after it,
+    // restrained saturation, contrast in log space around mid grey
+    lift: V(0, 0, 0), gamma: V(1, 1, 1), gain: V(1, 1, 1), wb: V(1, 1, 1), sat: 1.0, contrast: 1.04,
+    vignette: 0.3, vigColor: C('#8f8a86'),
+    bloom: 0.06, threshold: 1.25, rays: 0.25, halation: 0.05,
     // the sea: body colour of deep water (reflectance-like, lit here), the turquoise of light through
     // thin crests and shallows, the default sea state, water clarity (1 clear .. 3 murky), night plankton
     sea: C('#0d4a6b'), seaScatter: C('#2bd1b5'), seaState: 0.3, clarity: 1, plankton: 0,
@@ -37,32 +39,32 @@ function preset(o) {
 export const PRESETS = {
   dawn: preset({
     fill: 0.75, warmth: 0.9,
-    sunElev: 4, sunAz: 72, sun: C('#ffae72', 2.6),
-    zenith: C('#2b4785'), horizon: C('#f7b88e'),
-    ambient: C('#8090d4', 0.84), bounce: C('#d6aa9c', 0.55), shadowTint: C('#c6c2f2'),
-    fog: C('#d9b3a8'), scatter: C('#ffa96f', 1.25),
-    cloudLit: C('#ffd2ad', 1.15), cloudShadow: C('#6b6cb0', 0.92),
-    bankLit: C('#ffc29a'), bankShadow: C('#7c6fb2'),
+    sunElev: 4, sunAz: 72, sun: C('#ffb37a', 2.6),
+    zenith: C('#2d4b84'), horizon: C('#f4bf92'),
+    ambient: C('#8ea2cc', 0.84), bounce: C('#d8b49a', 0.55), shadowTint: C('#c9d1ec'),
+    fog: C('#d6bea8'), scatter: C('#ffad72', 1.2),
+    cloudLit: C('#ffd6b0', 1.12), cloudShadow: C('#7180a4', 0.92),
+    bankLit: C('#ffc89e'), bankShadow: C('#7c86a6'),
     fogDist: 0.000035, fogHeight: 0.00016,
     exposure: 0.98, stars: 0.14, planet: 0.9, cirrus: 0.6, bank: 0.1,
     moon2: 0.5, moon2Elev: 16, moon2Az: -95, galaxy: 0.08,
-    lift: V(0.0, 0.0, 0.02), gain: V(1.03, 1.0, 0.96), sat: 1.06, contrast: 1.06,
-    vignette: 0.32, vigColor: C('#9b86b8'), bloom: 0.08, threshold: 1.2, rays: 0.38,
+    lift: V(0.0, 0.004, 0.01), wb: V(1.035, 1.0, 0.95), sat: 1.0, contrast: 1.06,
+    vignette: 0.3, vigColor: C('#8c847c'), bloom: 0.08, threshold: 1.2, rays: 0.38, halation: 0.07,
     sea: C('#1a4a66'), seaScatter: C('#3cc6ae'), seaState: 0.06, clarity: 0.9,
   }),
   menu: preset({
     fill: 0.8, warmth: 0.9,
-    sunElev: 7, sunAz: 55, sun: C('#ffb57e', 2.55),
-    zenith: C('#2f5596'), horizon: C('#ffc4a0'),
-    ambient: C('#8290da', 0.85), bounce: C('#d9b09f', 0.56), shadowTint: C('#c8c4f2'),
-    fog: C('#cdaebf'), scatter: C('#ffb282', 1.2),
-    cloudLit: C('#ffd9bb', 1.12), cloudShadow: C('#7072b4', 0.92),
-    bankLit: C('#ffcaa6'), bankShadow: C('#8076b6'),
+    sunElev: 7, sunAz: 55, sun: C('#ffb984', 2.55),
+    zenith: C('#305894'), horizon: C('#f8c6a0'),
+    ambient: C('#8fa3cf', 0.85), bounce: C('#d9b8a0', 0.56), shadowTint: C('#cad2ee'),
+    fog: C('#d2bcaa'), scatter: C('#ffb584', 1.15),
+    cloudLit: C('#ffdcbc', 1.1), cloudShadow: C('#7484a8', 0.92),
+    bankLit: C('#ffcda8'), bankShadow: C('#7e88aa'),
     fogDist: 0.000035, fogHeight: 0.00015,
     exposure: 0.98, stars: 0.05, planet: 0.95, cirrus: 0.65, bank: 0.11,
     moon2: 0.35, moon2Elev: 24, moon2Az: -80, galaxy: 0.04,
-    lift: V(0.0, 0.0, 0.02), gain: V(1.03, 1.0, 0.96), sat: 1.06, contrast: 1.06,
-    vignette: 0.34, vigColor: C('#9b88ba'), bloom: 0.08, threshold: 1.2, rays: 0.4,
+    lift: V(0.0, 0.004, 0.01), wb: V(1.03, 1.0, 0.955), sat: 1.0, contrast: 1.06,
+    vignette: 0.32, vigColor: C('#8c847c'), bloom: 0.08, threshold: 1.2, rays: 0.4, halation: 0.07,
     sea: C('#1b4b69'), seaScatter: C('#3cc6ae'), seaState: 0.12, clarity: 0.9,
   }),
   morning: preset({
@@ -84,7 +86,7 @@ export const PRESETS = {
     fog: C('#c2e3f0'), scatter: C('#fff6e2', 0.9),
     cloudLit: C('#ffffff', 1.06), cloudShadow: C('#93a9c4', 0.95),
     bankShadow: C('#9fb8d8'), planet: 0.4, cirrus: 0.75, bank: 0.13, rays: 0.12,
-    sat: 1.08,
+    sat: 1.02,
     sea: C('#0b4a70'), seaScatter: C('#26d3bb'), seaState: 0.38, clarity: 1.1,
   }),
   afternoon: preset({
@@ -96,22 +98,22 @@ export const PRESETS = {
     cloudLit: C('#fff6ea', 1.05), cloudShadow: C('#8fa2b8', 0.93),
     bankShadow: C('#9fb4c6'),
     fogDist: 0.000035, fogHeight: 0.00016, planet: 0.5, cirrus: 0.6, bank: 0.13, rays: 0.35,
-    gain: V(1.0, 1.01, 0.98), sat: 1.06,
+    wb: V(1.015, 1.0, 0.975), sat: 1.02,
     sea: C('#0f4f6a'), seaScatter: C('#33d0aa'), seaState: 0.32,
   }),
   golden: preset({
     fill: 0.6, warmth: 1.2, shadeCalm: 0.1,
     sunElev: 4.5, sunAz: 4, sun: C('#ffa45a', 2.8),
-    zenith: C('#3c509a'), horizon: C('#ffb38a'),
-    ambient: C('#8c8ad0', 0.78), bounce: C('#e5ae92', 0.62), shadowTint: C('#c9c0f0'),
-    fog: C('#f0b8a0'), scatter: C('#ffa463', 1.7),
-    cloudLit: C('#ffd1a6', 1.15), cloudShadow: C('#8a7bb8', 0.9),
-    bankLit: C('#ffbf8e'), bankShadow: C('#8b70a8'),
+    zenith: C('#3a5490'), horizon: C('#ffbc86'),
+    ambient: C('#8f9dc6', 0.78), bounce: C('#e5b490', 0.62), shadowTint: C('#cfd3ea'),
+    fog: C('#e6bf9a'), scatter: C('#ffa866', 1.6),
+    cloudLit: C('#ffd4a6', 1.12), cloudShadow: C('#7d84a4', 0.9),
+    bankLit: C('#ffc28e'), bankShadow: C('#84829c'),
     fogDist: 0.00005, fogHeight: 0.00022,
     exposure: 1.02, stars: 0.05, planet: 0.85, cirrus: 0.9, bank: 0.12,
     moon2: 0.3, moon2Elev: 12, moon2Az: 150, galaxy: 0.03,
-    lift: V(0.025, 0.01, 0.04), gain: V(1.05, 0.99, 0.93), sat: 1.1, contrast: 1.03,
-    vignette: 0.42, vigColor: C('#a46f8f'), bloom: 0.09, threshold: 1.15, rays: 0.55,
+    lift: V(0.006, 0.005, 0.01), wb: V(1.05, 1.0, 0.92), sat: 1.0, contrast: 1.05,
+    vignette: 0.34, vigColor: C('#8a7c70'), bloom: 0.09, threshold: 1.15, rays: 0.55, halation: 0.09,
     sea: C('#1d4a62'), seaScatter: C('#46c49e'), seaState: 0.15,
   }),
   dusk: preset({
@@ -119,45 +121,45 @@ export const PRESETS = {
     sunElev: -3, sunAz: -8, sun: C('#ff8a6a', 0.5),
     zenith: C('#1d2a64'), horizon: C('#e2907f'),
     ambient: C('#6f74aa', 0.62), bounce: C('#a07390', 0.45), shadowTint: C('#cfc6f0'),
-    fog: C('#8d7c9e'), scatter: C('#f39a72', 1.0),
-    cloudLit: C('#f0a0a4', 0.8), cloudShadow: C('#5d5b96', 0.85),
-    bankLit: C('#e79aa6'), bankShadow: C('#5a5690'),
+    fog: C('#86829a'), scatter: C('#f09e76', 1.0),
+    cloudLit: C('#e8aa94', 0.82), cloudShadow: C('#5c6290', 0.85),
+    bankLit: C('#e2a694'), bankShadow: C('#5a608a'),
     fogDist: 0.00004, fogHeight: 0.00018,
     night: 0.35, stars: 0.45, planet: 1.0, cirrus: 0.7, bank: 0.11,
     moon: C('#7f9cff', 0.12), exposure: 1.1, moon2: 0.7, moon2Elev: 18, moon2Az: 95, galaxy: 0.35,
-    lift: V(0.02, 0.01, 0.05), gain: V(1.02, 0.98, 1.0), sat: 1.0,
-    vignette: 0.45, vigColor: C('#6d5a8f'), bloom: 0.1, threshold: 1.1, rays: 0.2,
+    lift: V(0.004, 0.008, 0.02), wb: V(1.0, 1.0, 1.0), sat: 0.92, contrast: 1.06,
+    vignette: 0.36, vigColor: C('#66646e'), bloom: 0.1, threshold: 1.1, rays: 0.2, halation: 0.06,
     sea: C('#173d5c'), seaScatter: C('#3a9fb0'), seaState: 0.2, plankton: 0.25,
   }),
   night: preset({
     fill: 0.3, warmth: 0, shadeCalm: 0.05, soft: 0.4,
     sunElev: -22, sunAz: -40, sun: C('#000000', 0),
-    zenith: C('#040818'), horizon: C('#16224c'),
-    ambient: C('#2c3c72', 0.55), bounce: C('#1e2a58', 0.4), shadowTint: C('#c9d2f6'),
-    fog: C('#121c40'), scatter: C('#27325f', 1.0),
-    cloudLit: C('#425088', 0.5), cloudShadow: C('#171f3e', 0.85),
-    bankLit: C('#3c4a80'), bankShadow: C('#121a3a'),
+    zenith: C('#0a1324'), horizon: C('#2c3c5c'),
+    ambient: C('#506384', 0.6), bounce: C('#2c3852', 0.4), shadowTint: C('#d0d8ee'),
+    fog: C('#202c46'), scatter: C('#3a4662', 1.0),
+    cloudLit: C('#74829e', 0.62), cloudShadow: C('#1e2638', 0.85),
+    bankLit: C('#5c6a8c'), bankShadow: C('#1a2234'),
     fogDist: 0.00004, fogHeight: 0.00016,
     night: 1, stars: 1, planet: 1, cirrus: 0.4, bank: 0.1,
-    moonElev: 38, moonAz: 150, moon: C('#86a2ff', 0.42), exposure: 1.3,
+    moonElev: 38, moonAz: 150, moon: C('#bccbe8', 0.8), exposure: 1.5,
     moon2: 1, moon2Elev: 24, moon2Az: 70, galaxy: 1,
-    lift: V(0.0, 0.012, 0.035), gain: V(0.98, 1.0, 1.05), sat: 0.95, contrast: 1.02,
-    vignette: 0.5, vigColor: C('#3a3f6a'), bloom: 0.11, threshold: 0.9, rays: 0.0,
-    sea: C('#0c3355'), seaScatter: C('#2a7fae'), seaState: 0.18, plankton: 1,
+    lift: V(0.004, 0.007, 0.014), wb: V(0.97, 1.0, 1.05), sat: 0.76, contrast: 1.12,
+    vignette: 0.36, vigColor: C('#4c5260'), bloom: 0.11, threshold: 0.9, rays: 0.0, halation: 0.04,
+    sea: C('#12304a'), seaScatter: C('#2f7ea6'), seaState: 0.18, plankton: 1,
   }),
   storm: preset({
     fill: 0.3, warmth: 0.2, shadeCalm: 0.25, soft: 0.6,
-    sunElev: 14, sunAz: 30, sun: C('#aab4c2', 0.8),
-    zenith: C('#2f3843'), horizon: C('#64707a'),
-    ambient: C('#7a889a', 0.72), bounce: C('#55606e', 0.45), shadowTint: C('#d2dbe8'),
-    fog: C('#58646f'), scatter: C('#7d8896', 1.0),
-    cloudLit: C('#97a2b0', 0.85), cloudShadow: C('#36404d', 0.95),
-    bankLit: C('#808b99'), bankShadow: C('#323b47'),
+    sunElev: 14, sunAz: 30, sun: C('#b2bbc6', 1.05),
+    zenith: C('#3a4450'), horizon: C('#77838c'),
+    ambient: C('#8290a0', 0.86), bounce: C('#5e6874', 0.45), shadowTint: C('#d6dde8'),
+    fog: C('#66727c'), scatter: C('#86909c', 1.0),
+    cloudLit: C('#a4aebb', 0.9), cloudShadow: C('#3c4652', 0.95),
+    bankLit: C('#8a95a2'), bankShadow: C('#36404c'),
     fogDist: 0.00026, fogHeight: 0.0011, fogFalloff: 0.004,
-    storm: 1, night: 0.25, stars: 0, planet: 0, cirrus: 0, bank: 0.2,
-    moon: C('#7f9cff', 0.1), exposure: 1.15,
-    lift: V(0.01, 0.015, 0.03), gain: V(0.97, 1.0, 1.04), sat: 0.75, contrast: 1.06,
-    vignette: 0.52, vigColor: C('#474d66'), bloom: 0.1, threshold: 1.0, rays: 0.0,
+    storm: 1, night: 0.12, stars: 0, planet: 0, cirrus: 0, bank: 0.2,
+    moon: C('#a8b8d8', 0.1), exposure: 1.55,
+    lift: V(0.006, 0.009, 0.014), wb: V(0.98, 1.0, 1.03), sat: 0.82, contrast: 1.14,
+    vignette: 0.36, vigColor: C('#50545c'), bloom: 0.1, threshold: 1.0, rays: 0.0, halation: 0.04,
     sea: C('#20414c'), seaScatter: C('#4f9c8f'), seaState: 1, clarity: 2.2,
   }),
   stormDawn: preset({
@@ -171,8 +173,8 @@ export const PRESETS = {
     fogDist: 0.00006, fogHeight: 0.00035,
     storm: 0.22, planet: 0.45, cirrus: 0.3, bank: 0.16,
     moon2: 0.2, moon2Elev: 20, moon2Az: -100,
-    lift: V(0.015, 0.012, 0.03), gain: V(1.03, 0.99, 0.95), sat: 0.96, contrast: 1.07,
-    vignette: 0.45, vigColor: C('#6a6488'), bloom: 0.08, threshold: 1.15, rays: 0.6,
+    lift: V(0.006, 0.008, 0.014), wb: V(1.03, 1.0, 0.955), sat: 0.94, contrast: 1.08,
+    vignette: 0.36, vigColor: C('#6e6a68'), bloom: 0.08, threshold: 1.15, rays: 0.6, halation: 0.07,
     sea: C('#1f4658'), seaScatter: C('#55b2a0'), seaState: 0.7, clarity: 1.7,
   }),
   oasis: preset({
@@ -185,8 +187,8 @@ export const PRESETS = {
     bankLit: C('#fff8ee'), bankShadow: C('#a6bed8'),
     fogDist: 0.00003, fogHeight: 0.00016,
     planet: 0.75, cirrus: 0.6, bank: 0.13, moon2: 0.15, moon2Elev: 35, moon2Az: 120,
-    lift: V(0.01, 0.015, 0.02), gain: V(1.02, 1.01, 0.98), sat: 1.1, contrast: 1.02,
-    vignette: 0.34, vigColor: C('#a7b9a8'), bloom: 0.09, threshold: 1.18, rays: 0.6,
+    lift: V(0.004, 0.008, 0.01), wb: V(1.02, 1.0, 0.975), sat: 1.04, contrast: 1.04,
+    vignette: 0.3, vigColor: C('#8a8c84'), bloom: 0.09, threshold: 1.18, rays: 0.6,
     sea: C('#0f6a80'), seaScatter: C('#3fe0c0'), seaState: 0.08, clarity: 0.75,
   }),
 };
@@ -196,8 +198,8 @@ const COLOR_KEYS = ['sun', 'zenith', 'horizon', 'ambient', 'bounce', 'shadowTint
 const NUM_KEYS = ['sunElev', 'sunAz', 'fogDist', 'fogHeight', 'fogFalloff', 'fogBase', 'exposure', 'night',
   'stars', 'planet', 'cirrus', 'bank', 'storm', 'moonElev', 'moonAz', 'sat', 'contrast', 'vignette',
   'bloom', 'threshold', 'rays', 'seaState', 'clarity', 'plankton', 'moon2Elev', 'moon2Az', 'moon2', 'galaxy',
-  'fill', 'warmth', 'shadeCalm', 'soft'];
-const VEC_KEYS = ['lift', 'gamma', 'gain'];
+  'fill', 'warmth', 'shadeCalm', 'soft', 'halation'];
+const VEC_KEYS = ['lift', 'gamma', 'gain', 'wb'];
 
 function clonePreset(p) {
   const o = {};
@@ -270,20 +272,20 @@ export class Atmosphere {
     const horizonFade = smoothstep(-6, 2, p.sunElev);
     const stormDim = 1 - s * 0.7;
     G.uSunColor.value.copy(p.sun).multiplyScalar(horizonFade * stormDim);
-    G.uSkyZenith.value.copy(p.zenith).multiplyScalar(1 - s * 0.45);
-    G.uSkyHorizon.value.copy(p.horizon).multiplyScalar(1 - s * 0.4);
-    G.uSkyAmbient.value.copy(p.ambient).multiplyScalar(1 - s * 0.3);
-    G.uBounce.value.copy(p.bounce).multiplyScalar(1 - s * 0.4);
+    G.uSkyZenith.value.copy(p.zenith).multiplyScalar(1 - s * 0.3);
+    G.uSkyHorizon.value.copy(p.horizon).multiplyScalar(1 - s * 0.25);
+    G.uSkyAmbient.value.copy(p.ambient).multiplyScalar(1 - s * 0.15);
+    G.uBounce.value.copy(p.bounce).multiplyScalar(1 - s * 0.3);
     G.uShadowTint.value.copy(p.shadowTint);
-    G.uFogColor.value.copy(p.fog).multiplyScalar(1 - s * 0.35);
+    G.uFogColor.value.copy(p.fog).multiplyScalar(1 - s * 0.22);
     G.uSunScatter.value.copy(p.scatter).multiplyScalar(1 - s * 0.6);
-    G.uCloudLit.value.copy(p.cloudLit).multiplyScalar(1 - s * 0.45);
-    G.uCloudShadow.value.copy(p.cloudShadow).multiplyScalar(1 - s * 0.3);
+    G.uCloudLit.value.copy(p.cloudLit).multiplyScalar(1 - s * 0.3);
+    G.uCloudShadow.value.copy(p.cloudShadow).multiplyScalar(1 - s * 0.2);
     G.uFogParams.value.set(p.fogDist * (1 + s * 2.5), p.fogHeight * (1 + s), p.fogFalloff, p.fogBase);
     G.uNight.value = p.night;
     G.uMoonColor.value.copy(p.moon);
     G.uStorm.value = saturate(p.storm + s);
-    G.uExposure.value = p.exposure;
+    G.uExposure.value = p.exposure * (1 + s * 0.12);
     // storms close the sky: flatter, darker shade without the warm bounce
     G.uLightK.value.set(p.fill * (1 - s * 0.6), p.warmth * (1 - s), Math.min(1, p.shadeCalm + s * 0.15), p.soft);
 
@@ -324,7 +326,11 @@ export class Atmosphere {
     g.uLift.value.copy(p.lift);
     g.uGamma.value.copy(p.gamma);
     g.uGain.value.copy(p.gain);
-    g.uSaturation.value = p.sat * (1 - s * 0.2);
+    // white balance, normalised so it never changes the brightness
+    const wl = p.wb.x * 0.2126 + p.wb.y * 0.7152 + p.wb.z * 0.0722;
+    g.uWB.value.copy(p.wb).multiplyScalar(1 / Math.max(wl, 1e-3));
+    g.uHalation.value = p.halation;
+    g.uSaturation.value = p.sat * (1 - s * 0.15);
     g.uContrast.value = p.contrast;
     g.uVignette.value = p.vignette;
     g.uVignetteColor.value.copy(p.vigColor);

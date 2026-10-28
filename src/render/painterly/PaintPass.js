@@ -369,7 +369,7 @@ export const PAINT_DEFAULTS = {
   split: 0.25, // split-tone strength
   vibrance: 0.08,
   calm: 0.1, // pull back the loudest saturations
-  curve: 0.0, // soft S-curve (the filmic tone map already shapes contrast)
+  curve: 0.07, // soft S-curve (gentle: the filmic tone map already shapes most of the contrast)
   lift: 0.12, // additive shadow lift (by shadeLift; the light model already fills the shade)
   hueLean: 0.06, // how far the darks lean toward the shade hue (value preserved)
   shadeLift: new Color(0.062, 0.068, 0.074), // neutral cool grey: the shadows' shared hue and lift

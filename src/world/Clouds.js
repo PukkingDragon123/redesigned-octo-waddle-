@@ -226,7 +226,7 @@ void main() {
   // billow texture: cauliflower bumps catch the light on the sunny side (world space, continuous)
   col *= 1.0 + (bB - 0.5) * 0.14 * light;
   col += uSkyAmbient * 0.04;
-  col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.6;
+  col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.38;
   // silver lining only along the outer silhouette of the cloud
   float outward = smoothstep(0.1, 0.8, dot(normalize(uv + 1e-4), vOutDir));
   float rim = smoothstep(0.5, 1.0, edge) * vPeriph * outward;

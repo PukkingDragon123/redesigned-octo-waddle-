@@ -173,8 +173,8 @@ realistic, not just everywhere."*
 - **Creatures:** every creature gets a super-detailed, polished, realistic model (silhouette, anatomy, eyes,
   skin, scales, membranes, animation). They live where they would really live, in believable numbers, not
   sprinkled everywhere.
-- **Title:** the SKYSONG logo is the custom spiral logotype (hand-drawn spiral S's, the O as Vur Sok's ringed
-  world, Almendra letters). The rest of the lettering is Almendra.
+- **Lettering:** the user chose **Almendra SC**, widely letter-spaced, for the SKYSONG logo, the act and
+  chapter titles, the kickers and the menu. Cormorant Garamond italic stays for subtitle and narration lines.
 
 Builders:
 

@@ -7,10 +7,10 @@ import {
 import { damp, clamp, lerp, smoothstep } from '../core/math.js';
 import { CONTROL_LINES } from '../core/Input.js';
 
-// Lettering: hand-lettered Almendra (Almendra Display for the SKYSONG logo, Almendra SC for the menu
-// lines), Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
+// Lettering: hand-lettered Almendra SC, widely spaced, for the SKYSONG logo and the menu lines;
+// Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
 export const FONTS = {
-  logo: '"Almendra Display", "Almendra SC", Georgia, "Times New Roman", serif',
+  logo: '"Almendra SC", "Almendra", Georgia, "Times New Roman", serif',
   caps: '"Almendra SC", "Almendra", Georgia, "Times New Roman", serif',
   italic: '"Cormorant Garamond", "Cormorant", Georgia, "Times New Roman", serif',
 };
@@ -165,7 +165,7 @@ export class Menu {
     this.anchorQ = new Quaternion();
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
-    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 400, spacing: 0.12, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
+    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 400, spacing: 0.26, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
     this.subtitle = new TextItem('a whole life across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;

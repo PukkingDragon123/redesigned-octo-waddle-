@@ -83,7 +83,7 @@ export class Story {
         Promise.all([
           ...['300 96px', '400 96px', 'italic 400 96px'].map((f) => document.fonts?.load(`${f} "Cormorant Garamond"`)),
           document.fonts?.load('400 96px "Almendra SC"'),
-          document.fonts?.load('400 96px "Almendra Display"'),
+          document.fonts?.load('400 96px "Almendra"'),
         ]),
         new Promise((r) => setTimeout(r, 2500)),
       ]);

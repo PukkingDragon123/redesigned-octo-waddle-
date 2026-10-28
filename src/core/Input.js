@@ -13,6 +13,11 @@ const KEYMAP = {
   rollRight: ['KeyE'],
   hum: ['KeyF', 'KeyH'],
   boom: ['KeyR'],
+  // moves (src/game/Moves.js)
+  slap: ['KeyX'],
+  spout: ['KeyV'],
+  loop: ['KeyZ'],
+  dash: ['KeyG'],
   pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'NumpadEnter', 'Space'],
   menuUp: ['ArrowUp', 'KeyW'],
@@ -20,6 +25,39 @@ const KEYMAP = {
   menuLeft: ['ArrowLeft', 'KeyA'],
   menuRight: ['ArrowRight', 'KeyD'],
   back: ['Escape', 'Backspace'],
+};
+
+/**
+ * The controls as the Settings -> Controls page lists them (Menu.js reads these, so a new move
+ * only needs adding here). Each entry is one line of text.
+ */
+export const CONTROL_LINES = {
+  keyboard: [
+    'Mouse — look, and swim where you look',
+    'W  or  left click — swim        Shift — surge',
+    'A  D — turn      Space  C — rise and dive',
+    'Q  E — barrel roll  (tap again mid-roll: corkscrew)',
+    'Z — loop        G  or  double-tap Shift — dash',
+    'X — tail slap        V — spout  (bubbles under water)',
+    'Dive deep, then race up — breach',
+    'F — hum  (hold to sing)',
+    'R  or  right click — hold to gather a sonic boom, release',
+    'Esc — pause',
+  ],
+  gamepad: [
+    'Right stick — look      Left stick — steer      RT — swim',
+    'LT — slow      L3 — surge      A  B — rise and dive',
+    'LB  RB — barrel roll      D-pad left  or  R3 — loop',
+    'D-pad down — tail slap      D-pad up — spout      D-pad right — dash',
+    'X — hum      Y — hold to gather a sonic boom      Start — pause',
+  ],
+  touch: [
+    'Drag — look, and swim where you look',
+    'Two fingers — hum  (hold to sing);  a quick two-finger tap — spout',
+    'Flick sideways — barrel roll;  flick up — loop;  flick down — tail slap',
+    'Double-tap — dash;  double-tap and hold — sonic boom, release',
+    'Three fingers — pause',
+  ],
 };
 
 // Standard gamepad mapping indices
@@ -52,8 +90,16 @@ export class Input {
     this.enabled = true;
     this.lastActivity = performance.now();
 
+    this.lastTap = {};
+    this.dashTap = false;
     const kd = (e) => {
       if (e.repeat) { if (this.capturesKey(e.code)) e.preventDefault(); return; }
+      // double-tap Shift dashes
+      const now0 = performance.now();
+      const tapKey = e.code === 'ShiftLeft' || e.code === 'ShiftRight' ? 'Shift' : null;
+      if (tapKey) {
+        if (now0 - (this.lastTap[tapKey] || -1e9) < 280) { this.dashTap = true; this.lastTap[tapKey] = -1e9; } else this.lastTap[tapKey] = now0;
+      }
       this.keys.add(e.code);
       this.keysPressed.add(e.code);
       this.anyPressed = true;
@@ -118,6 +164,9 @@ export class Input {
     this.touches = new Map();
     this.touchSwim = false;
     this.rollFlick = 0;
+    this.vFlick = 0; // +1 flick up (loop), -1 flick down (tail slap)
+    this.twoTap = false; // a quick two-finger tap (spout)
+    let twoT0 = -1, twoMoved = false;
     let lastEnd = 0;
     const setPointer = (t) => {
       const r = canvas.getBoundingClientRect();
@@ -146,6 +195,7 @@ export class Input {
         setPointer(t);
       }
       if (this.touches.size === 3 && this.lockWanted) this.touchPause = true;
+      if (this.touches.size === 2) { twoT0 = now; twoMoved = false; } else if (this.touches.size > 2) twoT0 = -1;
       this.anyPressed = true;
       this.usingGamepad = false;
       this.lastActivity = now;
@@ -176,7 +226,12 @@ export class Input {
         this.touches.delete(t.identifier);
         const dx = t.clientX - tr.x0, dy = t.clientY - tr.y0;
         const quick = now - tr.t0 < 250;
-        if (tr.boom) release(2);
+        if (tr.boom) {
+          release(2);
+          // a quick double-tap (not held to gather a boom) is a dash
+          if (quick && Math.hypot(dx, dy) < 30 && this.lockWanted) this.dashTap = true;
+        }
+        if (Math.hypot(dx, dy) > 30) twoMoved = true;
         if (!this.lockWanted && tr.menu && !tr.gesture && quick && Math.hypot(dx, dy) < 24) {
           // a one-finger tap begun in the menu: point and click (lifting the three-finger
           // pause tap must not click the menu it just opened)
@@ -184,9 +239,15 @@ export class Input {
           this.mousePressed |= 1;
         } else if (this.lockWanted && quick && this.touches.size === 0 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 2) {
           this.rollFlick = Math.sign(dx);
+        } else if (this.lockWanted && quick && this.touches.size === 0 && !tr.gesture && Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx) * 2) {
+          this.vFlick = -Math.sign(dy); // screen y grows downward: a flick up is +1
         }
         // only a tap arms the double-tap boom (not a roll flick, not a menu tap)
-        if (this.touches.size === 0 && quick && this.lockWanted && Math.hypot(dx, dy) < 24) lastEnd = now;
+        if (this.touches.size === 0 && quick && this.lockWanted && Math.hypot(dx, dy) < 24 && !tr.boom && !tr.gesture) lastEnd = now;
+        if (this.touches.size === 0 && twoT0 >= 0) {
+          if (now - twoT0 < 300 && !twoMoved && this.lockWanted) this.twoTap = true;
+          twoT0 = -1;
+        }
       }
       sync();
     };
@@ -237,6 +298,11 @@ export class Input {
       this.gpAxes[1] = dz(pad.axes[1] || 0);
       this.gpAxes[2] = dz(pad.axes[2] || 0);
       this.gpAxes[3] = dz(pad.axes[3] || 0);
+      // double-click L3 (surge) dashes
+      if (this.gpPressed(GP.L3)) {
+        const now = performance.now();
+        if (now - (this._l3T ?? -1e9) < 300) { this.dashTap = true; this._l3T = -1e9; } else this._l3T = now;
+      }
       let active = false;
       for (let i = 0; i < 17; i++) if (this.gpButtons[i] > 0.5 && this.gpPrev[i] <= 0.5) active = true;
       for (let i = 0; i < 4; i++) if (Math.abs(this.gpAxes[i]) > 0.3) active = true;
@@ -261,6 +327,9 @@ export class Input {
     this.anyPressed = false;
     this.mouseMovedThisFrame = false;
     this.rollFlick = 0;
+    this.vFlick = 0;
+    this.twoTap = false;
+    this.dashTap = false;
     this.touchPause = false;
   }
 
@@ -318,6 +387,14 @@ export class Input {
   get boom() { return this.enabled && (this.key('boom') || this.gp(GP.Y) || !!(this.mouseButtons & 2)); }
   get boomPressed() { return this.enabled && (this.keyPressed('boom') || this.gpPressed(GP.Y) || !!(this.mousePressed & 2)); }
   get boomReleased() { return this.keyReleased('boom') || this.gpReleased(GP.Y) || !!(this.mouseReleased & 2); }
+  // ---- moves (src/game/Moves.js) -------------------------------------------
+  get slapPressed() { return this.enabled && (this.keyPressed('slap') || this.gpPressed(GP.DOWN) || this.vFlick < 0); }
+  get spoutPressed() { return this.enabled && (this.keyPressed('spout') || this.gpPressed(GP.UP) || this.twoTap); }
+  get loopPressed() { return this.enabled && (this.keyPressed('loop') || this.gpPressed(GP.LEFT) || this.gpPressed(GP.R3) || this.vFlick > 0); }
+  get dashPressed() { return this.enabled && (this.keyPressed('dash') || this.gpPressed(GP.RIGHT) || this.dashTap); }
+  /** Rolls queued while a roll is spinning chain into a corkscrew (the press itself is enough). */
+  get rollHeld() { return this.enabled && (this.key('rollLeft') || this.key('rollRight') || this.gp(GP.LB) || this.gp(GP.RB)); }
+
   get pausePressed() { return this.keyPressed('pause') || this.gpPressed(GP.START) || this.touchPause; }
 
   // ---- Menu actions ------------------------------------------------------

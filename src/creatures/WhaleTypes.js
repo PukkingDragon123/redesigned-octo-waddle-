@@ -187,3 +187,74 @@ export const CALVES = [
     voice: { base: 74, formant: 1.38, breath: 0.25 },
   },
 ];
+
+// ---- the life cycle (src/game/life) ---------------------------------------------------------
+// The player's whale grows up between the acts. Each stage keeps the calf's own colouring (the
+// deep blue back, the pale spotting, the soft eye patch) so it is recognisably the same whale.
+
+/** Act II and III: the calf grown into a young adult; its horns have come in, sleek and swept. */
+export const YOUNG = {
+  name: 'young', length: 15, seed: 7,
+  back: '#36557f', belly_c: '#f4ece0', mark: '#55769f', mark2: '#faf5ec',
+  pattern: { spots: 0.3, stripes: 0.3 }, bars: 0.65, streaks: 0.3, mottle: 0.35,
+  eyePatch: { size: 0.95, len: 1.0, angle: 0.1, dark: 0.55 },
+  scars: 0.08, barnacles: 0.05, tornWing: null, notchedFluke: null,
+  horns: { style: 'swept', len: 0.22 }, hornBase: '#2e2a2a', hornTip: '#efe4cc',
+  plate: '#3b5878', crestIn: '#de7486', crestScale: 1.05,
+  arm: '#36557f', membrane: '#5d7aa2', finTip: '#a8b8d0', ray: '#335276', finMark: '#f6f1ea', finMarkAmt: 0.35,
+  iris: '#e8aa3a', iris2: '#4a2508', lid: '#36557f', sclera: '#cfc6b8',
+  frond: '#f39a9c', frondTip: '#ffd2c6', gill: '#f08a8c', mouth: '#9a5064',
+  furShade: 0.8, furTip: 1.16, furScale: 1.1, girth: 0.98, finScale: 1.04,
+  skinRes: 1024,
+  voice: { base: 57, formant: 1.12, breath: 0.22 },
+};
+
+/** Act II: the mate who answers at golden hour (warm sand and rose, elegant curled horns). */
+export const MATE = {
+  name: 'mate', length: 14, seed: 141,
+  back: '#7a4e5e', belly_c: '#f8ece6', mark: '#a8707e', mark2: '#fcf2ee',
+  pattern: { spots: 0.5, blaze: 0.4 }, bars: 0.55, streaks: 0.25, mottle: 0.4,
+  eyePatch: { size: 0.9, len: 1.5, angle: 0.3, dark: 0.6 },
+  scars: 0.05, barnacles: 0.05, tornWing: null, notchedFluke: null,
+  horns: { style: 'elegant', len: 0.2 }, hornBase: '#3a2a2a', hornTip: '#f6e8d4',
+  plate: '#6a4452', crestIn: '#f07a96', crestScale: 1.1,
+  arm: '#7a4e5e', membrane: '#b07c8a', finTip: '#e2bcc4', ray: '#6c4452', finMark: '#fbf1ee', finMarkAmt: 0.5,
+  iris: '#f0b440', iris2: '#4a2508', lid: '#7a4e5e', sclera: '#d4c8b8',
+  frond: '#ffa0b4', frondTip: '#ffd8e0', gill: '#f48ca0', mouth: '#a45666',
+  furShade: 0.82, furTip: 1.2, furScale: 1.1, girth: 0.96, finScale: 1.06,
+  skinRes: 1024,
+  voice: { base: 62, formant: 1.2, breath: 0.24 },
+};
+
+/** Act III: the newborn, smaller and softer than the calf you were (a blend of both parents). */
+export const NEWBORN = {
+  name: 'newborn', calf: true, length: 3.2, seed: 151,
+  back: '#5a5f8e', belly_c: '#fbf3ee', mark: '#8a88b6', mark2: '#fdf8f4',
+  pattern: { spots: 0.55 }, bars: 0.25, streaks: 0.05, mottle: 0.3,
+  eyePatch: { size: 0.85, len: 0.9, angle: 0.15, dark: 0.4 },
+  scars: 0, barnacles: 0, tornWing: null, notchedFluke: null,
+  horns: { style: 'nub' }, hornBase: '#8a86a0', hornTip: '#f2e8e8',
+  plate: '#6a6c9a', crestIn: '#f294a8',
+  arm: '#5a5f8e', membrane: '#8e8eba', finTip: '#cfcce2', ray: '#64689a', finMark: '#f8f2f4', finMarkAmt: 0.25,
+  iris: '#ecb044', iris2: '#4a2a10', lid: '#5a5f8e', sclera: '#d4cabc', mouth: '#a45666',
+  frond: '#ffa6b4', frondTip: '#ffdce2',
+  furShade: 0.86, furTip: 1.2, furScale: 1.1, skinRes: 768,
+  voice: { base: 79, formant: 1.45, breath: 0.28 },
+};
+
+/** Act IV: you, the elder of the herd: the largest, scarred, barnacled, horns huge and gnarled. */
+export const ELDER_SELF = {
+  name: 'elderSelf', length: 32, seed: 7,
+  back: '#3a4a60', belly_c: '#e4dccc', mark: '#5a6a80', mark2: '#f0ebe0',
+  pattern: { spots: 0.25, stripes: 0.4 }, bars: 0.55, streaks: 0.75, mottle: 0.7, algae: 0.45,
+  eyePatch: { size: 1.0, len: 1.1, angle: 0.1, dark: 0.6 },
+  scars: 0.9, barnacles: 0.9, wornTubercles: true, tornWing: null, notchedFluke: 'L',
+  horns: { style: 'gnarled' }, hornBase: '#332a22', hornTip: '#e6d8b8', hornScale: 1.1,
+  plate: '#3a4656', crestIn: '#c05a6a', plateThick: 1.25, crestScale: 1.05,
+  arm: '#3a4a60', membrane: '#5a6a7c', finTip: '#9aa2ae', ray: '#384656', finMark: '#ece6da', finMarkAmt: 0.3,
+  iris: '#d8a448', iris2: '#3a2410', lid: '#3a4a60', sclera: '#c8bca8',
+  frond: '#c27488', frondTip: '#e6aebc', gill: '#c46c7c', mouth: '#7a3e4e',
+  furShade: 0.72, furTip: 1.1, girth: 1.08, finScale: 1.1, furScale: 1.25,
+  skinRes: 1536,
+  voice: { base: 40, formant: 0.86, breath: 0.26 },
+};

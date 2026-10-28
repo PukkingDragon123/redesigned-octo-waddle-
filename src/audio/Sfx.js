@@ -597,4 +597,180 @@ export class Sfx {
     if (last.src) this._cleanup(last.src, nodes);
     return Math.min(last.end, t + 5);
   }
+
+  // ---- moves and bugs (src/game/Moves.js, src/game/Activities.js) -----------------------
+
+  /**
+   * A bug snapped up: a soft wet pop, then a celesta note on the current chord. o.step (the
+   * catch combo) climbs the chord, so a run of catches plays a rising arpeggio.
+   */
+  _bugCatch(t, gain, pitch, pos, o) {
+    const nodes = [];
+    const out = this._out(t, pos, nodes, { ref: 8, wet: 0.35 });
+    const amp = this._gain(gain * 0.5, nodes);
+    amp.connect(out);
+    // pop: a quick downward sine blip with a click of noise
+    const f0 = 520 * pitch;
+    const o1 = this._osc('sine', f0, t, t + 0.12, nodes);
+    expAt(o1.frequency, f0 * 0.45, t + 0.07);
+    const g1 = this._gain(0, nodes);
+    this._env(g1.gain, t, 0.5, 0.003, 0.025);
+    o1.connect(g1); g1.connect(amp);
+    const n = this._noise('white', t, t + 0.06, nodes);
+    const hp = this._filter('bandpass', 2600, 1.2, nodes);
+    const ng = this._gain(0, nodes);
+    this._env(ng.gain, t, 0.12, 0.002, 0.012);
+    n.connect(hp); hp.connect(ng); ng.connect(amp);
+    // the note
+    const key = this.sys._keyNow();
+    const tones = chordTones(key.ch, 76, 101, []);
+    let last = { end: t + 0.3, src: o1 };
+    if (tones.length) {
+      const step = Math.max(0, Math.floor(finite(o && o.step, 0)));
+      const m = tones[step % tones.length] + 12 * Math.min(1, Math.floor(step / tones.length));
+      const r = this._sample('celesta', Math.min(m, 106), t + 0.03, 0.55, amp, nodes);
+      if (r.src) last = r;
+    }
+    this._cleanup(last.src || n, nodes);
+    return Math.min(last.end, t + 3);
+  }
+
+  /** A tail slap on the sea: a sharp wet crack, a deep thump, then falling spray. */
+  _tailSlap(t, gain, pitch, pos) {
+    const nodes = [];
+    const end = t + 1.8;
+    const out = this._out(t, pos, nodes, { ref: 18, wet: 0.35, echo: 0.12 });
+    const amp = this._gain(gain * 0.75, nodes);
+    amp.connect(out);
+    const crack = this._noise('white', t, t + 0.12, nodes);
+    const chp = this._filter('highpass', 1400 * pitch, 0.7, nodes);
+    const cg = this._gain(0, nodes);
+    this._env(cg.gain, t, 1.0, 0.001, 0.03);
+    crack.connect(chp); chp.connect(cg); cg.connect(amp);
+    const th = this._osc('sine', 110 * pitch, t, t + 0.5, nodes);
+    expAt(th.frequency, 38 * pitch, t + 0.3);
+    const tg = this._gain(0, nodes);
+    this._env(tg.gain, t, 0.9, 0.004, 0.12);
+    th.connect(tg); tg.connect(amp);
+    const n = this._noise('white', t + 0.05, end, nodes);
+    const bp = this._filter('bandpass', 1100 * pitch, 0.5, nodes);
+    const g = this._gain(0, nodes);
+    setAt(g.gain, 0, t + 0.05);
+    rampAt(g.gain, 0.45, t + 0.2);
+    glide(g.gain, 0, t + 0.25, 0.35);
+    n.connect(bp); bp.connect(g); g.connect(amp);
+    for (let i = 0; i < 10; i++) {
+      const tt = t + 0.25 + this.rng() * 1.1;
+      const f = (700 + this.rng() * 1600) * pitch;
+      const ob = this._osc('sine', f, tt, tt + 0.08, nodes);
+      expAt(ob.frequency, f * 1.7, tt + 0.05);
+      const dg = this._gain(0, nodes);
+      this._env(dg.gain, tt, 0.1 + this.rng() * 0.12, 0.002, 0.015);
+      ob.connect(dg); dg.connect(amp);
+    }
+    this._cleanup(n, nodes);
+    return end;
+  }
+
+  /** A blow from the blowholes: a breathy roaring whoosh with a low chesty rumble. */
+  _spout(t, gain, pitch, pos) {
+    const nodes = [];
+    const end = t + 1.6;
+    const out = this._out(t, pos, nodes, { ref: 12, wet: 0.25 });
+    const amp = this._gain(gain * 0.7, nodes);
+    amp.connect(out);
+    const n = this._noise('pink', t, end, nodes);
+    const bp = this._filter('bandpass', 380 * pitch, 0.8, nodes);
+    expAt(bp.frequency, 1500 * pitch, t + 0.18);
+    expAt(bp.frequency, 520 * pitch, t + 1.4);
+    const g = this._gain(0, nodes);
+    setAt(g.gain, 0, t);
+    rampAt(g.gain, 0.9, t + 0.06);
+    glide(g.gain, 0, t + 0.12, 0.4);
+    n.connect(bp); bp.connect(g); g.connect(amp);
+    const r = this._osc('triangle', 72 * pitch, t, t + 0.6, nodes);
+    expAt(r.frequency, 50 * pitch, t + 0.5);
+    const rg = this._gain(0, nodes);
+    this._env(rg.gain, t, 0.35, 0.02, 0.15);
+    r.connect(rg); rg.connect(amp);
+    this._cleanup(n, nodes);
+    return end;
+  }
+
+  /** A burst of bubbles under water: a quick cluster of rising blips. */
+  _bubbles(t, gain, pitch, pos) {
+    const nodes = [];
+    const end = t + 1.2;
+    const out = this._out(t, pos, nodes, { ref: 10, wet: 0.3 });
+    const amp = this._gain(gain * 0.4, nodes);
+    amp.connect(out);
+    let lastO = null;
+    for (let i = 0; i < 16; i++) {
+      const tt = i === 15 ? t + 0.95 : t + Math.pow(this.rng(), 1.6) * 0.9;
+      const f = (240 + this.rng() * 700) * pitch;
+      const ob = this._osc('sine', f, tt, tt + 0.07, nodes);
+      expAt(ob.frequency, f * 2.2, tt + 0.06);
+      const dg = this._gain(0, nodes);
+      this._env(dg.gain, tt, 0.25 + this.rng() * 0.3, 0.002, 0.018);
+      ob.connect(dg); dg.connect(amp);
+      lastO = ob;
+    }
+    const n = this._noise('pink', t, t + 0.5, nodes);
+    const lp = this._filter('lowpass', 600 * pitch, 0.7, nodes);
+    const ng = this._gain(0, nodes);
+    this._env(ng.gain, t, 0.3, 0.01, 0.12);
+    n.connect(lp); lp.connect(ng); ng.connect(amp);
+    this._cleanup(lastO || n, nodes);
+    return end;
+  }
+
+  /** A dash: a fast tearing whoosh with a bright airy whistle on top. */
+  _dash(t, gain, pitch, pos) {
+    const nodes = [];
+    const end = t + 0.9;
+    const out = this._out(t, pos, nodes, { ref: 10, wet: 0.2 });
+    const amp = this._gain(gain * 0.7, nodes);
+    amp.connect(out);
+    const n = this._noise('white', t, end, nodes);
+    const bp = this._filter('bandpass', 500 * pitch, 1.4, nodes);
+    expAt(bp.frequency, 3200 * pitch, t + 0.16);
+    expAt(bp.frequency, 700 * pitch, t + 0.8);
+    const g = this._gain(0, nodes);
+    setAt(g.gain, 0, t);
+    rampAt(g.gain, 0.8, t + 0.1);
+    glide(g.gain, 0, t + 0.16, 0.2);
+    n.connect(bp); bp.connect(g); g.connect(amp);
+    const w = this._osc('sine', 900 * pitch, t, t + 0.5, nodes);
+    expAt(w.frequency, 2100 * pitch, t + 0.14);
+    expAt(w.frequency, 1200 * pitch, t + 0.45);
+    const wg = this._gain(0, nodes);
+    this._env(wg.gain, t, 0.06, 0.03, 0.12);
+    w.connect(wg); wg.connect(amp);
+    this._cleanup(n, nodes);
+    return end;
+  }
+
+  /** A trick landed / a ring flown through: a quick harp run up the chord (o.step lifts it). */
+  _trick(t, gain, pitch, pos, o) {
+    const nodes = [];
+    const out = this._out(t, pos, nodes, { ref: 14, wet: 0.5 });
+    const amp = this._gain(gain * 0.3, nodes);
+    amp.connect(out);
+    const key = this.sys._keyNow();
+    const step = Math.max(0, Math.floor(finite(o && o.step, 0)));
+    const tones = chordTones(key.ch, 67 + Math.min(step, 4) * 2, 96, []);
+    let last = { end: t + 0.5, src: null };
+    const n = Math.min(5, tones.length);
+    for (let i = 0; i < n; i++) {
+      const r = this._sample('harp', tones[i] + 12 * Math.log2(pitch), t + i * 0.045, 0.75 - i * 0.08, amp, nodes);
+      if (r.src && r.end >= last.end) last = r;
+    }
+    const ns = this._noise('white', t, t + 0.35, nodes);
+    const hp = this._filter('highpass', 6500, 0.7, nodes);
+    const sg = this._gain(0, nodes);
+    this._env(sg.gain, t, 0.05, 0.02, 0.08);
+    ns.connect(hp); hp.connect(sg); sg.connect(amp);
+    this._cleanup(last.src || ns, nodes);
+    return Math.min(last.end, t + 4);
+  }
 }

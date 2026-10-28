@@ -57,21 +57,23 @@ export class CameraRig {
     const calm = speed > 4 && speed < 14 && Math.abs(whale.yawRate) < 0.25 && !opts.busy;
     this.calmT = calm ? this.calmT + dt : Math.max(0, this.calmT - dt * 3);
     this.wide = damp(this.wide, smoothstep(5, 9, this.calmT), 0.5, dt);
-    const base = opts.distance ?? 8.5;
-    const distT = base + speed * 0.2 + diving * 4 + this.wide * 6 + (opts.extraDist || 0);
+    // framing scales with the whale: the calf (4 m) as before, a grown whale (15-32 m) further out
+    const sc = Math.max(1, Math.pow(whale.L / 4.2, 0.8));
+    const base = (opts.distance ?? 8.5) * sc;
+    const distT = base + speed * 0.2 + (diving * 4 + this.wide * 6) * sc + (opts.extraDist || 0);
     this.distExtra = damp(this.distExtra, distT, 2.2, dt);
     let dist = this.distExtra;
-    const height = 1.7 + this.wide * 2.2 + (opts.extraHeight || 0) - aimPitch * 1.2;
+    const height = (1.7 + this.wide * 2.2 - aimPitch * 1.2) * sc + (opts.extraHeight || 0);
     const desired = _r.copy(whale.pos).addScaledVector(aim, -dist).addScaledVector(UP, height);
     // keep the camera out of rock
     if (this.collide) {
       const d = this.collide(whale.pos, desired);
       if (d !== null && d < dist) {
-        dist = Math.max(2.5, d - 1);
+        dist = Math.max(2.5 * sc, d - 1);
         desired.copy(whale.pos).addScaledVector(aim, -dist).addScaledVector(UP, height * (dist / this.distExtra));
       }
     }
-    const lookT = _u.copy(whale.pos).addScaledVector(aim, 3.5 + speed * 0.12).addScaledVector(UP, 0.8 + this.wide * 0.5);
+    const lookT = _u.copy(whale.pos).addScaledVector(aim, 3.5 * sc + speed * 0.12).addScaledVector(UP, (0.8 + this.wide * 0.5) * sc);
     if (opts.lookBias) {
       // lookBiasMax caps the shift in metres, so a far target (a falcon 500 m away) turns the view
       // toward it without losing the calf

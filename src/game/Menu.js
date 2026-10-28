@@ -6,7 +6,14 @@ import {
 } from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/math.js';
 
-const FONT = '"Cormorant Garamond", "Cormorant", Georgia, "Times New Roman", serif';
+// Lettering: Cinzel Decorative for the SKYSONG logo, Cinzel (carved Roman capitals) for the menu
+// lines, Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
+export const FONTS = {
+  logo: '"Cinzel Decorative", "Cinzel", Georgia, "Times New Roman", serif',
+  caps: '"Cinzel", "Trajan Pro", Georgia, "Times New Roman", serif',
+  italic: '"Cormorant Garamond", "Cormorant", Georgia, "Times New Roman", serif',
+};
+const FONT = FONTS.caps;
 
 const VERT = /* glsl */ `
 varying vec2 vUv;
@@ -48,7 +55,8 @@ function makeTextTexture(text, size = 96, opts = {}) {
   const ctx = c.getContext('2d', { willReadFrequently: true });
   const weight = opts.weight ?? 300;
   const spacing = opts.spacing ?? 0.08;
-  ctx.font = `${opts.italic ? 'italic ' : ''}${weight} ${size}px ${FONT}`;
+  const font = opts.font || (opts.italic ? FONTS.italic : FONT);
+  ctx.font = `${opts.italic ? 'italic ' : ''}${weight} ${size}px ${font}`;
   // manual letter spacing
   const chars = [...text];
   const widths = chars.map((ch) => ctx.measureText(ch).width);
@@ -56,7 +64,7 @@ function makeTextTexture(text, size = 96, opts = {}) {
   c.width = Math.ceil(total + pad * 2);
   c.height = Math.ceil(size * 1.5 + pad * 2);
   const draw = (blur, style) => {
-    ctx.font = `${opts.italic ? 'italic ' : ''}${weight} ${size}px ${FONT}`;
+    ctx.font = `${opts.italic ? 'italic ' : ''}${weight} ${size}px ${font}`;
     ctx.textBaseline = 'middle';
     ctx.filter = blur ? `blur(${blur}px)` : 'none';
     ctx.fillStyle = style;
@@ -156,8 +164,8 @@ export class Menu {
     this.anchorQ = new Quaternion();
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
-    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 300, spacing: 0.32 });
-    this.subtitle = new TextItem('a journey home across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
+    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 700, spacing: 0.2, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
+    this.subtitle = new TextItem('a whole life across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
   }
@@ -233,7 +241,7 @@ export class Menu {
     // under the title on the main and pause pages, vertically centred elsewhere
     const top = page === 'main' || page === 'pause' ? 0 : (entries.length - 1) * gap * 0.5;
     entries.forEach(([label, action], i) => {
-      const it = new TextItem(label, h, { size: small ? 64 : 88, weight: 400, spacing: 0.07, dim: action === null });
+      const it = new TextItem(label, h * (small ? 0.92 : 0.86), { size: small ? 60 : 80, weight: small ? 400 : 500, spacing: small ? 0.06 : 0.16, dim: action === null, font: small ? FONTS.italic : FONT });
       it.action = action;
       it.mesh.position.set(0, top - i * gap, 0);
       it.baseY = top - i * gap;

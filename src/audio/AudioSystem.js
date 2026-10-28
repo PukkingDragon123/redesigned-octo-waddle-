@@ -25,7 +25,9 @@ import { MOODS, MOOD_NAMES } from './moods.js';
 import { parseChord, SCALES, bassNote, chordTones } from './theory.js';
 import { clamp, glide, setAt, holdAt, finite, softClipCurve, yieldNow } from './util.js';
 
-const SFX_NAMES = ['boom', 'boomSmall', 'gulp', 'sparkle', 'bonk', 'wingbeat', 'whoosh', 'thunder', 'lightningCrack', 'falconScreech', 'falconWing', 'splash', 'chime'];
+const SFX_NAMES = ['boom', 'boomSmall', 'gulp', 'sparkle', 'bonk', 'wingbeat', 'whoosh', 'thunder', 'lightningCrack', 'falconScreech', 'falconWing', 'splash', 'chime',
+  // moves and bugs (Moves.js, Activities.js)
+  'bugCatch', 'tailSlap', 'spout', 'bubbles', 'dash', 'trick'];
 const STINGERS = ['discover', 'boom', 'strike', 'harmony', 'resolve'];
 const MAX_VOICE_ENGINES = 16;
 const DEFAULT_CHORD = parseChord('D');

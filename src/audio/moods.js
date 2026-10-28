@@ -344,6 +344,74 @@ export const MOODS = {
       { p: 'swell', inst: 'swell', every: 4, vel: 0.42, on: [0.9, 1] },
     ],
   },
+
+  // ---- the life cycle (src/game/life) -------------------------------------------------------
+  // Act II: the courtship duet and spiral dance at golden hour (warm, lilting, a little waltz).
+  courtship: {
+    level: 1.2,
+    bpm: 68,
+    key: { root: 64, scale: SCALES.major },
+    sections: {
+      a: { bars: ['E', 'A/E', 'C#m7', 'Bsus4:2 B:2'] },
+      b: { bars: ['Amaj7', 'F#m7', 'G#m7', 'Bsus4:2 B:2'] },
+      c: { bars: ['C#m', 'Amaj7', 'E/B', 'B'] },
+    },
+    form: ['a', 'b', 'a', 'c'],
+    layers: [
+      { p: 'pad', target: 'strings', n: 4, lo: 56, hi: 78, gain: 0.28 },
+      { p: 'arp', inst: 'harp', rate: 2, shape: 'updown', lo: 52, hi: 81, vel: 0.32 },
+      { p: 'gen', target: 'flute', lo: 71, hi: 88, vel: 0.5, phrase: 2, cells: [[3, 1], [2, 2], [4]], melodic: true, on: [0.3, 0.6] },
+      { p: 'bass', target: 'low', gain: 0.2, on: [0.2, 0.5] },
+      { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 79, vowel: (e) => (e > 0.6 ? 'ah' : 'oo'), gain: 0.18, on: [0.45, 0.8] },
+      { p: 'bells', inst: 'bell', every: 2, lo: 76, hi: 93, vel: 0.3, on: [0.55, 0.85] },
+      { p: 'sparkle', inst: 'celesta', lo: 81, hi: 98, prob: 0.07, vel: 0.3, on: [0.6, 0.9] },
+      { p: 'swell', inst: 'swell', every: 4, vel: 0.4, on: [0.8, 1] },
+    ],
+  },
+
+  // Act III: new life in the lagoon at dawn (hushed, a lullaby on celesta and harp over strings).
+  birth: {
+    level: 1.3,
+    bpm: 58,
+    key: MAJOR,
+    sections: {
+      a: { bars: ['Dmaj7', 'Gmaj7/D', 'Bm9', 'Asus4:2 A:2'] },
+      frag: theme(),
+      b: { bars: ['Gmaj7', 'D/F#', 'Em9', 'Asus4:2 A:2'] },
+    },
+    form: ['a', 'a', 'frag', 'b'],
+    layers: [
+      { p: 'pad', target: 'strings', n: 4, lo: 55, hi: 76, gain: 0.26 },
+      { p: 'drone', target: 'drone', lo: 38, notes: [0, 12], gain: 0.14 },
+      { p: 'melody', inst: 'celesta', vel: 0.42, prob: 0.7, keepFirst: true, human: 0.04, secs: ['frag'], melodic: true },
+      { p: 'gen', inst: 'celesta', lo: 74, hi: 91, vel: 0.36, secs: ['a', 'b'], phrase: 1, restProb: 0.6, cells: [[2, 2], [4], [3, 1]], melodic: true },
+      { p: 'arp', inst: 'harp', rate: 1, shape: 'up', lo: 50, hi: 74, vel: 0.3, on: [0.3, 0.6] },
+      { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 79, vowel: 'oo', gain: 0.16, on: [0.5, 0.85] },
+      { p: 'bells', inst: 'bell', every: 4, lo: 79, hi: 93, vel: 0.26, on: [0.6, 0.9] },
+    ],
+  },
+
+  // Act IV: the elder's rest (slow, deep and luminous; the theme once more, very far away).
+  rest: {
+    level: 1.33,
+    bpm: 52,
+    key: MAJOR,
+    sections: {
+      a: { bars: ['D/A', 'Gmaj7/A', 'Bm7/A', 'Asus4:2 A:2'] },
+      theme: theme({ energy: 0.3 }),
+      b: { bars: ['Gmaj7', 'Em9', 'F#m7', 'Asus4'] },
+    },
+    form: ['a', 'theme', 'b', 'a'],
+    layers: [
+      { p: 'drone', target: 'drone', pc: 9, lo: 33, notes: [0, 7, 12], gain: 0.22 },
+      { p: 'pad', target: 'strings', n: 4, lo: 50, hi: 72, gain: 0.26 },
+      { p: 'pad', target: 'choir', n: 4, lo: 55, hi: 76, vowel: 'oo', gain: 0.2 },
+      { p: 'melody', target: 'lead', octs: [-1], vel: 0.45, secs: ['theme'], melodic: true, on: [0.3, 0.6] },
+      { p: 'sparkle', inst: 'celesta', lo: 79, hi: 98, prob: 0.06, vel: 0.28 },
+      { p: 'bells', inst: 'bell', every: 4, lo: 74, hi: 91, vel: 0.22 },
+      { p: 'swell', inst: 'swell', every: 4, vel: 0.32, on: [0.5, 0.9] },
+    ],
+  },
 };
 
 export const MOOD_NAMES = [...Object.keys(MOODS), 'silence'];

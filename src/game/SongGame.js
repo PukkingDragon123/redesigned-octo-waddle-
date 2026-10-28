@@ -197,4 +197,73 @@ export class SongGame {
     if (S.eco) S.eco.songFocus = null;
     this.active = false;
   }
+  /**
+   * A duet (Act II): `partner` sings a phrase, the player's whale answers it, three times, each
+   * success drawing the two closer (opts.onSuccess(i)). Returns the number of phrases matched.
+   * The player always gets through: after two misses a phrase is let go.
+   */
+  *duet(partner, opts = {}) {
+    const S = this.story;
+    const me = S.herd.calf;
+    const phrases = opts.phrases || [[[0, 1], [2, 1], [4, 2]], [[4, 1], [5, 1], [4, 1], [2, 1]], [[7, 2], [5, 1], [4, 1], [2, 2]]];
+    this.active = true;
+    let wins = 0;
+    for (let pi = 0; pi < phrases.length; pi++) {
+      const phrase = phrases[pi];
+      for (let tries = 0; tries < 2; tries++) {
+        const beat = this.key().beat;
+        yield* S.untilNextBeat(beat * 1.5, beat * 0.35);
+        for (const [deg, beats] of phrase) {
+          partner.drive.sing = 1;
+          partner.anim.sHeadPitch?.impulse(-1.2);
+          yield beat * 0.3;
+          S.voiceHum(partner, this.midi(deg, 0), (beats - 0.3) * beat * 0.95);
+          yield (beats - 0.3) * beat;
+        }
+        partner.drive.sing = 0.4;
+        yield beat * 0.5;
+        partner.anim.sHeadPitch?.impulse(2.2);
+        yield* S.untilNextBeat(beat * 1.2);
+        this.expect = phrase;
+        this.presses = [];
+        this.windowStart = this.game.time;
+        this.listening = true;
+        // the answer an octave below hers (humStart sings expect degrees an octave above the key's root)
+        const total = phrase.reduce((a, n) => a + n[1], 0) * beat;
+        let waited = 0;
+        while (waited < total + beat * 1.6) {
+          const t = this.game.time - this.windowStart;
+          if (opts.auto && this.presses.length < phrase.length) {
+            // headless autopilot: answer in time
+            let on = 0;
+            for (let i = 0; i < this.presses.length; i++) on += phrase[i][1] * beat;
+            if (t >= on) { this.presses.push({ on: t, off: t + phrase[this.presses.length][1] * beat * 0.8 }); }
+          }
+          if (this.presses.length >= phrase.length && this.presses[this.presses.length - 1].off !== null && t > total * 0.6) break;
+          waited += yield 0;
+        }
+        this.listening = false;
+        const res = this.evaluate(phrase, beat);
+        if (res.ok) {
+          wins++;
+          S.voiceHum(partner, this.midi(phrase[phrase.length - 1][0] + 2, 0), beat * 3);
+          S.voiceHum(me, this.midi(phrase[phrase.length - 1][0], 0), beat * 3);
+          partner.drive.happy = 1;
+          me.drive.happy = 1;
+          S.audio.stinger?.('harmony');
+          S.audio.setIntensity?.(clamp(0.35 + pi * 0.25, 0, 1));
+          G.uSongAmp.value = Math.min(1.4, 0.5 + pi * 0.35);
+          G.uSongRipple.value.set(partner.pos.x, partner.pos.y, partner.pos.z, this.game.time);
+          opts.onSuccess?.(pi);
+          yield beat * 3.5;
+          break;
+        }
+        partner.drive.happy = 0.3;
+        yield beat * 1.5;
+      }
+    }
+    G.uSongAmp.value = 0;
+    this.active = false;
+    return wins;
+  }
 }

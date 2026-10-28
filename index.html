@@ -8,7 +8,7 @@
     <meta name="description" content="A cinematic 3D fantasy adventure: fly as a baby flying whale following your mother and the great herd across the painted seas and spiral islands of Vur Sok to the legendary Oasis." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
     <style>
       :root {
         --bg: #0b0f1e;
@@ -42,11 +42,61 @@
         pointer-events: none;
       }
       #veil.gone { opacity: 0; }
+      /* Cinematic overlay (src/game/Cinematics.js): letterbox bars and title cards, only during
+         cinematic moments. Never interactive. */
+      #cine { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+      #cine .bar {
+        position: absolute; left: 0; right: 0; height: 11.5vh; background: #030409;
+        transition: transform 1.6s cubic-bezier(.65,0,.25,1);
+      }
+      #cine .bar.top { top: 0; transform: translateY(-101%); }
+      #cine .bar.bot { bottom: 0; transform: translateY(101%); }
+      #cine.lb .bar { transform: translateY(0); }
+      #cine .card {
+        position: absolute; left: 6vw; right: 6vw; top: 50%; transform: translateY(-50%);
+        text-align: center; color: #f4ecdc; opacity: 0;
+        transition: opacity 1.8s ease;
+        text-shadow: 0 0 18px rgba(4, 6, 18, .75), 0 0 2px rgba(4, 6, 18, .6);
+      }
+      #cine .card.low { top: auto; bottom: 15vh; transform: none; }
+      #cine .card.on { opacity: 1; }
+      #cine .card .kicker {
+        font: 500 clamp(11px, 1.35vw, 17px) "Cinzel", "Trajan Pro", Georgia, serif;
+        letter-spacing: .62em; text-indent: .62em; color: #e3c98f; opacity: .92;
+      }
+      #cine .card .kicker::before, #cine .card .kicker::after {
+        content: ""; display: inline-block; width: clamp(24px, 5vw, 70px); height: 1px; vertical-align: middle;
+        margin: 0 1.1em; background: linear-gradient(90deg, transparent, rgba(227, 201, 143, .8), transparent);
+      }
+      #cine .card .kicker:empty { display: none; }
+      #cine .card .title {
+        font: 400 clamp(30px, 6.4vw, 92px) "Cinzel", "Trajan Pro", Georgia, serif;
+        letter-spacing: .14em; text-indent: .14em; margin: .22em 0 .18em; line-height: 1.08;
+        transition: letter-spacing 7s cubic-bezier(.2,.6,.3,1);
+      }
+      #cine .card.on .title { letter-spacing: .24em; text-indent: .24em; }
+      #cine .card .title.logo { font-family: "Cinzel Decorative", "Cinzel", Georgia, serif; font-weight: 700; }
+      #cine .card .line {
+        font: italic 300 clamp(15px, 2.1vw, 30px) "Cormorant Garamond", Georgia, serif;
+        letter-spacing: .06em; color: #efe6d6; opacity: .9;
+      }
+      #cine .card .line:empty, #cine .card .title:empty { display: none; }
+      #cine .skip {
+        position: absolute; right: 3.2vw; bottom: 3.6vh; opacity: 0; transition: opacity .5s ease;
+        font: 400 clamp(10px, 1vw, 13px) "Cinzel", Georgia, serif; letter-spacing: .4em; color: #d8cfbe;
+      }
+      #cine .skip.on { opacity: .75; }
+      #cine .skip i { display: block; height: 1px; margin-top: 6px; background: #e3c98f; transform-origin: left; transform: scaleX(0); }
     </style>
   </head>
   <body>
     <canvas id="c" tabindex="0"></canvas>
     <div id="veil"></div>
+    <div id="cine" aria-hidden="true">
+      <div class="bar top"></div><div class="bar bot"></div>
+      <div class="card"><div class="kicker"></div><div class="title"></div><div class="line"></div></div>
+      <div class="skip">HOLD TO SKIP<i></i></div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -65,6 +65,17 @@ export default async function (game) {
   game.ocean = ocean;
   if (p.has('state')) ocean.setSeaState(+p.get('state'), { dur: 0.01 });
   if (p.has('odebug')) ocean.uniforms.uDebug.value = +p.get('odebug');
+  // &set=uniform:x,y,z  pins an ocean uniform for experiments
+  const pins = (p.get('set') || '').split(';').filter(Boolean).map((e) => e.split(':'));
+  game.addSystem({ update() {
+    for (const [k, v] of pins) {
+      const u = ocean.uniforms[k];
+      if (!u) continue;
+      const a = v.split(',').map(Number);
+      if (typeof u.value === 'number') u.value = a[0];
+      else u.value.fromArray(a);
+    }
+  } });
   if (!p.has('time')) game.atmosphere.set('noon');
 
   // test objects
@@ -105,15 +116,30 @@ export default async function (game) {
     high: [[0, 70, 60], [0, 0, -160]],
     skim: [[0, 2.4, 18], [0, 1.0, -40]],
     under: [[-2, -5, 4], [10, -6, -40]],
-    look: [[0, -7, -10], [6, 0, -36]],
+    look: [[0, -6, -10], [5, 0, -20]],
+    window: [[0, -8, -20], [0.5, 0, -20.3]],
+    deep: [[-4, -12, -12], [10, -4, -50]],
     horizon: [[0, 28, 0], [0, 22, -600]],
     sun: [[0, 20, 0], null],
     shallow: [[36, 16, -30], [26, -4, -70]],
     whale: [[6, 5, -22], [-8, -0.5, -42]],
     storm: [[0, 32, 40], [0, 6, -200]],
+    stormlow: [[0, 9, 40], [0, 6, -200]],
+    calm: [[0, 14, 30], [0, 4, -400]],
+    moons: [[0, 12, 0], [-1000, 520, -700]],
+    galaxy: [[0, 12, 0], [-520, 500, -690]],
+    sky: [[0, 60, 200], [0, 330, -1500]],
+    wake: [[0, 26, 10], [0, 0, -40]],
+    splash: [[0, 7, -6], [4, 0, -30]],
+    trail: [[22, 9, -8], [24, 0, -40]],
   };
   const name = p.get('cam') || 'high';
   const v = views[name] || views.high;
+  // &lookdir=x,y,z: from the chosen position, look along a direction
+  if (p.has('lookdir')) {
+    const d = p.get('lookdir').split(',').map(Number);
+    v[1] = [v[0][0] + d[0] * 100, v[0][1] + d[1] * 100, v[0][2] + d[2] * 100];
+  }
   const cam = game.engine.camera;
   const pos = new Vector3(...v[0]);
   const look = v[1] ? new Vector3(...v[1]) : null;

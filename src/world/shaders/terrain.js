@@ -153,21 +153,26 @@ void main() {
   rock *= mix(1.0, 0.9 + 0.2 * facetId, mesoF);
   float bigId = ax.x > 0.5 ? bA.y : bB.y;
   rock *= mix(1.0, 0.86 + 0.28 * bigId, steep);
+  // fresh rockfall scars: a few joint-bounded blocks recently fallen away, paler and unweathered
+  float scar = step(0.86, hash11(bigId * 41.3)) * steep * smoothstep(0.02, 0.06, bigEdge) * smoothstep(6.0, 12.0, P.y);
+  rock = mix(rock, mix(vec3(luma(rock)), rock, 0.6) * 1.32 + vec3(0.03, 0.025, 0.015), scar * 0.55);
   rock = mix(rock, rock * mix(vec3(1.08, 0.98, 0.9), vec3(0.92, 0.97, 1.06), hash11(bigId * 9.1)), steep * 0.6);
   float jointMask = smoothstep(0.35, 0.7, nm.g + 0.3 * (hash11(facetId * 5.3) - 0.5));
-  float joint = smoothstep(0.06, 0.0, edgeD) * mesoF * jointMask + smoothstep(0.03, 0.0, bigEdge) * steep * 0.9;
-  rock *= 1.0 - joint * 0.45;
+  // joints are anti-aliased against their own screen-space width
+  float jw = max(fwidth(edgeD), 1e-4), bw = max(fwidth(bigEdge), 1e-4);
+  float joint = (1.0 - smoothstep(0.0, max(0.06, jw * 1.5), edgeD)) * mesoF * jointMask * smoothstep(0.12, 0.03, jw)
+              + (1.0 - smoothstep(0.0, max(0.03, bw * 1.5), bigEdge)) * steep * 0.9 * smoothstep(0.1, 0.02, bw);
+  rock *= 1.0 - joint * 0.4;
 
   // edge wear: convex lips and corners chipped pale (geometric), plus the lit lip of each facet
-  float lip = smoothstep(0.12, 0.02, edgeD) * (1.0 - smoothstep(0.02, 0.0, edgeD)) * mesoF * 0.5;
-  float wear = clamp(edgeW * (0.6 + 0.6 * nm.b) + lip * (1.0 - joint), 0.0, 1.0);
+  float wear = clamp(edgeW * (0.6 + 0.6 * nm.b), 0.0, 1.0);
   rock = mix(rock, mix(rock, vec3(luma(rock)), 0.35) * 1.38, wear * 0.55);
   // rain streaks down steep faces (tiger stripes on limestone), rust seeps
   float streakA = texture2D(uNoise, vec2(P.z / 7.0, P.y / 75.0)).b;
   float streakB = texture2D(uNoise, vec2(P.x / 7.0 + 0.5, P.y / 75.0)).b;
   float streak = ax.x * streakA + ax.y * streakB;
   float streak2 = ax.x * texture2D(uNoise, vec2(P.z / 2.3, P.y / 30.0)).r + ax.y * texture2D(uNoise, vec2(P.x / 2.3, P.y / 30.0)).r;
-  float stain = smoothstep(0.5, 0.78, streak) * steep;
+  float stain = smoothstep(0.5, 0.78, streak) * steep * (1.0 - scar * 0.8);
   rock *= 1.0 - stain * mix(0.38, 0.2, kind);
   rock = mix(rock, rock * vec3(1.12, 0.94, 0.8), smoothstep(0.55, 0.75, streak2) * steep * sed * 0.5);
   // basalt: polygonal column tops on flats
@@ -195,7 +200,7 @@ void main() {
   float barnZone = smoothstep(1.6, 0.9, yN) * smoothstep(-0.5, 0.3, yN);
   float algae = smoothstep(0.5, -0.1, yN) * smoothstep(-2.5, -0.6, yN);
   vec2 bc = cells(vec2(ax.x * P.z + ax.y * P.x, P.y) * 3.2 + P.xz * 0.5);
-  float barn = barnZone * smoothstep(0.12, 0.3, bc.x) * step(0.35, bc.y) * fineF;
+  float barn = barnZone * smoothstep(0.12, 0.3, bc.x) * step(0.35, bc.y) * fineF * smoothstep(0.08, 0.03, px);
   rock *= 1.0 - blackZone * 0.5 * (0.6 + 0.4 * streak);
   rock = mix(rock, rock * vec3(0.42, 0.44, 0.46), wet * 0.85);
   rock = mix(rock, vec3(0.42, 0.4, 0.36), barn * 0.6);
@@ -211,7 +216,7 @@ void main() {
   // ---------------- sand ----------------
   float sandW = smoothstep(0.25, 0.65, sandIn + (nm.g - 0.5) * 0.35);
   if (sandW > 0.001) {
-    vec3 sc = mix(uSandLight, uSandBlack, kind);
+    vec3 sc = mix(mix(uSandLight * 0.8, vColor * 1.12, 0.55), uSandBlack, kind);
     sc *= 0.9 + 0.16 * nM.r + 0.06 * micro;
     // ripples on shallow and beach sand
     vec2 rd = vec2(0.8, 0.6);
@@ -228,6 +233,17 @@ void main() {
     sc += kind * vec3(0.5, 0.48, 0.45) * step(0.985, hash12(floor(P.xz * 9.0))) * detail * 0.4;
     albedo = mix(albedo, sc, sandW);
     heightB = mix(heightB, rip * 0.25 * ripW + micro * 0.2, sandW);
+  }
+
+  // ---------------- tide pools: still water in hollows of the rock platforms ----------------
+  float pool = 0.0;
+  if (P.y > 0.15 && P.y < 1.9 && N.y > 0.8) {
+    vec2 pc = cells(P.xz / 3.6 + nm.rg * 0.6);
+    float rim = smoothstep(0.18, 0.32, pc.x + (nm.b - 0.5) * 0.12);
+    pool = rim * step(0.45, pc.y) * smoothstep(0.8, 0.95, N.y) * (1.0 - sandW) * smoothstep(1.9, 1.2, P.y) * smoothstep(0.15, 0.45, P.y);
+    // a ring of green weed at the pool's lip
+    float lipW = smoothstep(0.12, 0.2, pc.x) * (1.0 - rim) * step(0.45, pc.y);
+    albedo = mix(albedo, vec3(0.08, 0.14, 0.06), lipW * 0.7 * (1.0 - sandW));
   }
 
   // ---------------- meadow ----------------
@@ -281,14 +297,33 @@ void main() {
   float wetAll = max(wet * (1.0 - sandW), smoothstep(0.7, 0.1, P.y) * sandW);
   s.spec = wetAll * 0.55 * smoothstep(-0.5, 0.3, P.y);
   s.gloss = 0.75;
+  if (pool > 0.01) {
+    // the pool mirrors the sky over a dark, weedy floor
+    vec3 Vp = normalize(uCamPos - P);
+    float fr = 0.04 + 0.96 * pow(1.0 - max(Vp.y, 0.0), 5.0);
+    vec3 R = reflect(-Vp, vec3(0.0, 1.0, 0.0));
+    vec3 sky = mix(uSkyHorizon, uSkyZenith, smoothstep(0.0, 0.6, R.y));
+    s.albedo = mix(s.albedo, s.albedo * vec3(0.25, 0.32, 0.3), pool);
+    s.N = normalize(mix(s.N, vec3(0.0, 1.0, 0.0), pool));
+    s.emissive += sky * fr * pool * 0.9 * (1.0 - uNight * 0.7);
+    s.spec = mix(s.spec, 1.0, pool);
+    s.gloss = mix(s.gloss, 0.97, pool);
+  }
   s.ao = cav * mix(0.74, 1.0, smoothstep(-0.7, 0.5, N.y)) * (0.85 + 0.15 * micro);
   // lava: faint glowing fissures at the foot of forming islands (restrained, natural light only)
   if (heat > 0.01) {
-    vec2 lc2 = cells(P.xz / 3.4 + nm.rg * 1.5);
-    float fis = smoothstep(0.09, 0.0, lc2.x) * heat;
+    // fissures between cooling crust plates: lines widened to at least a pixel and dimmed in
+    // proportion, so far away they read as a soft glow instead of sparkling dots
+    vec2 lc2 = cells(P.xz / 4.2 + nm.rg * 1.5 + vec2(P.y * 0.15));
+    float fw = max(fwidth(lc2.x), 1e-4);
+    float lw = max(0.07, fw * 1.2);
+    float fis = (1.0 - smoothstep(0.0, lw, lc2.x)) * (0.07 / lw) * heat;
     float pulse = 0.75 + 0.25 * sin(uTime * 0.7 + lc2.y * 6.28);
-    float hot = fis * pulse * smoothstep(9.0, 0.5, P.y) ;
-    s.emissive = uLava * hot * (1.6 + 2.4 * uNight);
+    float foot = smoothstep(9.0, 0.5, P.y);
+    float hot = fis * pulse * foot;
+    // a dull underglow where the young rock meets the water
+    float under = heat * foot * smoothstep(3.0, 0.0, P.y) * 0.18;
+    s.emissive += uLava * (hot + under) * (1.4 + 2.0 * uNight);
     s.albedo *= 1.0 - fis * 0.5;
   }
   vec3 col = stylizedLight(s);

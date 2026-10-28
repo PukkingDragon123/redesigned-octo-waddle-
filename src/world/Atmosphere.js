@@ -13,7 +13,7 @@ function preset(o) {
     zenith: C('#2a66c0'), horizon: C('#bcdcef'),
     ambient: C('#a2c4ec', 0.8), bounce: C('#d9e8ee', 0.62), shadowTint: C('#dbe4fb'),
     fog: C('#c6e2ef'), scatter: C('#fff1d6', 1.0),
-    cloudLit: C('#fffaf2', 1.05), cloudShadow: C('#8fa2cf', 0.9),
+    cloudLit: C('#fffaf2', 1.05), cloudShadow: C('#8d9fbd', 0.92),
     bankLit: C('#ffffff'), bankShadow: C('#a3b1d6'),
     // marine haze: thin with distance, denser in the layer just above the sea
     fogDist: 0.00003, fogHeight: 0.00012, fogFalloff: 0.004, fogBase: 0,
@@ -35,9 +35,9 @@ function preset(o) {
 export const PRESETS = {
   dawn: preset({
     sunElev: 4, sunAz: 72, sun: C('#ffae72', 2.6),
-    zenith: C('#2b4785'), horizon: C('#f6b48f'),
-    ambient: C('#7f8cd8', 0.84), bounce: C('#d6aa9c', 0.55), shadowTint: C('#c6c2f2'),
-    fog: C('#c9a7b9'), scatter: C('#ffa96f', 1.25),
+    zenith: C('#2b4785'), horizon: C('#f7b88e'),
+    ambient: C('#8090d4', 0.84), bounce: C('#d6aa9c', 0.55), shadowTint: C('#c6c2f2'),
+    fog: C('#d9b3a8'), scatter: C('#ffa96f', 1.25),
     cloudLit: C('#ffd2ad', 1.15), cloudShadow: C('#6b6cb0', 0.92),
     bankLit: C('#ffc29a'), bankShadow: C('#7c6fb2'),
     fogDist: 0.000035, fogHeight: 0.00016,
@@ -66,7 +66,7 @@ export const PRESETS = {
     zenith: C('#2462bf'), horizon: C('#bfe0f2'),
     ambient: C('#9fbfee', 0.78), bounce: C('#dce8ea', 0.62), shadowTint: C('#dfe6fb'),
     fog: C('#c8e3f0'), scatter: C('#ffeccc', 0.95),
-    cloudLit: C('#fffaf2', 1.08), cloudShadow: C('#8193c6', 0.9),
+    cloudLit: C('#fffaf2', 1.08), cloudShadow: C('#8a9cb9', 0.94),
     planet: 0.55, cirrus: 0.8, bank: 0.13, rays: 0.22, contrast: 1.05,
     moon2: 0.12, moon2Elev: 30, moon2Az: -130,
     sea: C('#0e4a6c'), seaScatter: C('#2bd1b5'), seaState: 0.28,
@@ -76,7 +76,7 @@ export const PRESETS = {
     zenith: C('#1d58b4'), horizon: C('#b6dcef'),
     ambient: C('#9fcaee', 0.8), bounce: C('#d8eef0', 0.7), shadowTint: C('#e0e9fb'),
     fog: C('#c2e3f0'), scatter: C('#fff6e2', 0.9),
-    cloudLit: C('#ffffff', 1.05), cloudShadow: C('#8fb0d4', 0.92),
+    cloudLit: C('#ffffff', 1.06), cloudShadow: C('#93a9c4', 0.95),
     bankShadow: C('#9fb8d8'), planet: 0.4, cirrus: 0.75, bank: 0.13, rays: 0.12,
     sat: 1.08,
     sea: C('#0b4a70'), seaScatter: C('#26d3bb'), seaState: 0.38, clarity: 1.35,
@@ -86,7 +86,7 @@ export const PRESETS = {
     zenith: C('#2c63b4'), horizon: C('#cfe6e6'),
     ambient: C('#a6c8d6', 0.8), bounce: C('#d6e6d8', 0.66), shadowTint: C('#dde8f2'),
     fog: C('#d3e8e3'), scatter: C('#ffe8c0', 1.1),
-    cloudLit: C('#fff6ea', 1.05), cloudShadow: C('#8aa3c0', 0.9),
+    cloudLit: C('#fff6ea', 1.05), cloudShadow: C('#8fa2b8', 0.93),
     bankShadow: C('#9fb4c6'),
     fogDist: 0.000035, fogHeight: 0.00016, planet: 0.5, cirrus: 0.6, bank: 0.13, rays: 0.35,
     gain: V(1.0, 1.01, 0.98), sat: 1.06,
@@ -108,9 +108,9 @@ export const PRESETS = {
   }),
   dusk: preset({
     sunElev: -3, sunAz: -8, sun: C('#ff8a6a', 0.5),
-    zenith: C('#1d2760'), horizon: C('#d27f96'),
-    ambient: C('#6f70aa', 0.62), bounce: C('#a07390', 0.45), shadowTint: C('#cfc6f0'),
-    fog: C('#94779c'), scatter: C('#f08a7a', 1.0),
+    zenith: C('#1d2a64'), horizon: C('#e2907f'),
+    ambient: C('#6f74aa', 0.62), bounce: C('#a07390', 0.45), shadowTint: C('#cfc6f0'),
+    fog: C('#8d7c9e'), scatter: C('#f39a72', 1.0),
     cloudLit: C('#f0a0a4', 0.8), cloudShadow: C('#5d5b96', 0.85),
     bankLit: C('#e79aa6'), bankShadow: C('#5a5690'),
     fogDist: 0.00004, fogHeight: 0.00018,
@@ -168,7 +168,7 @@ export const PRESETS = {
     zenith: C('#2779d2'), horizon: C('#dcf1e6'),
     ambient: C('#acd4e6', 0.85), bounce: C('#e6eedc', 0.78), shadowTint: C('#e2e4f8'),
     fog: C('#d4ede4'), scatter: C('#ffe4ad', 1.45),
-    cloudLit: C('#fffaf0', 1.08), cloudShadow: C('#99b2d0', 0.92),
+    cloudLit: C('#fffaf0', 1.08), cloudShadow: C('#98aec6', 0.94),
     bankLit: C('#fff8ee'), bankShadow: C('#a6bed8'),
     fogDist: 0.00003, fogHeight: 0.00016,
     planet: 0.75, cirrus: 0.6, bank: 0.13, moon2: 0.15, moon2Elev: 35, moon2Az: 120,
@@ -296,6 +296,12 @@ export class Atmosphere {
       u.uBankHeight.value = p.bank + s * 0.08;
       u.uBankLit.value.copy(p.bankLit).multiplyScalar(1 - s * 0.45);
       u.uBankShadow.value.copy(p.bankShadow).multiplyScalar(1 - s * 0.3);
+      if (u.uMoon2Dir) {
+        const m2el = p.moon2Elev * DEG, m2az = p.moon2Az * DEG;
+        u.uMoon2Dir.value.set(Math.sin(m2az) * Math.cos(m2el), Math.sin(m2el), -Math.cos(m2az) * Math.cos(m2el)).normalize();
+        u.uMoon2Vis.value = p.moon2 * (1 - s);
+        u.uGalaxy.value = p.galaxy * (1 - s);
+      }
     }
     const post = this.engine.post;
     const g = post.grade;

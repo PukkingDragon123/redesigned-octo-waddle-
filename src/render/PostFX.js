@@ -1,11 +1,12 @@
 // Post-processing: restrained bloom, crepuscular rays, sonic-boom pressure distortion,
 // in-cloud veil, colour grading, neutral tone mapping, vignette and dithering.
 import {
-  WebGLRenderTarget, HalfFloatType, LinearFilter, Vector2, Vector3, Vector4, Color,
+  WebGLRenderTarget, HalfFloatType, LinearFilter, Vector2, Vector3, Vector4, Color, Matrix4,
   AdditiveBlending, NoBlending, RGBAFormat,
 } from 'three';
 import { FullscreenPass, FS_VERT } from './FullscreenPass.js';
 import { G } from './Globals.js';
+import { getNoiseTexture } from './NoiseTex.js';
 
 const PREFILTER = /* glsl */ `
 uniform sampler2D tSrc;
@@ -100,6 +101,57 @@ void main() {
 }
 `;
 
+// Under the sea: shafts of sunlight falling through the moving surface, marched through the
+// water along each view ray (quarter resolution), then smeared toward the refracted sun.
+const SHAFTS = /* glsl */ `
+uniform sampler2D tDepth;
+uniform sampler2D uNoise;
+uniform mat4 uInvProj;
+uniform mat4 uCamWorld;
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uWaterAbsorb;
+uniform vec2 uNearFar;
+uniform float uSeaLevel;
+uniform float uTime;
+uniform float uSurfY;
+varying vec2 vUv;
+float linDepth(float d) {
+  float n = uNearFar.x, f = uNearFar.y;
+  float z = d * 2.0 - 1.0;
+  return (2.0 * n * f) / (f + n - z * (f - n));
+}
+void main() {
+  vec4 vp = uInvProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 vdir = normalize(vp.xyz / vp.w);
+  vec3 rd = normalize(mat3(uCamWorld) * vdir);
+  float zd = linDepth(texture2D(tDepth, vUv).r);
+  float tEnd = min(zd / max(-vdir.z, 1e-3), 70.0);
+  // stop at the surface when looking up
+  if (rd.y > 1e-3) tEnd = min(tEnd, max((uSurfY - uCamPos.y) / rd.y, 0.0));
+  vec3 sr = refract(-uSunDir, vec3(0.0, 1.0, 0.0), 0.7519);
+  float sunUp = smoothstep(-0.02, 0.2, uSunDir.y);
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  const int N = 20;
+  float acc = 0.0;
+  float dt = tEnd / float(N);
+  float sigma = dot(uWaterAbsorb, vec3(0.15, 0.55, 0.3));
+  for (int i = 0; i < N; i++) {
+    float t = (float(i) + jit) * dt;
+    vec3 X = uCamPos + rd * t;
+    float depth = uSeaLevel - X.y;
+    if (depth < 0.0) continue;
+    vec2 S = X.xz + sr.xz * (depth / min(sr.y, -0.2));
+    float n1 = texture2D(uNoise, S / 9.0 + vec2(uTime * 0.012, uTime * 0.007)).g;
+    float n2 = texture2D(uNoise, S / 3.7 - vec2(uTime * 0.02, -uTime * 0.013)).b;
+    float shaft = pow(smoothstep(0.45, 0.95, n1 * 0.75 + n2 * 0.4), 2.0);
+    acc += shaft * exp(-sigma * (depth * 1.2 + t)) * dt;
+  }
+  float phase = 0.5 + 0.8 * pow(max(dot(rd, -sr), 0.0), 3.0);
+  gl_FragColor = vec4(vec3(acc * 0.06 * phase * sunUp), 1.0);
+}
+`;
+
 const COMPOSITE = /* glsl */ `
 uniform sampler2D tScene;
 uniform sampler2D tBloom;
@@ -126,12 +178,43 @@ uniform float uAspect;
 uniform float uTime;
 uniform vec2 uResolution;
 uniform float uPulse;
+uniform float uUnderwater;
+uniform vec3 uWaterTint;
+uniform vec3 uShaftCol;
+uniform vec2 uLens;      // x: wet lens 0..1 (just surfaced), y: seconds since surfacing
 varying vec2 vUv;
+
+
 
 float hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash12(i), hash12(i + vec2(1,0)), u.x), mix(hash12(i + vec2(0,1)), hash12(i + vec2(1,1)), u.x), u.y);
+}
+
+// Water running off the lens after surfacing: beads that slide down and smear the view.
+vec2 lensDrops(vec2 uv, float t, out float rim) {
+  vec2 g = vec2(uv.x * uAspect, uv.y) * vec2(9.0, 6.0);
+  rim = 0.0;
+  vec2 off = vec2(0.0);
+  for (int k = 0; k < 2; k++) {
+    vec2 q = g * (k == 0 ? 1.0 : 1.9) + float(k) * 3.7;
+    float col = floor(q.x);
+    float sp = 0.25 + hash12(vec2(col, float(k))) * 0.6;
+    q.y += t * sp * (1.0 + t * 0.6);
+    vec2 ci = floor(q), cf = fract(q) - 0.5;
+    float h = hash12(ci + float(k) * 19.0);
+    if (h < 0.45) continue;
+    vec2 c = vec2(hash12(ci + 3.1) - 0.5, hash12(ci + 7.3) - 0.5) * 0.5;
+    vec2 d = (cf - c) * vec2(1.0, 0.75);
+    float r = mix(0.12, 0.3, hash12(ci + 11.0)) * (k == 0 ? 1.0 : 0.6);
+    float m = smoothstep(r, r * 0.6, length(d));
+    // a short trail above the bead
+    float trail = smoothstep(0.07, 0.0, abs(d.x)) * smoothstep(-0.05, 0.4, d.y) * smoothstep(0.9, 0.2, d.y) * 0.35;
+    off += d / r * m * 0.035 + vec2(0.0, -0.004) * trail;
+    rim += smoothstep(r * 0.6, r * 0.95, length(d)) * m;
+  }
+  return off;
 }
 
 vec3 neutralTonemap(vec3 color) {
@@ -183,6 +266,14 @@ void main() {
     float ny = vnoise(uv * 38.0 + vec2(0.0, uTime * 5.3) + 7.0) - 0.5;
     offs += vec2(nx, ny) * fall * uHaze.w * 0.012;
   }
+  // under water the whole view wavers a little
+  if (uUnderwater > 0.0) {
+    float wx = vnoise(uv * 9.0 + vec2(uTime * 0.6, 0.0)) - 0.5;
+    float wy = vnoise(uv * 9.0 + vec2(3.1, uTime * 0.55)) - 0.5;
+    offs += vec2(wx, wy) * 0.0035 * uUnderwater;
+  }
+  float lensRim = 0.0;
+  if (uLens.x > 0.001) offs += lensDrops(uv, uLens.y, lensRim) * uLens.x;
   vec2 suv = uv + offs;
   vec3 col;
   if (chroma > 0.01) {
@@ -193,8 +284,10 @@ void main() {
   } else {
     col = texture2D(tScene, suv).rgb;
   }
+  col *= 1.0 + lensRim * uLens.x * 0.12;
   col += texture2D(tBloom, suv).rgb * uBloomStrength;
-  col += texture2D(tRays, suv).rgb * uRayStrength * uSunScreen.z;
+  if (uUnderwater > 0.5) col += texture2D(tRays, suv).rgb * uShaftCol;
+  else col += texture2D(tRays, suv).rgb * uRayStrength * uSunScreen.z;
   col *= 1.0 + ringLight * 0.06;
 
   // Inside a cloud: a soft luminous veil that thickens toward the edges of view.
@@ -218,6 +311,7 @@ void main() {
   vec2 vd = (vUv - 0.5) * vec2(uAspect, 1.0);
   float vig = smoothstep(0.35, 1.05, length(vd));
   col = mix(col, col * uVignetteColor, vig * uVignette);
+  col *= 1.0 - vig * uUnderwater * 0.35;
   col *= 1.0 - uPulse * vig * 0.4;
 
   col = mix(col, uFadeColor, uFade);
@@ -276,6 +370,17 @@ export class PostFX {
         uInCloud: G.uInCloud, uCloudVeil: { value: new Color(0.9, 0.92, 0.96) },
         uFlash: G.uFlash, uAspect: { value: 1 }, uTime: G.uTime, uResolution: G.uResolution,
         uPulse: { value: 0 },
+        uUnderwater: G.uUnderwater, uWaterTint: G.uWaterTint, uShaftCol: { value: new Color(0.6, 0.9, 1.0) },
+        uLens: { value: new Vector2(0, 0) },
+      },
+    });
+    this.shafts = new FullscreenPass({
+      vertexShader: FS_VERT, fragmentShader: SHAFTS,
+      uniforms: {
+        tDepth: { value: null }, uNoise: { value: getNoiseTexture() },
+        uInvProj: { value: new Matrix4() }, uCamWorld: { value: new Matrix4() },
+        uCamPos: G.uCamPos, uSunDir: G.uSunDir, uWaterAbsorb: G.uWaterAbsorb, uNearFar: G.uNearFar,
+        uSeaLevel: G.uSeaLevel, uTime: G.uTime, uSurfY: { value: 0 },
       },
     });
     this.composite.material.blending = NoBlending;
@@ -283,6 +388,11 @@ export class PostFX {
     this.bloomEnabled = true;
     this.raysEnabled = true;
     this._v = new Vector3();
+    this._v2 = new Vector3();
+    this._v3 = new Vector3();
+    this.surfaceY = 0;
+    // optional painterly pass (src/render/painterly PainterlyPost): set engine.post.painterly = pp
+    this.painterly = null;
   }
 
   setSize(w, h) {
@@ -313,6 +423,14 @@ export class PostFX {
 
   render(renderer, sceneRT, camera) {
     const src = sceneRT.texture;
+    // surfacing leaves water running off the lens for a moment
+    const und = G.uUnderwater.value;
+    const now = G.uTime.value;
+    if (this._wasUnder && und < 0.5) this._surfacedAt = now;
+    this._wasUnder = und > 0.5;
+    const since = now - (this._surfacedAt ?? -99);
+    const lens = this.composite.uniforms.uLens.value;
+    lens.set(since >= 0 && since < 2.2 && und < 0.5 ? Math.max(0, 1 - since / 2.2) ** 0.7 : 0, Math.max(since, 0));
     // Bloom
     if (this.bloomEnabled) {
       const m0 = this.mips[0];
@@ -333,9 +451,28 @@ export class PostFX {
     } else {
       this.composite.uniforms.tBloom.value = null;
     }
-    // Crepuscular rays
+    // Crepuscular rays (in the air) or shafts through the sea (under it)
     this.updateSun(camera);
-    if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
+    const under = G.uUnderwater.value > 0.5;
+    if (under) {
+      const su = this.shafts.uniforms;
+      su.tDepth.value = sceneRT.depthTexture;
+      su.uInvProj.value.copy(camera.projectionMatrixInverse);
+      su.uCamWorld.value.copy(camera.matrixWorld);
+      su.uSurfY.value = this.surfaceY ?? 0;
+      this.shafts.render(renderer, this.rayA);
+      // smear toward where the sun shines down from
+      const sr = this._v2.copy(G.uSunDir.value).negate();
+      const eta = 0.7519, c = -sr.y, k = 1 - eta * eta * (1 - c * c);
+      sr.multiplyScalar(eta).add(this._v3.set(0, 1, 0).multiplyScalar(eta * c - Math.sqrt(Math.max(k, 0)))).negate();
+      const v = this._v.copy(sr).multiplyScalar(100).add(camera.position).project(camera);
+      this.rayBlur.uniforms.uSunScreen.value.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, 1);
+      this.rayBlur.uniforms.tSrc.value = this.rayA.texture;
+      this.rayBlur.render(renderer, this.rayB);
+      this.composite.uniforms.tRays.value = this.rayB.texture;
+      const wt = G.uWaterTint.value;
+      this.composite.uniforms.uShaftCol.value.setRGB(0.35 + wt.r * 4, 0.45 + wt.g * 4, 0.45 + wt.b * 4).multiply(G.uSunColor.value).multiplyScalar(0.5);
+    } else if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
       this.rayMask.uniforms.tSrc.value = src;
       this.rayMask.uniforms.tDepth.value = sceneRT.depthTexture;
       this.rayMask.render(renderer, this.rayA);
@@ -347,6 +484,18 @@ export class PostFX {
       this.composite.uniforms.tRays.value = this.rayB.texture;
     }
     this.composite.uniforms.tScene.value = src;
+    // the painterly pass (src/render/painterly) paints the graded frame when it is attached
+    const pp = this.painterly;
+    if (pp && pp.enabled !== false && pp.ldrTarget && pp.apply) {
+      if (pp.width !== this.engine.width || pp.height !== this.engine.height) pp.setSize?.(this.engine.width, this.engine.height);
+      const vig = this.composite.uniforms.uVignette;
+      const v0 = vig.value;
+      vig.value = v0 * 0.5; // the paint pass owns the soft edge darkening
+      this.composite.render(renderer, pp.ldrTarget);
+      vig.value = v0;
+      pp.apply(pp.ldrTarget.texture, sceneRT.depthTexture, camera, null, { time: G.uTime.value });
+      return;
+    }
     this.composite.render(renderer, null);
   }
 }

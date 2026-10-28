@@ -70,6 +70,10 @@ void main() {
   } else if (kind < 1.5) {
     // glow mote: tight core, soft halo
     a = exp(-r2 * 6.0) + exp(-r2 * 28.0) * 0.8;
+  } else if (kind > 4.5) {
+    // drifting mote in the water (marine snow): a soft speck lit by the light in the water
+    a = exp(-r2 * 4.0);
+    col = (uWaterTint * 2.5 + uSunColor * 0.04) * vCol.rgb;
   } else if (kind > 3.5) {
     // bubble: clear centre, bright rim and a glint (rises through the water)
     float r = sqrt(r2);
@@ -159,7 +163,7 @@ export class Particles {
 
   /**
    * o: { pos, vel, life, size, sizeEnd, color (Color or [r,g,b]), alpha, drag, gravity,
-   *      kind (0 mist, 1 glow, 2 sparkle, 3 sea spray droplet, 4 bubble) }
+   *      kind (0 mist, 1 glow, 2 sparkle, 3 sea spray droplet, 4 bubble, 5 underwater mote) }
    */
   emit(o) {
     let i;
@@ -201,9 +205,11 @@ export class Particles {
       }
       const k = Math.exp(-this.drag[i] * dt);
       const i3 = i * 3;
-      this.vel[i3] = this.vel[i3] * k + wind.x * (1 - k) * 0.6;
+      // bubbles and motes live under the sea, out of the wind
+      const wk = this.kind[i] > 3.5 ? 0 : (1 - k) * 0.6;
+      this.vel[i3] = this.vel[i3] * k + wind.x * wk;
       this.vel[i3 + 1] = this.vel[i3 + 1] * k - this.grav[i] * dt;
-      this.vel[i3 + 2] = this.vel[i3 + 2] * k + wind.z * (1 - k) * 0.6;
+      this.vel[i3 + 2] = this.vel[i3 + 2] * k + wind.z * wk;
       this.pos[i3] += this.vel[i3] * dt;
       this.pos[i3 + 1] += this.vel[i3 + 1] * dt;
       this.pos[i3 + 2] += this.vel[i3 + 2] * dt;

@@ -1,484 +1,316 @@
-// Stylized vegetation built as instanced templates.
-// Canopies are clusters of noise-displaced blobs whose normals are transferred from the
-// overall crown (soft, painterly shading), with leaf translucency when backlit and wind sway
-// weighted from trunk to twig. Templates: broadleaf (Ghibli camphor), umbrella pine, cypress,
-// weeping willow, bush, boulder, giant tree (buttress roots, layered crowns, hanging moss),
-// and hanging vines.
-import {
-  BufferGeometry, Float32BufferAttribute, InstancedMesh, ShaderMaterial, Color, Vector3, Matrix4,
-  Quaternion, IcosahedronGeometry, DoubleSide, Object3D,
-} from 'three';
-import { G } from '../render/Globals.js';
-import { UNIFORMS, NOISE, SHADOW, LIGHTING, WIND } from '../render/shaders/common.js';
-import { getNoiseTexture } from '../render/NoiseTex.js';
-import { Noise } from '../core/noise.js';
-import { rng, lerp, clamp, TAU, smoothstep } from '../core/math.js';
+// Trees of Vur Sok: a few accents among the alien flora (contract 0.2: fewer trees, more moving
+// plants). They are built with the flora's chain machinery (see Flora.js / shaders/flora.js):
+// 3D trunks of twisted strands, roots gripping the rock, and hand-painted 2D canopy clumps as
+// camera-facing billboards with spherically bent normals, so every crown reads as a soft painted
+// volume that flutters in the wind. Far away each tree becomes a single painted impostor.
+//   coilTree       spiral-trunk tree of the meadows (crowns of painted leaf clumps)
+//   giantCoilTree  the colossal coil-trunk trees of the Coil Forest
+//   pine           wind-bent pines on the tops of spires and stacks
+//   palm, cycad    beaches and motus
+//   blossomTree    the Oasis
+//   motherTree     the Mother Tree on the central coiled island of the Oasis
+//   giantFern      tree-sized fiddleheads (the Coil Forest)
+//   impostor       far painted billboard of any of the above
+import { Color } from 'three';
+import { rng, lerp, clamp, TAU } from '../core/math.js';
+import { SLOT } from './Painted.js';
+import { FloraGeo, FloraSet, SPECIES, FLORA_PAL } from './Flora.js';
+import { thin } from './Spirals.js';
 
-const noise = new Noise(777);
+const C = (h) => new Color(h);
+const inst = (r, open = 1) => [r() * TAU, r() < 0.25 ? r() : 0, lerp(0.85, 1.1, r()), open];
 
-const VERT = /* glsl */ `
-${UNIFORMS}
-${NOISE}
-${WIND}
-attribute vec4 aVeg;   // x flex (0 rigid .. 1 tip), y leaf (0 bark, 1 leaf, 2 vine), z phase, w ao
-varying vec3 vWorldPos;
-varying vec3 vNormal;
-varying vec3 vColor;
-varying vec4 vVeg;
-uniform float uSwayAmt;
-void main() {
-  vec3 transformed = position;
-  vec3 n = normal;
-  #ifdef USE_INSTANCING
-    transformed = (instanceMatrix * vec4(transformed, 1.0)).xyz;
-    n = mat3(instanceMatrix) * n;
-  #endif
-  vec4 wp = modelMatrix * vec4(transformed, 1.0);
-  float ph = aVeg.z + wp.x * 0.013 + wp.z * 0.011;
-  vec3 sway = windSway(wp.xyz, aVeg.x * uSwayAmt, ph);
-  // vines and leaves flutter more
-  sway *= 1.0 + aVeg.y * 0.6;
-  wp.xyz += sway;
-  vWorldPos = wp.xyz;
-  vNormal = normalize(mat3(modelMatrix) * n);
-  #ifdef USE_COLOR
-    vColor = color;
-  #else
-    vColor = vec3(1.0);
-  #endif
-  vVeg = aVeg;
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`;
-
-const FRAG = /* glsl */ `
-${UNIFORMS}
-${NOISE}
-${SHADOW}
-${LIGHTING}
-uniform sampler2D uNoise;
-varying vec3 vWorldPos;
-varying vec3 vNormal;
-varying vec3 vColor;
-varying vec4 vVeg;
-void main() {
-  #ifdef DEPTH_PASS
-    gl_FragColor = vec4(1.0);
-    return;
-  #endif
-  vec3 N = normalize(vNormal);
-  if (!gl_FrontFacing) N = -N;
-  vec3 albedo = vColor;
-  float leaf = step(0.5, vVeg.y) * step(vVeg.y, 1.5);
-  float vine = step(1.5, vVeg.y);
-  Surface s = makeSurface(albedo, N, vWorldPos);
-  if (leaf > 0.5) {
-    // leaf clumps: soft value variation across the crown
-    float c1 = texture2D(uNoise, vWorldPos.xz / 9.0 + vWorldPos.y / 13.0).g;
-    float c2 = texture2D(uNoise, vWorldPos.xy / 3.1 + vWorldPos.z / 5.0).b;
-    s.albedo *= 0.8 + 0.3 * c1 + 0.12 * (c2 - 0.5);
-    s.trans = 0.65;
-    s.wrap = 0.3;
-    s.rim = 0.35;
-  } else if (vine > 0.5) {
-    s.trans = 0.45;
-    s.wrap = 0.3;
-    s.rim = 0.3;
-  } else {
-    float bark = texture2D(uNoise, vec2(atan(vWorldPos.x, vWorldPos.z) * 2.0, vWorldPos.y / 7.0)).b;
-    s.albedo *= 0.85 + 0.25 * bark;
-    s.rim = 0.25;
-    s.wrap = 0.18;
+// ---- chain helpers -------------------------------------------------------------------------------
+/** Rest-pose point and direction along a rigid chain (matches the shader with no wind). */
+export function chainPoint(ch, s, steps = 14) {
+  let ang = ch.tilt, px = 0, py = 0, prev = 0;
+  for (let i = 1; i <= steps; i++) {
+    const f = i / steps, u1 = 1 - (1 - f) * (1 - f);
+    if (prev >= s) break;
+    const h = Math.min(u1, s) - prev;
+    const a = ang + ch.curl * h * 0.5;
+    px += Math.sin(a) * h * ch.L; py += Math.cos(a) * h * ch.L;
+    ang += ch.curl * h;
+    prev = u1;
   }
-  s.ao = vVeg.w;
-  s.shadow = sampleShadow(vWorldPos, N);
-  vec3 col = stylizedLight(s);
-  col = applyFog(col, vWorldPos);
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
-
-let _mat = null;
-export function vegMaterial() {
-  if (_mat) return _mat;
-  _mat = new ShaderMaterial({
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    uniforms: Object.assign({}, G, { uNoise: { value: getNoiseTexture() }, uSwayAmt: { value: 1 } }),
-    vertexColors: true,
-    side: DoubleSide,
-  });
-  return _mat;
+  return [ch.base[0] + Math.cos(ch.az) * px, ch.base[1] + py, ch.base[2] + Math.sin(ch.az) * px, ang];
 }
 
-// ---- geometry builder ------------------------------------------------------------------
-class Builder {
-  constructor() {
-    this.pos = []; this.nor = []; this.col = []; this.veg = []; this.idx = [];
-  }
-  get count() { return this.pos.length / 3; }
-  vert(p, n, c, flex, kind, phase, ao) {
-    this.pos.push(p.x, p.y, p.z);
-    this.nor.push(n.x, n.y, n.z);
-    this.col.push(c.r, c.g, c.b);
-    this.veg.push(flex, kind, phase, ao);
-    return this.count - 1;
-  }
-  /** Tapered tube along a polyline of points with radii. */
-  tube(points, radii, color, flexFn, seg = 8, kind = 0, colorFn = null) {
-    const base = this.count;
-    const n = points.length;
-    const tmpN = new Vector3(), side = new Vector3(), up = new Vector3();
-    const c = new Color();
-    for (let i = 0; i < n; i++) {
-      const p = points[i];
-      const t = new Vector3().subVectors(points[Math.min(n - 1, i + 1)], points[Math.max(0, i - 1)]).normalize();
-      const ref = Math.abs(t.y) > 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
-      side.crossVectors(t, ref).normalize();
-      up.crossVectors(side, t).normalize();
-      for (let j = 0; j < seg; j++) {
-        const a = (j / seg) * TAU;
-        tmpN.copy(side).multiplyScalar(Math.cos(a)).addScaledVector(up, Math.sin(a));
-        const rr = radii[i] * (1 + 0.08 * Math.sin(a * 3 + i));
-        const v = p.clone().addScaledVector(tmpN, rr);
-        c.copy(colorFn ? colorFn(i / (n - 1), a) : color);
-        this.vert(v, tmpN, c, flexFn(i / (n - 1)), kind, i * 0.3, 0.8 + 0.2 * (i / (n - 1)));
-      }
-    }
-    for (let i = 0; i < n - 1; i++) {
-      for (let j = 0; j < seg; j++) {
-        const a = base + i * seg + j, b = base + i * seg + ((j + 1) % seg);
-        const cc = base + (i + 1) * seg + j, d = base + (i + 1) * seg + ((j + 1) % seg);
-        this.idx.push(a, cc, b, b, cc, d);
-      }
-    }
-  }
-  /** Noise-displaced blob whose normals come from the crown centre (soft painterly shading). */
-  blob(center, radius, crownCenter, crownR, color, flex, opts = {}) {
-    const ico = new IcosahedronGeometry(1, opts.detail ?? 2);
-    const p = ico.attributes.position;
-    const base = this.count;
-    const v = new Vector3(), n = new Vector3(), c = new Color();
-    const sq = opts.squash ?? 0.85;
-    const seed = opts.seed ?? 0;
-    // de-index: icosahedron geometry is non-indexed in three (each face its own verts)
-    const map = new Map();
-    const indices = [];
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i);
-      const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
-      let id = map.get(key);
-      if (id === undefined) {
-        const dir = v.clone().normalize();
-        const disp = 1 + 0.22 * noise.noise3(dir.x * 1.7 + seed, dir.y * 1.7, dir.z * 1.7 - seed) + 0.1 * noise.noise3(dir.x * 4 + seed, dir.y * 4, dir.z * 4);
-        const wp = dir.clone().multiplyScalar(radius * disp);
-        wp.y *= sq;
-        wp.add(center);
-        // transferred normal: from the crown centre, blended with the blob's own
-        n.copy(wp).sub(crownCenter).normalize().multiplyScalar(0.7).addScaledVector(dir, 0.45).normalize();
-        const lightness = clamp(0.5 + (wp.y - crownCenter.y) / (crownR * 2) + 0.3 * noise.noise3(wp.x * 0.1, wp.y * 0.1, wp.z * 0.1), 0, 1);
-        c.copy(color.dark).lerp(color.light, lightness);
-        const ao = clamp(0.55 + 0.45 * ((wp.distanceTo(crownCenter) / crownR) * 0.8 + (wp.y > crownCenter.y ? 0.25 : 0)), 0.4, 1);
-        id = this.vert(wp, n, c, flex, 1, seed, ao);
-        map.set(key, id);
-      }
-      indices.push(id);
-    }
-    for (let i = 0; i < indices.length; i += 3) this.idx.push(indices[i], indices[i + 1], indices[i + 2]);
-    ico.dispose();
-    return base;
-  }
-  /** Hanging strand (vine / moss curtain): a narrow ribbon, flex grows downward. */
-  strand(top, length, width, color, seg = 6, phase = 0) {
-    const base = this.count;
-    const c = new Color();
-    for (let i = 0; i <= seg; i++) {
-      const t = i / seg;
-      const y = top.y - t * length;
-      const w = width * (1 - t * 0.7);
-      const curl = Math.sin(t * 3 + phase) * length * 0.04;
-      c.copy(color.top).lerp(color.bottom, t);
-      this.vert(new Vector3(top.x - w + curl, y, top.z), new Vector3(0, 0, 1), c, t * t * 1.5, 2, phase, 0.85);
-      this.vert(new Vector3(top.x + w + curl, y, top.z), new Vector3(0, 0, 1), c, t * t * 1.5, 2, phase, 0.85);
-    }
-    for (let i = 0; i < seg; i++) {
-      const a = base + i * 2;
-      this.idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
-    }
-  }
-  build() {
-    const g = new BufferGeometry();
-    g.setAttribute('position', new Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('color', new Float32BufferAttribute(this.col, 3));
-    g.setAttribute('aVeg', new Float32BufferAttribute(this.veg, 4));
-    g.setIndex(this.idx);
-    g.computeBoundingSphere();
-    return g;
+/** A twisted trunk of n strands winding around its chain. */
+function twistedTrunk(g, ch, o) {
+  const n = o.strands ?? 3;
+  for (let k = 0; k < n; k++) {
+    const ph = (k / n) * TAU;
+    g.tube(ch, {
+      segs: o.segs ?? 14, sides: o.sides ?? 7, flex: o.flex ?? 0.05,
+      r: (s) => o.r(s) * (0.55 + 0.1 * Math.sin(s * 11 + k)),
+      center: (s) => { const a = ph + s * (o.turns ?? 1.3) * TAU; const R = o.r(s) * 0.62; return [Math.cos(a) * R, Math.sin(a) * R]; },
+      col: (s) => o.col.clone().lerp(o.col2, 0.5 + 0.5 * Math.sin(s * 9 + k * 2.1)), acc: o.acc,
+    });
   }
 }
-
-const LEAF = {
-  green: { dark: new Color('#3f6b3d'), light: new Color('#8db063') },
-  spring: { dark: new Color('#4b7a45'), light: new Color('#a6c46e') },
-  deep: { dark: new Color('#2f5640'), light: new Color('#6f9a5c') },
-  autumn: { dark: new Color('#7a6a3c'), light: new Color('#d0b46a') },
-  blossom: { dark: new Color('#c98aa0'), light: new Color('#f6d6dc') },
-  teal: { dark: new Color('#2f5f5a'), light: new Color('#7fb2a0') },
-};
-const BARK = new Color('#7c6a5c');
-const BARK_LIGHT = new Color('#a39282');
-
-function curvedLine(base, height, bend, steps, r) {
-  const pts = [];
-  const dx = (r() - 0.5) * bend, dz = (r() - 0.5) * bend;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    pts.push(new Vector3(base.x + dx * t * t, base.y + t * height, base.z + dz * t * t));
-  }
-  return pts;
-}
-
-/** Template generators. Each returns a BufferGeometry with the tree base at the origin. */
-export const TEMPLATES = {
-  broadleaf(seed = 1, palette = LEAF.green) {
-    const r = rng(seed);
-    const b = new Builder();
-    const h = lerp(8, 12, r());
-    const trunk = curvedLine(new Vector3(), h, 2.5, 6, r);
-    b.tube(trunk, trunk.map((_, i) => lerp(0.75, 0.32, i / 6)), BARK, (t) => t * 0.25, 9, 0, (t) => BARK.clone().lerp(BARK_LIGHT, t * 0.5));
-    const top = trunk[trunk.length - 1];
-    const crown = top.clone().add(new Vector3(0, 2.5, 0));
-    const crownR = lerp(5.5, 7.5, r());
-    // a few branches reaching into the crown
-    for (let k = 0; k < 3; k++) {
-      const a = r() * TAU;
-      const start = trunk[3 + (k % 3)];
-      const end = crown.clone().add(new Vector3(Math.cos(a) * crownR * 0.6, (r() - 0.3) * 2, Math.sin(a) * crownR * 0.6));
-      const pts = [start, start.clone().lerp(end, 0.5).add(new Vector3(0, 0.6, 0)), end];
-      b.tube(pts, [0.3, 0.2, 0.1], BARK, (t) => 0.25 + t * 0.35, 6);
-    }
-    const nb = 9 + Math.floor(r() * 5);
-    for (let k = 0; k < nb; k++) {
-      const d = r.onSphere(new Vector3());
-      d.y = Math.abs(d.y) * 0.7 - 0.1;
-      const c = crown.clone().addScaledVector(d, crownR * lerp(0.35, 0.75, r()));
-      b.blob(c, crownR * lerp(0.42, 0.6, r()), crown, crownR, palette, 0.6 + 0.4 * r(), { seed: k * 3.1 + seed, squash: 0.82 });
-    }
-    return { geo: b.build(), height: h + crownR * 1.6, radius: crownR * 1.3 };
-  },
-  umbrella(seed = 1, palette = LEAF.deep) {
-    const r = rng(seed);
-    const b = new Builder();
-    const h = lerp(14, 20, r());
-    const trunk = curvedLine(new Vector3(), h, 5, 8, r);
-    b.tube(trunk, trunk.map((_, i) => lerp(0.7, 0.28, i / 8)), BARK, (t) => t * 0.3, 8, 0, (t) => BARK.clone().lerp(BARK_LIGHT, t * 0.6));
-    const top = trunk[trunk.length - 1];
-    const crownR = lerp(7, 10, r());
-    // a forked crown of flat pads
-    const nb = 7 + Math.floor(r() * 4);
-    for (let k = 0; k < nb; k++) {
-      const a = (k / nb) * TAU + r() * 0.4;
-      const rr = crownR * lerp(0.2, 0.75, r());
-      const c = top.clone().add(new Vector3(Math.cos(a) * rr, 1 + r() * 1.5, Math.sin(a) * rr));
-      if (k % 2 === 0) b.tube([trunk[6], c.clone().add(new Vector3(0, -0.6, 0))], [0.22, 0.1], BARK, (t) => 0.3 + t * 0.4, 5);
-      b.blob(c, crownR * lerp(0.35, 0.48, r()), top.clone().add(new Vector3(0, 1.8, 0)), crownR, palette, 0.6 + 0.4 * r(), { seed: k * 2.3 + seed, squash: 0.42 });
-    }
-    return { geo: b.build(), height: h + 4, radius: crownR * 1.2 };
-  },
-  cypress(seed = 1, palette = LEAF.deep) {
-    const r = rng(seed);
-    const b = new Builder();
-    const h = lerp(12, 18, r());
-    const trunk = curvedLine(new Vector3(), h * 0.4, 0.6, 3, r);
-    b.tube(trunk, [0.45, 0.4, 0.33, 0.3], BARK, (t) => t * 0.2, 7);
-    const n = 7;
-    const crown = new Vector3(0, h * 0.55, 0);
-    for (let k = 0; k < n; k++) {
-      const t = k / (n - 1);
-      const y = lerp(h * 0.18, h * 0.95, t);
-      const rad = lerp(2.4, 0.9, t) * lerp(0.9, 1.1, r());
-      b.blob(new Vector3((r() - 0.5) * 0.6, y, (r() - 0.5) * 0.6), rad, crown, h * 0.5, palette, 0.35 + t * 0.6, { seed: k + seed, squash: 1.25, detail: 1 });
-    }
-    return { geo: b.build(), height: h, radius: 3 };
-  },
-  willow(seed = 1, palette = LEAF.spring) {
-    const r = rng(seed);
-    const b = new Builder();
-    const h = lerp(7, 10, r());
-    const trunk = curvedLine(new Vector3(), h, 4, 6, r);
-    b.tube(trunk, trunk.map((_, i) => lerp(0.7, 0.3, i / 6)), BARK, (t) => t * 0.3, 8);
-    const top = trunk[trunk.length - 1];
-    const crownR = lerp(5, 7, r());
-    for (let k = 0; k < 6; k++) {
-      const d = r.onSphere(new Vector3());
-      d.y = Math.abs(d.y) * 0.5;
-      b.blob(top.clone().addScaledVector(d, crownR * 0.45), crownR * 0.5, top, crownR, palette, 0.7, { seed: k + seed, squash: 0.7, detail: 1 });
-    }
-    // weeping curtains
-    const vc = { top: palette.dark.clone().lerp(palette.light, 0.4), bottom: palette.light.clone() };
-    for (let k = 0; k < 34; k++) {
-      const a = r() * TAU;
-      const rr = crownR * lerp(0.5, 1.0, r());
-      const p = top.clone().add(new Vector3(Math.cos(a) * rr, -0.5 + r() * 1.5, Math.sin(a) * rr));
-      b.strand(p, lerp(4, 8, r()), lerp(0.25, 0.45, r()), vc, 5, r() * 6);
-    }
-    return { geo: b.build(), height: h + 3, radius: crownR * 1.2 };
-  },
-  bush(seed = 1, palette = LEAF.green) {
-    const r = rng(seed);
-    const b = new Builder();
-    const R = lerp(1.2, 2.2, r());
-    const cc = new Vector3(0, R * 0.6, 0);
-    for (let k = 0; k < 4; k++) {
-      const d = r.onSphere(new Vector3());
-      d.y = Math.abs(d.y) * 0.4;
-      b.blob(cc.clone().addScaledVector(d, R * 0.45), R * lerp(0.55, 0.75, r()), cc, R, palette, 0.25, { seed: k + seed, squash: 0.75, detail: 1 });
-    }
-    return { geo: b.build(), height: R * 1.5, radius: R * 1.3 };
-  },
-  boulder(seed = 1) {
-    const r = rng(seed);
-    const b = new Builder();
-    const ico = new IcosahedronGeometry(1, 2);
-    const p = ico.attributes.position;
-    const map = new Map();
-    const ids = [];
-    const c = new Color();
-    const v = new Vector3();
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i);
-      const key = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
-      let id = map.get(key);
-      if (id === undefined) {
-        const d = v.clone().normalize();
-        const disp = 1 + 0.25 * noise.noise3(d.x * 1.5 + seed, d.y * 1.5, d.z * 1.5) + 0.12 * noise.noise3(d.x * 4, d.y * 4 + seed, d.z * 4);
-        const w = d.clone().multiplyScalar(disp);
-        w.y = w.y * 0.7 + 0.35;
-        c.set('#a69c9a').lerp(new Color('#6f8f58'), smoothstep(0.3, 0.8, d.y) * 0.8);
-        id = b.vert(w, d, c, 0, 0, 0, 0.7 + 0.3 * Math.max(d.y, 0));
-        map.set(key, id);
-      }
-      ids.push(id);
-    }
-    for (let i = 0; i < ids.length; i += 3) b.idx.push(ids[i], ids[i + 1], ids[i + 2]);
-    ico.dispose();
-    return { geo: b.build(), height: 1, radius: 1 };
-  },
-  giant(seed = 1, palette = LEAF.deep, opts = {}) {
-    const r = rng(seed);
-    const b = new Builder();
-    const H = opts.height ?? lerp(130, 180, r());
-    const R0 = opts.trunkR ?? H * 0.075;
-    // buttress roots flaring into the island
-    for (let k = 0; k < 7; k++) {
-      const a = (k / 7) * TAU + r() * 0.3;
-      const pts = [];
-      for (let i = 0; i <= 5; i++) {
-        const t = i / 5;
-        const rad = lerp(R0 * 2.6, R0 * 0.6, Math.pow(t, 0.6));
-        pts.push(new Vector3(Math.cos(a) * rad, lerp(-R0 * 0.8, H * 0.12, t), Math.sin(a) * rad));
-      }
-      b.tube(pts, pts.map((_, i) => lerp(R0 * 0.35, R0 * 0.25, i / 5)), BARK, () => 0, 7, 0, (t) => BARK.clone().lerp(new Color('#6b7f58'), 0.35 * (1 - t)));
-    }
-    // trunk: slightly twisting column
-    const trunk = [];
-    for (let i = 0; i <= 12; i++) {
-      const t = i / 12;
-      trunk.push(new Vector3(Math.sin(t * 2.2 + seed) * R0 * 0.6, t * H * 0.78, Math.cos(t * 1.7 + seed) * R0 * 0.6));
-    }
-    b.tube(trunk, trunk.map((_, i) => lerp(R0, R0 * 0.45, i / 12)), BARK, (t) => t * 0.05, 14, 0,
-      (t, a) => BARK.clone().lerp(BARK_LIGHT, 0.2 + 0.3 * Math.sin(a * 5 + t * 20) * 0.5).lerp(new Color('#6f8a5a'), smoothstep(0.6, 1, Math.sin(a + 1.2)) * 0.25));
-    // layered crowns on great curving limbs
-    const layers = opts.layers ?? 5;
-    const crownC = new Vector3(0, H * 0.8, 0);
-    for (let l = 0; l < layers; l++) {
-      const lt = l / Math.max(1, layers - 1);
-      const y = lerp(H * 0.42, H * 0.9, lt);
-      const spread = lerp(H * 0.4, H * 0.16, lt);
-      const nLimbs = l === layers - 1 ? 3 : 5;
-      for (let k = 0; k < nLimbs; k++) {
-        const a = (k / nLimbs) * TAU + l * 1.3 + r() * 0.5;
-        const start = new Vector3(0, y - H * 0.08, 0);
-        const end = new Vector3(Math.cos(a) * spread, y + H * 0.05 + r() * H * 0.04, Math.sin(a) * spread);
-        const m1 = start.clone().lerp(end, 0.35).add(new Vector3(0, H * 0.03, 0));
-        const m2 = start.clone().lerp(end, 0.7).add(new Vector3(0, H * 0.06, 0));
-        b.tube([start, m1, m2, end], [R0 * 0.42, R0 * 0.3, R0 * 0.2, R0 * 0.1], BARK, (t) => 0.04 + t * 0.12, 8);
-        const padR = lerp(H * 0.08, H * 0.11, r()) * (1.15 - lt * 0.3);
-        const nPads = 6;
-        for (let q = 0; q < nPads; q++) {
-          const off = new Vector3((r() - 0.5) * padR * 2.0, (r() - 0.25) * padR * 0.8, (r() - 0.5) * padR * 2.0);
-          b.blob(end.clone().lerp(m2, q < 2 ? 0.5 : 0).add(off), padR * lerp(0.7, 1.0, r()), crownC, H * 0.45, palette, 0.22, { seed: l * 10 + k * 3 + q + seed, squash: 0.62 });
-        }
-        // hanging moss curtains from the limb
-        const mc = { top: new Color('#7f9a64'), bottom: new Color('#b7c98c') };
-        for (let q = 0; q < 5; q++) {
-          const t = 0.3 + r() * 0.6;
-          const p2 = start.clone().lerp(end, t).add(new Vector3(0, -R0 * 0.15, 0));
-          b.strand(p2, lerp(H * 0.06, H * 0.16, r()), lerp(0.4, 0.9, r()), mc, 6, r() * 6);
-        }
-      }
-    }
-    // crown cap
-    for (let q = 0; q < 5; q++) {
-      const off = new Vector3((r() - 0.5) * H * 0.12, H * 0.96 + r() * H * 0.04, (r() - 0.5) * H * 0.12);
-      b.blob(off, H * 0.09, crownC, H * 0.45, palette, 0.22, { seed: 99 + q + seed, squash: 0.7 });
-    }
-    return { geo: b.build(), height: H, radius: H * 0.5 };
-  },
-  vine(seed = 1) {
-    const r = rng(seed);
-    const b = new Builder();
-    const vc = { top: new Color('#5d7f4e'), bottom: new Color('#9fbf78') };
-    for (let k = 0; k < 3; k++) {
-      b.strand(new Vector3((r() - 0.5) * 1.2, 0, (r() - 0.5) * 1.2), lerp(0.7, 1.0, r()), 0.035, vc, 8, r() * 6);
-    }
-    return { geo: b.build(), height: 1, radius: 1 };
-  },
-};
-
-export const PALETTES = LEAF;
 
 /**
- * Instanced forest: collects placements per template key, then builds one InstancedMesh per key.
+ * A painted foliage pad: n clump billboards scattered in a flattened ellipsoid around `center`
+ * (each on an invisible rigid stalk so it rides the tree's sway), lower clumps darker.
  */
-export class Vegetation {
-  constructor(game) {
-    this.game = game;
-    this.templates = new Map(); // key -> {geo, height, radius}
-    this.placements = new Map(); // key -> [matrix]
-    this.meshes = [];
-  }
-
-  template(key, factory) {
-    if (!this.templates.has(key)) this.templates.set(key, factory());
-    return this.templates.get(key);
-  }
-
-  add(key, factory, pos, scale = 1, rotY = 0, tilt = null) {
-    this.template(key, factory);
-    if (!this.placements.has(key)) this.placements.set(key, []);
-    const m = new Matrix4();
-    const q = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), rotY);
-    if (tilt) q.premultiply(tilt);
-    m.compose(pos, q, new Vector3(scale, scale, scale));
-    this.placements.get(key).push(m);
-  }
-
-  build(scene, shadows, castShadows = true) {
-    const mat = vegMaterial();
-    for (const [key, list] of this.placements) {
-      const t = this.templates.get(key);
-      const mesh = new InstancedMesh(t.geo, mat, list.length);
-      for (let i = 0; i < list.length; i++) mesh.setMatrixAt(i, list[i]);
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.computeBoundingSphere();
-      mesh.name = 'veg-' + key;
-      scene.add(mesh);
-      if (castShadows && shadows && !key.startsWith('vine')) shadows.addCaster(mesh);
-      this.meshes.push(mesh);
-    }
-    this.placements.clear();
-    return this.meshes;
+function pad(g, center, radius, n, o) {
+  const r = o.r;
+  for (let i = 0; i < n; i++) {
+    const az = r() * TAU, d = Math.sqrt(r()) * radius;
+    const y = (r() - 0.35) * radius * (o.flat ?? 0.45);
+    const ox = Math.cos(az) * d, oz = Math.sin(az) * d;
+    const L = Math.hypot(ox, y, oz) + 1e-3;
+    const tilt = Math.acos(clamp(y / L, -1, 1));
+    const shade = lerp(0.72, 1.08, clamp(0.5 + y / (radius * 0.6), 0, 1));
+    const col = (Array.isArray(o.col) ? o.col[i % o.col.length] : o.col).clone().multiplyScalar(shade);
+    const size = o.size * lerp(0.7, 1.1, r()) * (1 - 0.25 * d / radius);
+    g.bill({ base: center, L, az, tilt, curl: 0, kind: 0 }, { s: 1, size, slot: Array.isArray(o.slot) ? o.slot[Math.floor(r() * o.slot.length)] : o.slot, col, acc: o.acc, flex: o.flex ?? 0.25 });
   }
 }
+
+SPECIES.coilTree = (seed, H, pal = { bark: C('#5a4a3e'), bark2: C('#7a6a58'), leaf: C('#4f7f3c'), acc: C('#c9b45a'), slot: SLOT.leafA }) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const trunk = { base: [0, -H * 0.02, 0], L: H * 0.62, az: r() * TAU, tilt: lerp(0.02, 0.16, r()), curl: lerp(-0.2, 0.2, r()), kind: 0 };
+  twistedTrunk(g, trunk, { strands: 3, turns: lerp(0.8, 1.6, r()), r: (s) => H * lerp(0.05, 0.026, s), col: pal.bark, col2: pal.bark2, acc: pal.acc });
+  // roots gripping the rock
+  for (let k = 0; k < 5; k++) {
+    const az = (k / 5) * TAU + r() * 0.5;
+    const ch = { base: [0, H * 0.04, 0], L: H * lerp(0.12, 0.22, r()), az, tilt: lerp(1.75, 2.1, r()), curl: -0.6, kind: 0 };
+    g.tube(ch, { segs: 6, sides: 6, flex: 0, r: (s) => H * lerp(0.03, 0.006, s), col: pal.bark, acc: pal.acc });
+  }
+  // branches spiralling up the crown, each ending in painted clumps
+  const nB = 5 + Math.floor(r() * 4);
+  for (let k = 0; k < nB; k++) {
+    const st = lerp(0.55, 0.95, k / nB);
+    const [bx, by, bz] = chainPoint(trunk, st);
+    const az = k * 2.4 + r() * 0.6;
+    const ch = { base: [bx, by, bz], L: H * lerp(0.22, 0.38, r()) * (1.15 - st * 0.4), az, tilt: lerp(0.95, 1.35, r()), curl: lerp(-0.9, -0.4, r()), kind: 0 };
+    g.tube(ch, { segs: 6, sides: 5, flex: 0.15, r: (s) => H * lerp(0.016, 0.005, s), col: pal.bark, acc: pal.acc });
+    const [ex, ey, ez] = chainPoint(ch, 1);
+    pad(g, [ex, ey + H * 0.02, ez], H * lerp(0.13, 0.2, r()), 7, { r, size: H * 0.16, slot: [pal.slot, SLOT.leafC], col: pal.leaf, acc: pal.acc, flat: 0.5, flex: 0.3 });
+  }
+  const top = chainPoint(trunk, 1);
+  pad(g, [top[0], top[1] + H * 0.04, top[2]], H * 0.2, 8, { r, size: H * 0.18, slot: pal.slot, col: pal.leaf, acc: pal.acc, flat: 0.55, flex: 0.3 });
+  return { geo: g.build(), height: H, radius: H * 0.45, shadow: true, fade: [1200, 1700] };
+};
+
+SPECIES.palm = (seed, H, pal = { bark: C('#6d5d48'), bark2: C('#8d7b62'), leaf: C('#5a8a3a'), acc: C('#c7c36a') }) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const trunk = { base: [0, -0.2, 0], L: H, az: r() * TAU, tilt: lerp(0.15, 0.45, r()), curl: lerp(-0.45, -0.15, r()), kind: 0 };
+  g.tube(trunk, { segs: 12, sides: 7, flex: 0.12, r: (s) => H * lerp(0.03, 0.02, s) * (1 + 0.12 * Math.max(0, Math.sin(s * 70))), col: (s) => pal.bark.clone().lerp(pal.bark2, 0.5 + 0.5 * Math.sin(s * 70)), acc: pal.acc });
+  const [tx, ty, tz] = chainPoint(trunk, 1);
+  const n = 10 + Math.floor(r() * 5);
+  for (let k = 0; k < n; k++) {
+    const az = (k / n) * TAU + r() * 0.3;
+    const ch = { base: [tx, ty, tz], L: H * lerp(0.38, 0.5, r()), az, tilt: lerp(0.7, 1.4, r()), curl: lerp(1.0, 1.8, r()), kind: 7 };
+    g.card(ch, { segs: 7, slot: SLOT.palm, w: (s) => H * 0.17 * Math.sin(Math.PI * Math.min(1, s * 0.9 + 0.1)), col: pal.leaf, acc: pal.acc, flex: 0.5 });
+  }
+  for (let q = 0; q < 4; q++) g.bill({ base: [tx, ty - H * 0.03, tz], L: H * 0.03, az: r() * TAU, tilt: 1.5, curl: 0, kind: 0 }, { s: 1, size: H * 0.08, slot: SLOT.puff, col: C('#7a6a3a'), acc: C('#a08a4a'), flex: 0.1 });
+  return { geo: g.build(), height: H, radius: H * 0.5, shadow: true, fade: [1000, 1500] };
+};
+
+SPECIES.blossomTree = (seed, H, pal = { bark: C('#4f4044'), bark2: C('#6d5a5a'), leaf: C('#e4a9bb'), acc: C('#fff1f4'), slot: SLOT.blossom }) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const trunk = { base: [0, -H * 0.02, 0], L: H * 0.45, az: r() * TAU, tilt: lerp(0.1, 0.3, r()), curl: lerp(-0.4, 0.4, r()), kind: 0 };
+  twistedTrunk(g, trunk, { strands: 2, turns: 1.1, r: (s) => H * lerp(0.05, 0.03, s), col: pal.bark, col2: pal.bark2, acc: pal.acc });
+  const nB = 6 + Math.floor(r() * 4);
+  for (let k = 0; k < nB; k++) {
+    const st = lerp(0.5, 1.0, r());
+    const [bx, by, bz] = chainPoint(trunk, st);
+    const ch = { base: [bx, by, bz], L: H * lerp(0.3, 0.5, r()), az: r() * TAU, tilt: lerp(0.7, 1.3, r()), curl: lerp(-0.7, 0.1, r()), kind: 0 };
+    g.tube(ch, { segs: 6, sides: 5, flex: 0.15, r: (s) => H * lerp(0.02, 0.006, s), col: pal.bark, acc: pal.acc });
+    const [ex, ey, ez] = chainPoint(ch, 0.9);
+    pad(g, [ex, ey + H * 0.03, ez], H * lerp(0.16, 0.24, r()), 7, { r, size: H * 0.2, slot: [pal.slot, pal.slot, SLOT.leafC], col: pal.leaf, acc: pal.acc, flat: 0.6, flex: 0.3 });
+  }
+  return { geo: g.build(), height: H, radius: H * 0.5, shadow: true, fade: [1200, 1700] };
+};
+
+/** Wind-bent pine on the tops of spires: a crooked leaning trunk under flat pads of needles. */
+SPECIES.pine = (seed, H, pal = { bark: C('#4f4038').multiplyScalar(0.8), bark2: C('#6e5a48').multiplyScalar(0.8), leaf: C('#355a3c').multiplyScalar(0.8), acc: C('#9ab86a') }) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const lean = r() * TAU;
+  const trunk = { base: [0, -0.3, 0], L: H * 0.85, az: lean, tilt: lerp(0.35, 0.7, r()), curl: lerp(-0.6, -0.25, r()), kind: 0 };
+  twistedTrunk(g, trunk, { strands: 2, turns: 0.7, segs: 10, sides: 6, r: (s) => H * lerp(0.045, 0.02, s), col: pal.bark, col2: pal.bark2, acc: pal.acc });
+  const nP = 4 + Math.floor(r() * 3);
+  for (let k = 0; k < nP; k++) {
+    const st = lerp(0.55, 1.0, k / (nP - 1));
+    const [bx, by, bz] = chainPoint(trunk, st);
+    // flat pads swept downwind (the trunk's lean)
+    const ch = { base: [bx, by, bz], L: H * lerp(0.25, 0.42, r()) * (1.2 - st * 0.5), az: lean + (r() - 0.5) * 1.6, tilt: lerp(1.35, 1.6, r()), curl: lerp(-0.25, 0.1, r()), kind: 0 };
+    g.tube(ch, { segs: 4, sides: 4, flex: 0.1, r: (s) => H * lerp(0.014, 0.005, s), col: pal.bark, acc: pal.acc });
+    const [ex, ey, ez] = chainPoint(ch, 0.85);
+    pad(g, [ex, ey + H * 0.02, ez], H * lerp(0.14, 0.2, r()), 5, { r, size: H * 0.2, slot: SLOT.needles, col: pal.leaf, acc: pal.acc, flat: 0.25, flex: 0.25 });
+  }
+  return { geo: g.build(), height: H, radius: H * 0.5, shadow: true, fade: [1200, 1700] };
+};
+
+/** Cycad: a stout scaly trunk crowned with a rosette of stiff fronds. */
+SPECIES.cycad = (seed, H, pal = { bark: C('#5a5040').multiplyScalar(0.8), bark2: C('#7a6e56').multiplyScalar(0.8), leaf: C('#3f6e3a').multiplyScalar(0.8), acc: C('#d2b86a') }) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const trunk = { base: [0, -0.2, 0], L: H * 0.45, az: r() * TAU, tilt: lerp(0, 0.2, r()), curl: 0, kind: 0 };
+  g.tube(trunk, { segs: 8, sides: 8, flex: 0, r: (s) => H * lerp(0.09, 0.07, s) * (1 + 0.1 * Math.max(0, Math.sin(s * 40))), col: (s) => pal.bark.clone().lerp(pal.bark2, 0.5 + 0.5 * Math.sin(s * 40)), acc: pal.acc });
+  const [tx, ty, tz] = chainPoint(trunk, 1);
+  const n = 14 + Math.floor(r() * 6);
+  for (let k = 0; k < n; k++) {
+    const ch = { base: [tx, ty, tz], L: H * lerp(0.5, 0.65, r()), az: (k / n) * TAU + r() * 0.2, tilt: lerp(0.5, 1.1, r()), curl: lerp(0.3, 0.7, r()), kind: 7 };
+    g.card(ch, { segs: 5, slot: SLOT.palm, w: (s) => H * 0.16 * Math.sin(Math.PI * Math.min(1, s * 0.9 + 0.1)), col: pal.leaf, acc: pal.acc, flex: 0.2 });
+  }
+  return { geo: g.build(), height: H, radius: H * 0.6, shadow: true, fade: [900, 1300] };
+};
+
+/** A giant coil-trunk tree of the Coil Forest (many strands, crown in layered pads). */
+SPECIES.giantCoilTree = (seed, H) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const bark = C('#56483e').multiplyScalar(0.8), bark2 = C('#7c6a58').multiplyScalar(0.8), moss = C('#56703e').multiplyScalar(0.75);
+  const leaf = [C('#3f7a5a'), C('#4f8a46'), C('#2f6a62')].map((c) => c.multiplyScalar(0.72));
+  const trunk = { base: [0, -3, 0], L: H * 0.7, az: r() * TAU, tilt: lerp(0.02, 0.1, r()), curl: lerp(-0.1, 0.1, r()), kind: 0 };
+  twistedTrunk(g, trunk, { strands: 5, turns: lerp(1.2, 2.0, r()), segs: 22, sides: 8, r: (s) => H * lerp(0.075, 0.035, Math.pow(s, 0.8)), col: bark, col2: bark2, acc: moss });
+  for (let k = 0; k < 8; k++) {
+    const az = (k / 8) * TAU + r() * 0.3;
+    const ch = { base: [0, H * 0.03, 0], L: H * lerp(0.15, 0.26, r()), az: az + 0.4, tilt: lerp(1.6, 1.95, r()), curl: -0.4, kind: 0 };
+    g.tube(ch, { segs: 8, sides: 6, flex: 0, r: (s) => H * lerp(0.035, 0.006, s), col: bark, acc: moss });
+  }
+  // layered crown pads on long limbs (the herd weaves under and between them)
+  const layers = 4;
+  for (let l = 0; l < layers; l++) {
+    const st = lerp(0.55, 1.0, l / (layers - 1));
+    const nL = l === layers - 1 ? 3 : 5;
+    for (let k = 0; k < nL; k++) {
+      const [bx, by, bz] = chainPoint(trunk, st);
+      const ch = { base: [bx, by, bz], L: H * lerp(0.26, 0.38, r()) * (1.15 - st * 0.4), az: k * (TAU / nL) + l * 1.1 + r() * 0.4, tilt: lerp(1.15, 1.45, r()), curl: lerp(-0.7, -0.35, r()), kind: 0 };
+      g.tube(ch, { segs: 8, sides: 6, flex: 0.03, r: (s) => H * lerp(0.022, 0.006, s), col: bark, acc: moss });
+      const [ex, ey, ez] = chainPoint(ch, 1);
+      pad(g, [ex, ey + H * 0.02, ez], H * lerp(0.13, 0.19, r()), 13, { r, size: H * 0.11, slot: [SLOT.leafB, SLOT.leafA, SLOT.leafC], col: leaf, acc: C('#c9d47a'), flat: 0.42, flex: 0.18 });
+      const [mx, my, mz] = chainPoint(ch, 0.55);
+      pad(g, [mx, my + H * 0.015, mz], H * 0.08, 4, { r, size: H * 0.075, slot: SLOT.leafB, col: leaf, acc: C('#c9d47a'), flat: 0.5, flex: 0.18 });
+      for (let q = 0; q < 2; q++) {
+        const [vx, vy, vz] = chainPoint(ch, lerp(0.3, 0.9, r()));
+        g.card({ base: [vx, vy, vz], L: H * lerp(0.06, 0.16, r()), az: ch.az + Math.PI / 2, tilt: Math.PI - 0.05, curl: 0, kind: 8 }, { segs: 8, slot: SLOT.vine, w: () => H * 0.02, col: FLORA_PAL.vine.leaf, acc: FLORA_PAL.vine.acc, flex: 1 });
+      }
+    }
+  }
+  const [tx, ty, tz] = chainPoint(trunk, 1);
+  pad(g, [tx, ty + H * 0.04, tz], H * 0.16, 14, { r, size: H * 0.12, slot: [SLOT.leafB, SLOT.leafA], col: leaf, acc: C('#c9d47a'), flat: 0.5, flex: 0.15 });
+  return { geo: g.build(), height: H, radius: H * 0.45, shadow: true, fade: [3000, 4200] };
+};
+
+/** The Mother Tree: a colossal tree of many strands spiralling up from roots that grip the island. */
+SPECIES.motherTree = (seed = 5, H = 210) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const bark = C('#5d4c44').multiplyScalar(0.8), bark2 = C('#8a7766').multiplyScalar(0.8), moss = C('#58703f').multiplyScalar(0.75);
+  const trunk = { base: [0, -4, 0], L: H * 0.6, az: 0.4, tilt: 0.04, curl: 0.05, kind: 0 };
+  twistedTrunk(g, trunk, { strands: 7, turns: 1.6, segs: 24, sides: 9, r: (s) => H * lerp(0.13, 0.06, Math.pow(s, 0.7)), col: bark, col2: bark2, acc: moss });
+  // buttress roots spiralling out over the island
+  for (let k = 0; k < 11; k++) {
+    const az = (k / 11) * TAU + r() * 0.3;
+    const ch = { base: [Math.cos(az) * H * 0.05, H * 0.05, Math.sin(az) * H * 0.05], L: H * lerp(0.28, 0.45, r()), az: az + 0.5, tilt: lerp(1.55, 1.85, r()), curl: lerp(-0.35, -0.15, r()), kind: 0 };
+    g.tube(ch, { segs: 10, sides: 7, flex: 0, r: (s) => H * lerp(0.05, 0.008, Math.pow(s, 0.8)), col: bark, acc: moss });
+  }
+  // great limbs spiralling up, canopy of blossom and leaf clumps, hanging vines
+  const nB = 16;
+  for (let k = 0; k < nB; k++) {
+    const st = lerp(0.42, 1.0, k / (nB - 1));
+    const [bx, by, bz] = chainPoint(trunk, st);
+    const az = k * 2.39996;
+    const ch = { base: [bx, by, bz], L: H * lerp(0.32, 0.5, r()) * (1.2 - st * 0.5), az, tilt: lerp(1.0, 1.4, r()), curl: lerp(-0.8, -0.35, r()), kind: 0 };
+    g.tube(ch, { segs: 10, sides: 7, flex: 0.04, r: (s) => H * lerp(0.03, 0.006, s), col: bark, acc: moss });
+    const mcols = [C('#e8b4c2').multiplyScalar(0.8), C('#f0c9b0').multiplyScalar(0.8), C('#5f8f4a').multiplyScalar(0.75), C('#e3a6bd').multiplyScalar(0.78)];
+    for (const st2 of [0.55, 1.0]) {
+      const [ex, ey, ez] = chainPoint(ch, st2);
+      pad(g, [ex, ey + H * 0.02, ez], H * (st2 > 0.9 ? 0.13 : 0.08), st2 > 0.9 ? 12 : 6, { r, size: H * (st2 > 0.9 ? 0.1 : 0.08), slot: [SLOT.blossom, SLOT.blossom, SLOT.leafA, SLOT.leafC], col: mcols, acc: C('#fff3e8'), flat: 0.45, flex: 0.22 });
+    }
+    for (let q = 0; q < 3; q++) {
+      const [vx, vy, vz] = chainPoint(ch, lerp(0.3, 0.9, r()));
+      const vch = { base: [vx, vy, vz], L: H * lerp(0.08, 0.2, r()), az: az + Math.PI / 2, tilt: Math.PI - 0.05, curl: 0, kind: 8 };
+      g.card(vch, { segs: 8, slot: SLOT.vine, w: () => H * 0.025, col: FLORA_PAL.vine.leaf, acc: FLORA_PAL.vine.acc, flex: 1 });
+    }
+  }
+  const top = chainPoint(trunk, 1);
+  pad(g, [top[0], top[1] + H * 0.05, top[2]], H * 0.2, 22, { r, size: H * 0.13, slot: [SLOT.blossom, SLOT.blossom, SLOT.leafA], col: [C('#efc2cf').multiplyScalar(0.8), C('#f3d2bd').multiplyScalar(0.8), C('#5f8f4a').multiplyScalar(0.75)], acc: C('#fff7ee'), flat: 0.5, flex: 0.2 });
+  return { geo: g.build(), height: H, radius: H * 0.6, shadow: true, fade: [6000, 8000] };
+};
+
+/** Giant fiddleheads of the Coil Forest: tree-sized croziers. */
+SPECIES.giantFern = (seed, H, pal = FLORA_PAL.fernTeal) => {
+  const r = rng(seed);
+  const g = new FloraGeo();
+  const n = 3 + Math.floor(r() * 3);
+  for (let k = 0; k < n; k++) {
+    const az = (k / n) * TAU + r() * 0.8;
+    const L = H * lerp(0.75, 1.0, r());
+    const open = k === 0 ? false : r() < 0.4;
+    const ch = { base: [Math.cos(az) * H * 0.03, 0, Math.sin(az) * H * 0.03], L, az, tilt: lerp(0.05, 0.25, r()) + (open ? 0.3 : 0), curl: open ? lerp(0.3, 0.5, r()) : lerp(0.9, 1.2, r()), kind: 1 };
+    g.tube(ch, { segs: 30, sides: 10, warp: 1.7, flex: 0.15, r: (s) => L * lerp(0.028, 0.006, Math.pow(s, 0.8)), col: (s) => pal.stem.clone().lerp(pal.leaf, s * 0.6), acc: pal.acc });
+    g.card(ch, { segs: 28, warp: 1.7, s0: 0.25, s1: 1, slot: SLOT.frond, w: (s) => L * 0.34 * Math.pow(Math.sin(Math.PI * clamp((s - 0.22) / 0.8, 0, 1)), 0.7), col: pal.leaf, acc: pal.acc, flex: 0.2 });
+  }
+  return { geo: g.build(), height: H, radius: H * 0.5, shadow: true, fade: [3000, 4200] };
+};
+
+/**
+ * Far painted impostor of a tree: a single canopy billboard on an invisible stalk, faded in where
+ * the 3D tree fades out. kind: coil | pine | palm | blossom | giant.
+ */
+SPECIES.impostor = (kind, H) => {
+  const g = new FloraGeo();
+  const look = {
+    coil: [SLOT.leafA, C('#4f7a44').multiplyScalar(0.7), 0.62, 0.62],
+    pine: [SLOT.needles, C('#3a5a40').multiplyScalar(0.7), 0.75, 0.55],
+    palm: [SLOT.palm, C('#5a8a3a').multiplyScalar(0.7), 0.92, 0.6],
+    blossom: [SLOT.blossom, C('#e0a8b8').multiplyScalar(0.75), 0.68, 0.7],
+    giant: [SLOT.leafB, C('#3f6f58').multiplyScalar(0.7), 0.78, 0.55],
+  }[kind] || [SLOT.leafA, C('#4f7a44').multiplyScalar(0.7), 0.62, 0.62];
+  const ch = { base: [0, 0, 0], L: H * look[2], az: 0, tilt: 0, curl: 0, kind: 0 };
+  g.bill(ch, { s: 1, size: H * look[3], slot: look[0], col: look[1], acc: look[1].clone().multiplyScalar(1.4), flex: 0 });
+  return { geo: g.build(), height: H, radius: H * 0.4, shadow: false, fade: [5200, 6800, 1450, 1750] };
+};
+
+
+// ---- placement --------------------------------------------------------------------------------------
+/**
+ * Accent trees on an island's meadow crests (a few per island; the Coil Forest grows giant
+ * fiddleheads). Returns a FloraSet with long fade distances.
+ */
+export function populateTrees(S, kind, seed, opts = {}) {
+  const r = rng(seed * 7 + 11);
+  const set = new FloraSet('trees');
+  const meadow = (ny, y, gr) => (gr > 0.5 && ny > 0.8 && y > 6 ? gr : 0);
+  const A = S.weights(meadow);
+  const n = Math.round(clamp(A / (opts.per ?? 2500), 0, opts.max ?? 6));
+  const grid = new Map();
+  const spots = thin(S.sample(n * 3, r), opts.spacing ?? 22, grid).slice(0, n);
+  for (const sm of spots) {
+    const p = sm.p.clone().setY(sm.p.y - 0.3);
+    if (kind === 'giantFern') {
+      const v = Math.floor(r() * 3);
+      set.add(`gfern-${v}`, () => SPECIES.giantFern(9500 + v, 80), p, lerp(0.6, 1.25, r()), r() * TAU, inst(r));
+    } else if (kind === 'pine') {
+      const v = Math.floor(r() * 3);
+      set.add(`pine-${v}`, () => SPECIES.pine(9900 + v, 16), p, lerp(0.6, 1.3, r()), r() * TAU, inst(r));
+    } else if (kind === 'blossom') {
+      const v = Math.floor(r() * 3);
+      set.add(`blossom-${v}`, () => SPECIES.blossomTree(9600 + v, 18), p, lerp(0.7, 1.3, r()), r() * TAU, inst(r));
+    } else {
+      const v = Math.floor(r() * 4);
+      const pal = TREE_PALS[v % TREE_PALS.length];
+      set.add(`coil-${v}`, () => SPECIES.coilTree(9700 + v, 22, pal), p, lerp(0.6, 1.4, r()), r() * TAU, inst(r));
+    }
+  }
+  return set;
+}
+
+const TREE_PALS = [
+  { bark: C('#5a4a3e').multiplyScalar(0.8), bark2: C('#7a6a58').multiplyScalar(0.8), leaf: C('#4f7f3c').multiplyScalar(0.75), acc: C('#c9b45a'), slot: SLOT.leafA },
+  { bark: C('#4a4642').multiplyScalar(0.8), bark2: C('#6e665c').multiplyScalar(0.8), leaf: C('#3e7a6a').multiplyScalar(0.75), acc: C('#a8d0a0'), slot: SLOT.leafB },
+  { bark: C('#5a463e').multiplyScalar(0.8), bark2: C('#86705a').multiplyScalar(0.8), leaf: C('#8a7a3a').multiplyScalar(0.75), acc: C('#e0b060'), slot: SLOT.leafC },
+  { bark: C('#4e4048').multiplyScalar(0.8), bark2: C('#6e5a66').multiplyScalar(0.8), leaf: C('#6a5a8a').multiplyScalar(0.75), acc: C('#e6c8ff'), slot: SLOT.leafA },
+];
+
+export { SPECIES };

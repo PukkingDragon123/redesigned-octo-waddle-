@@ -9,6 +9,14 @@ import { placeholderSea } from '../world/Water.js';
 
 export default async function (game) {
   const p = game.params;
+  // &ocean uses the real ocean (world/Ocean.js) when it exists; otherwise a placeholder sea
+  if (p.has('ocean') && !game.ocean) {
+    try {
+      const { Ocean } = await import('../world/Ocean.js');
+      game.ocean = new Ocean(game);
+      if (game.cloudSea) game.cloudSea.enabled = false;
+    } catch (e) { console.warn('[vursok] ocean unavailable', e); }
+  }
   placeholderSea(game);
   const path = new MigrationPath();
   const world = new WorldBuilder(game, path);
@@ -17,6 +25,7 @@ export default async function (game) {
   world.sliceMs = 1e9; // build in one go in the dev scene
   if (only) await world.buildChapter(only);
   else await world.build();
+  console.log('[vursok] timing', JSON.stringify(Object.fromEntries(Object.entries(world.timing || {}).map(([k, v]) => [k, Math.round(v)]))));
   console.log('[vursok] world built in', (performance.now() - t0).toFixed(0), 'ms; islands', world.islands.length, 'puffs', game.clouds?.count, 'falls', world.waterfalls.length, 'fish', world.spawns.fish.length, 'reptiles', world.spawns.reptiles.length, 'perches', world.perches.length);
   let s = +(p.get('s') ?? 60);
   const ch = path.chapterAt(s);

@@ -37,6 +37,8 @@ uniform float uUnderwater;
 uniform vec3 uWaterTint;
 uniform vec3 uWaterAbsorb;
 uniform vec4 uWaterParams;
+uniform vec4 uCloudShade[16];
+uniform vec2 uCloudShadeK;
 `;
 
 export const NOISE = /* glsl */ `
@@ -106,21 +108,45 @@ const vec2 POISSON[12] = vec2[](
   vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
   vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598)
 );
+// Soft shade of the cumulus overhead: each tower's footprint, cast along the sun from its base.
+float cloudShade(vec3 P) {
+  if (uCloudShadeK.x <= 0.0) return 1.0;
+  vec2 sxz = uSunDir.xz / max(uSunDir.y, 0.12);
+  float lit = 1.0;
+  for (int i = 0; i < 16; i++) {
+    if (float(i) >= uCloudShadeK.y) break;
+    vec4 c = uCloudShade[i];
+    vec2 q = P.xz + sxz * (c.w - P.y) - c.xy;
+    float d = length(q) / c.z;
+    lit *= 1.0 - smoothstep(1.0, 0.45, d) * 0.85;
+  }
+  return mix(1.0, lit, uCloudShadeK.x);
+}
 float sampleShadow(vec3 P, vec3 N) {
-  if (uShadowParams.w <= 0.0) return 1.0;
+  float cs = cloudShade(P);
+  if (uShadowParams.w <= 0.0) return cs;
   vec3 Pb = P + N * uShadowParams.z;
   vec4 sc = uShadowMatrix * vec4(Pb, 1.0);
   vec3 uvz = sc.xyz;
   vec2 e = abs(uvz.xy - 0.5) * 2.0;
   float edge = max(e.x, e.y);
-  if (edge > 1.0 || uvz.z > 1.0 || uvz.z < 0.0) return 1.0;
-  float z = uvz.z - uShadowParams.y;
-  float r = uShadowParams.x * 1.8;
+  if (edge > 1.0 || uvz.z > 1.0 || uvz.z < 0.0) return cs;
+  // Soft, wide penumbra (the painted look): a Poisson disc rotated by a world-anchored hash, so
+  // the soft edge never crawls as the camera moves; the bias grows with the kernel.
+  float r = uShadowParams.x * 3.0;
+  float z = uvz.z - uShadowParams.y * 1.35;
+  vec3 hp = fract(floor(P * 23.0) * vec3(0.1031, 0.1030, 0.0973));
+  hp += dot(hp, hp.yzx + 33.33);
+  float ang = fract((hp.x + hp.y) * hp.z) * 6.2831853;
+  float ca = cos(ang), sa = sin(ang);
+  mat2 rot = mat2(ca, sa, -sa, ca);
   float s = 0.0;
-  for (int i = 0; i < 12; i++) s += texture(uShadowMap, vec3(uvz.xy + POISSON[i] * r, z));
+  for (int i = 0; i < 12; i++) s += texture(uShadowMap, vec3(uvz.xy + rot * POISSON[i] * r, z));
   s *= (1.0 / 12.0);
+  // shape the falloff: a soft but present core, like a brushed shadow edge
+  s = smoothstep(0.0, 1.0, s);
   float fade = smoothstep(0.82, 1.0, edge);
-  return mix(mix(1.0, s, uShadowParams.w), 1.0, fade);
+  return mix(mix(1.0, s, uShadowParams.w), 1.0, fade) * cs;
 }
 #endif
 `;
@@ -159,6 +185,9 @@ vec3 stylizedLight(Surface s) {
   float NdL = dot(s.N, uSunDir);
   float h = NdL * 0.5 + 0.5;
   float ramp = smoothstep(0.5 - s.wrap, 0.5 + s.wrap * 0.7, h);
+  // soften the cel ramp toward a wrapped falloff: light turns the form gently, like paint
+  float soft = smoothstep(0.5 - s.wrap * 1.9, 0.5 + s.wrap * 1.5, h);
+  ramp = mix(ramp, soft, 0.35);
   float lit = ramp * s.shadow;
   vec3 hemi = hemiAmbient(s.N);
   vec3 ambient = hemi * s.ao;
@@ -231,29 +260,31 @@ float waterCaustics(vec3 P, float depth) {
   // the patch of surface that focused this light: walk back up the refracted sun ray
   vec2 S = P.xz + sr.xz * (depth / min(sr.y, -0.2));
   vec2 q = S * uWaterParams.y;
-  // gentle domain warp so the filaments curve like real caustics
-  q += 0.35 * vec2(sin(q.y * 0.9 + uTime * 0.45), sin(q.x * 0.8 - uTime * 0.38));
-  float t = uTime * 0.85;
-  float a = wcCells(q, t);
-  float b = wcCells(q * 1.37 + vec2(5.2, 1.3), t * 1.21 + 1.7);
-  // filaments sharpen near the focal depth and spread deeper down
-  float w = 0.05 + 0.02 * depth;
-  float c = exp(-a * a / (w * w)) + exp(-b * b / (w * w * 1.3));
-  c = c * c * 0.55 + c * 0.25;
-  return c * smoothstep(0.15, 1.6, depth) * exp(-depth * 0.045);
+  float t = uTime;
+  // two crossing sine fields bend the filaments so they curve and wobble like real caustics
+  vec2 wq = q + 0.42 * vec2(sin(q.y * 1.7 + t * 0.7) + sin((q.x + q.y) * 0.61 - t * 0.31),
+                            sin(q.x * 1.5 - t * 0.6) + sin((q.x - q.y) * 0.67 + t * 0.4));
+  float a = wcCells(wq, t * 0.9);
+  float b = wcCells(wq * 0.71 + vec2(3.7 + t * 0.05, 8.1 - t * 0.04), t * 1.13 + 2.0);
+  // filaments are sharp near the surface and blur with depth
+  float w = 0.055 + 0.02 * depth;
+  float la = exp(-a * a / (w * w));
+  float lb = exp(-b * b / (w * w * 1.6));
+  return max(la, lb) * 0.85 + la * lb * 0.9;
 }
 /** Light reaching a submerged surface: depth attenuation, blue-green tint and caustics. */
 vec3 waterSubmerge(vec3 col, vec3 P) {
   float d = uSeaLevel - P.y;
-  // waves wet a band around the mean level; the band widens with the swell
-  float band = max(0.25, uWaterParams.w);
-  float w = smoothstep(-band * 0.6, band, d);
+  // a short blend across the mean level (whatever skims the waves above it stays dry)
+  float w = smoothstep(-0.1, 0.45, d);
   if (w <= 0.0) return col;
   float dd = max(d, 0.0);
   vec3 Td = exp(-uWaterAbsorb * (dd * 1.15 + 0.4));
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
-  float cs = uWaterParams.x > 0.0 ? waterCaustics(P, dd) * uWaterParams.x * sunUp : 0.0;
-  vec3 lit = col * Td * (1.0 + cs * 1.6);
+  float k = uWaterParams.x * sunUp * smoothstep(0.1, 1.4, dd) * exp(-dd * 0.05);
+  // focusing moves light around rather than adding it: dim between the filaments
+  float cs = k > 0.002 ? (waterCaustics(P, dd) * 1.5 - 0.32) * k : 0.0;
+  vec3 lit = col * Td * (1.0 + cs);
   return mix(col, lit, w);
 }
 /** In-scattered light of the water column toward the viewer along rd, at a given depth. */
@@ -425,7 +456,7 @@ vec3 seaFarColor(vec3 rd) {
   vec3 refl = skyEnv(normalize(R), seaEnvLod(s2) + 1.0);
   vec3 col = refl * F + uSeaBody * (1.0 - F);
   vec3 N = vec3(0.0, 1.0, 0.0);
-  col += seaGlitter(N, V, uSunDir, s2 + 1e-4, uSunColor) * 0.9;
+  col += seaGlitter(N, V, uSunDir, s2 + 1e-4, uSunColor) * 0.9 * (1.0 - uStorm * 0.85);
   col += seaGlitter(N, V, uMoonDir, s2 + 1e-4, uMoonColor * 0.35) * uNight;
   vec3 foamCol = uSunColor * max(uSunDir.y, 0.0) * 0.75 + uSkyAmbient * 0.8;
   return mix(col, foamCol, uSeaFar.y * 0.5);

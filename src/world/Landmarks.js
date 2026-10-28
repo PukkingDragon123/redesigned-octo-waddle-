@@ -82,8 +82,105 @@ export function buildSpiralArch({ center, span, along, halfSpan = 150, apexY = 1
   return { mesh: m, colliders, feet, tops, unders, apex, points: pts };
 }
 
-/** Transitional alias for the pre-Vur Sok builder signature. */
-export function buildArch(o) {
-  const a = buildSpiralArch({ center: o.center, span: o.span, along: o.along, seed: o.seed ?? 7 });
-  return { mesh: a.mesh, colliders: a.colliders, tops: a.tops, unders: a.unders, feet: a.feet.map((f) => f.pos) };
+
+// ---- cooling basalt: hexagonal columns stepping down into the sea ---------------------------------
+import { BufferGeometry, BufferAttribute, InstancedMesh, Matrix4, Quaternion, Color } from 'three';
+
+let _hexGeo = null;
+/** Unit hexagonal prism (radius 1, height 1, base at y = 0) with a bevelled, worn top. */
+export function hexColumnGeometry() {
+  if (_hexGeo) return _hexGeo;
+  const pos = [], nor = [], col = [], mat = [], ext = [], idx = [];
+  const c0 = new Color('#3c3d43').multiplyScalar(0.9), c1 = new Color('#55524f').multiplyScalar(0.9);
+  const ring = (y, r, ny, edge, c) => {
+    const base = pos.length / 3;
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * TAU;
+      pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
+      const l = Math.hypot(Math.cos(a), ny, Math.sin(a));
+      nor.push(Math.cos(a) / l * (1 - Math.abs(ny)), ny, Math.sin(a) / l * (1 - Math.abs(ny)));
+      col.push(c.r, c.g, c.b);
+      mat.push(0, 0, 1, 0);
+      ext.push(edge > 0 ? 1 : 0.8, y, edge);
+    }
+    return base;
+  };
+  // sides as separate rings so the faces stay flat-shaded
+  for (let k = 0; k < 6; k++) {
+    const a0 = (k / 6) * TAU, a1 = ((k + 1) / 6) * TAU, am = (a0 + a1) / 2;
+    const b = pos.length / 3;
+    for (const [a, y] of [[a0, 0], [a1, 0], [a0, 0.94], [a1, 0.94]]) {
+      pos.push(Math.cos(a), y, Math.sin(a));
+      nor.push(Math.cos(am), 0, Math.sin(am));
+      const c = y > 0.5 ? c1 : c0;
+      col.push(c.r, c.g, c.b);
+      mat.push(0, 0, 1, 0);
+      ext.push(y > 0.5 ? 1 : 0.7, y, y > 0.5 ? 0.6 : 0);
+    }
+    idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+  }
+  // bevel ring and top cap
+  const rb = ring(0.94, 1, 0.5, 1, c1);
+  const rt = ring(1.0, 0.86, 1, 0.7, c1);
+  for (let k = 0; k < 6; k++) {
+    const k1 = (k + 1) % 6;
+    idx.push(rb + k, rt + k, rb + k1, rb + k1, rt + k, rt + k1);
+  }
+  const cIdx = pos.length / 3;
+  pos.push(0, 1.0, 0); nor.push(0, 1, 0); col.push(c1.r, c1.g, c1.b); mat.push(0, 0, 1, 0); ext.push(1, 1, 0);
+  for (let k = 0; k < 6; k++) idx.push(cIdx, rt + ((k + 1) % 6), rt + k);
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3));
+  g.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
+  g.setAttribute('aMat', new BufferAttribute(new Float32Array(mat), 4));
+  g.setAttribute('aExt', new BufferAttribute(new Float32Array(ext), 3));
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  _hexGeo = g;
+  return g;
+}
+
+/**
+ * A causeway of basalt columns around `center` (world, y ignored): a hex grid whose heights rise
+ * in steps from the sea toward `up` (a horizontal direction), cracked into terraces.
+ * Returns an array of Matrix4 (column instances).
+ */
+export function causeway(center, up, n, seed, o = {}) {
+  const r = rng(seed);
+  const out = [];
+  const rad = o.radius ?? 0.85;
+  const sp = rad * 1.74;
+  const span = Math.max(2, Math.ceil(Math.sqrt(n) * 0.55));
+  const m = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3();
+  const side = new Vector3(-up.z, 0, up.x);
+  for (let i = -span; i <= span; i++) {
+    for (let j = -span; j <= span; j++) {
+      const x = (i + (j & 1) * 0.5) * sp, z = j * sp * 0.866;
+      const d = Math.hypot(x, z) / (span * sp);
+      if (d > 1 || r() < d * 0.35) continue;
+      const along = (x * up.x + z * up.z), across = (x * side.x + z * side.z);
+      // terraces stepping up landward, with ragged edges
+      let h = (o.base ?? -1.5) + Math.max(0, along / (span * sp) + 0.6) * (o.rise ?? 7) + noise.noise2(x * 0.15 + seed, z * 0.15) * 1.6;
+      h = Math.round(h / 0.9) * 0.9 + (r() - 0.5) * 0.35;
+      h *= 1 - 0.6 * Math.pow(d, 3);
+      const len = h + 6;
+      p.set(center.x + across * side.x + along * up.x, h - len, center.z + across * side.z + along * up.z);
+      q.setFromAxisAngle(new Vector3(r() - 0.5, 0, r() - 0.5).normalize(), (r() - 0.5) * 0.06);
+      s.set(rad * lerp(0.9, 1.05, r()), len, rad * lerp(0.9, 1.05, r()));
+      m.compose(p, q, s);
+      out.push(m.clone());
+    }
+  }
+  return out;
+}
+
+/** Build one instanced mesh for a list of column matrices. */
+export function basaltMesh(matrices) {
+  const mesh = new InstancedMesh(hexColumnGeometry(), terrainMaterial(), matrices.length);
+  for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i]);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  mesh.name = 'basalt-columns';
+  return mesh;
 }

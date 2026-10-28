@@ -24,9 +24,9 @@ const noise = new Noise(4242);
 // value structure comes from band contrast, not brightness.
 const hexes = (a, k = 1) => a.map((h) => new Color(h).multiplyScalar(k));
 export const ROCK = {
-  banded: { kind: 0, bands: hexes(['#b3a184', '#9a8b78', '#bfae90', '#8c8590', '#a88f74', '#94918a', '#b6a083', '#7f7a84', '#a39580'], 0.62) },
-  limestone: { kind: 0, bands: hexes(['#bdb4a2', '#a69c89', '#c6bca8', '#958c7c', '#b2a58e', '#a39b8f', '#8e877b'], 0.6) },
-  warm: { kind: 0, bands: hexes(['#b38f6e', '#9c7c66', '#c2a181', '#8c7568', '#ad8b70', '#968379', '#a57f62'], 0.62) },
+  banded: { kind: 0, bands: hexes(['#b3a184', '#9a8b78', '#bfae90', '#8c8590', '#a88f74', '#94918a', '#b6a083', '#7f7a84', '#a39580'], 0.7) },
+  limestone: { kind: 0, bands: hexes(['#bdb4a2', '#a69c89', '#c6bca8', '#958c7c', '#b2a58e', '#a39b8f', '#8e877b'], 0.68) },
+  warm: { kind: 0, bands: hexes(['#b38f6e', '#9c7c66', '#c2a181', '#8c7568', '#ad8b70', '#968379', '#a57f62'], 0.7) },
   basalt: { kind: 1, bands: hexes(['#4d5059', '#3f4149', '#58534f', '#474a50', '#5f5b58', '#3b3c40'], 0.85) },
   volcanic: { kind: 1, bands: hexes(['#2f2e32', '#39373b', '#262528', '#48413e', '#5b4038', '#333034'], 0.9) },
 };
@@ -46,8 +46,10 @@ export function rockPainter(style) {
   const volcanic = style.rock === 'volcanic';
   const seed = style.seed ?? 1;
   return (P, N, s, ao, tag, out) => {
-    const k = Math.floor(s / bandH);
-    const f = s / bandH - k;
+    // beds of uneven thickness: the strata coordinate is warped by slow 1D noise
+    const sw = s + bandH * 1.1 * noise.noise2(s / 23 + seed * 0.13, 7.7) + bandH * 0.5 * noise.noise2(s / 7.3, seed * 0.29);
+    const k = Math.floor(sw / bandH);
+    const f = sw / bandH - k;
     const i0 = Math.floor(hash(k * 1.7 + seed) * bands.length);
     const i1 = Math.floor(hash((k + 1) * 1.7 + seed) * bands.length);
     _c.copy(bands[i0]).lerp(bands[i1], smoothstep(0.75, 1.0, f) * 0.6);
@@ -292,7 +294,7 @@ export function coilShape(o) {
     const tread = tipH + (Hin - tipH) * Math.pow(1 - t0, o.fall ?? 1.15);
     const next = tipH + (Hin - tipH) * Math.pow(1 - Math.min(1, (k + 1) / nSteps), o.fall ?? 1.15);
     const stepped = lerp(tread, next, smoothstep(0.78, 0.97, f) * 0.9 + f * 0.1);
-    const base = lerp(smooth, stepped, o.stepMix ?? 0.75);
+    const base = lerp(smooth, stepped, o.stepMix ?? 0.9);
     return base + noise.noise2(t * 7 + seed, 1.3) * Math.max(0, base) * 0.05;
   };
   const halfW = (t) => {
@@ -320,6 +322,10 @@ export function coilShape(o) {
     const i = Math.floor(x), f = x - i;
     const a0 = knots[((i % 400) + 400) % 400], a1 = knots[(((i + 1) % 400) + 400) % 400];
     return lerp(a0, a1, f);
+  };
+  const gully = (sArc, side) => {
+    const n = noise.noise2(sArc / 16 + side * 13.7, seed * 0.37) * 0.7 + noise.noise2(sArc / 5.5, side * 7 + seed) * 0.3;
+    return smoothstep(0.32, 0.62, n);
   };
   const sideW = (y, top, w) => {
     const u = clamp(y / Math.max(top, 1), 0, 1);
@@ -354,7 +360,7 @@ export function coilShape(o) {
       const top = topAt(t);
       const w = halfW(t);
       const sArc = t * arcLen;
-      const crownH = Math.max(1.0, w * 0.1);
+      const crownH = Math.max(1.4, w * 0.18);
       let q = 0;
       const flank = (k, side) => {
         let y = Ys[k];
@@ -364,6 +370,12 @@ export function coilShape(o) {
         const bed = bedK(y);
         let a = sideW(y, top, w) * bed.v * (1 + 0.06 * facet(sArc, bed.k, side) * smoothstep(-2, 3, y));
         a *= 1 + 0.025 * noise.noise3(sArc / 9 + seed, y / 7, side * 3);
+        // the sheltered inner flank (channel side) slopes back instead of standing as a wall
+        const u = clamp(y / Math.max(top, 1), 0, 1);
+        if (side === 0) a *= lerp(1.05, o.innerTop ?? 0.62, smoothstep(0.15, 1.0, u));
+        // gullies: runoff cuts notches into the crest edge and dark clefts down the face
+        const g = gully(sArc, side);
+        a *= 1 - (0.1 + 0.12 * u) * g * smoothstep(2, 8, y);
         return [a, y];
       };
       for (let k = 0; k < nS; k++) { const [a, y] = flank(k, 0); prof[q++] = -a; prof[q++] = y; }
@@ -668,7 +680,7 @@ export function buildIsland(spec) {
   let geo1 = null;
   if (spec.lod !== false) {
     const b1 = shape.build((spec.detail ?? 1) * 0.42);
-    geo1 = finishGeometry(b1.mesh, paint);
+    geo1 = finishGeometry(b1.mesh, paint, { curvature: false });
   }
   const mat = terrainMaterial();
   const mesh = new Mesh(geo0, mat);
@@ -679,3 +691,78 @@ export function buildIsland(spec) {
 }
 
 export { CAP, LEDGE, VOLCANIC, BASALT };
+
+// ---- scree: fallen boulders at the foot of the cliffs ------------------------------------------
+import { IcosahedronGeometry, InstancedMesh, Matrix4, Quaternion } from 'three';
+
+const _boulders = new Map();
+/** A rough boulder (local radius ~1), painted like the given rock style, with worn edges. */
+export function boulderGeometry(rock = 'banded', variant = 0) {
+  const key = rock + ':' + variant;
+  if (_boulders.has(key)) return _boulders.get(key);
+  const ico = new IcosahedronGeometry(1, 2);
+  const p = ico.attributes.position;
+  const mesh = new RockMesh();
+  const map = new Map();
+  const ids = [];
+  const v = new Vector3();
+  const seed = variant * 3.7 + 1;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const k = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+    let id = map.get(k);
+    if (id === undefined) {
+      const d = v.clone().normalize();
+      // blocky: a few big planar facets plus some noise
+      let r = 1 + 0.18 * noise.noise3(d.x * 1.4 + seed, d.y * 1.4, d.z * 1.4) + 0.07 * noise.noise3(d.x * 4 + seed, d.y * 4, d.z * 4);
+      r = Math.min(r, 0.9 / Math.max(0.35, Math.abs(d.x * 0.8 + d.z * 0.6)), 0.95 / Math.max(0.35, Math.abs(d.y)));
+      const y = d.y * r * 0.72;
+      id = mesh.add(d.x * r, y, d.z * r, y * 3, 1, 0);
+      map.set(k, id);
+    }
+    ids.push(id);
+  }
+  for (let i = 0; i < ids.length; i += 3) mesh.tri(ids[i], ids[i + 2], ids[i + 1]);
+  ico.dispose();
+  const paint = rockPainter({ rock, seed: variant + 5, meadow: 0.6, bandH: 1.35 });
+  const geo = finishGeometry(mesh, (P, N, s, ao, tag, out) => {
+    paint(P, N, s, ao, tag, out);
+    out.grass = Math.max(0, N.y - 0.7) * 1.2; // mossy tops
+    out.sand = 0;
+  });
+  _boulders.set(key, geo);
+  return geo;
+}
+
+/**
+ * Scree around an island's foot: boulders scattered where the rock meets the shore, half sunk.
+ * groundAt(x, z) -> y (world). Returns an InstancedMesh positioned in world space, or null.
+ */
+export function buildScree(rec, groundAt, n = 60) {
+  const sh = rec.shape;
+  const r = rng(rec.seed * 19 + 3);
+  const mats = [];
+  const m = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3(), ax = new Vector3();
+  for (let i = 0; i < n * 8 && mats.length < n; i++) {
+    const a = r() * TAU, d = lerp(sh.R * 0.15, sh.R * 1.05, Math.sqrt(r()));
+    const lx = Math.cos(a) * d, lz = Math.sin(a) * d;
+    const f = sh.footprint(lx, lz);
+    if (f < -3 || f > 9) continue;
+    const y = groundAt(lx + rec.pos.x, lz + rec.pos.z);
+    if (y < -5 || y > 3.5) continue;
+    const sc = lerp(0.8, 4.5, Math.pow(r(), 2.2)) * (f < 2 ? 1.2 : 0.8);
+    p.set(lx + rec.pos.x, y - sc * 0.25, lz + rec.pos.z);
+    q.setFromAxisAngle(ax.set(r() - 0.5, r() - 0.5, r() - 0.5).normalize(), r() * TAU);
+    s.set(sc * lerp(0.8, 1.3, r()), sc * lerp(0.6, 1.0, r()), sc * lerp(0.8, 1.3, r()));
+    m.compose(p, q, s);
+    mats.push(m.clone());
+  }
+  if (!mats.length) return null;
+  const rock = rec.style?.rock || 'banded';
+  const mesh = new InstancedMesh(boulderGeometry(rock, rec.seed % 3), terrainMaterial(), mats.length);
+  for (let i = 0; i < mats.length; i++) mesh.setMatrixAt(i, mats[i]);
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  mesh.name = 'scree';
+  return mesh;
+}

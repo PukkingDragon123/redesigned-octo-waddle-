@@ -13,8 +13,8 @@ const noise = new Noise(9191);
 export const DEEP = -200;
 const CELL = 256;
 
-const SAND = new Color('#e9dcc0').multiplyScalar(0.72);
-const SAND_GOLD = new Color('#d8c08e').multiplyScalar(0.66);
+const SAND = new Color('#e3d4b6').multiplyScalar(0.58);
+const SAND_GOLD = new Color('#d2b888').multiplyScalar(0.55);
 const SAND_DEEP = new Color('#b9b39a').multiplyScalar(0.55);
 const SEAGRASS = new Color('#4f6b3c').multiplyScalar(0.55);
 const REEF_A = new Color('#b48270').multiplyScalar(0.6); // coralline pinks
@@ -117,7 +117,7 @@ export class Seabed {
       return phi < sp.phi0 ? 0 : sp.rho(phi);
     };
     const f = {
-      x, z, R: R + 120, kind: 'atoll', chapter: o.chapter, spiral: sp,
+      x, z, R: R + 260, kind: 'atoll', chapter: o.chapter, spiral: sp,
       height: (lx, lz) => {
         const { d, phi } = rim(lx, lz);
         const rho = Math.hypot(lx, lz);
@@ -132,16 +132,17 @@ export class Seabed {
         if (inLagoon) {
           floor = lagoon + noise.noise2(lx * 0.012 + seed, lz * 0.012) * 2.0;
           // patch reefs and coral heads rising toward the surface
-          floor += Math.max(0, noise.noise2(lx * 0.045, lz * 0.045 + seed) - 0.3) * 10;
+          const pr = noise.noise2(lx * 0.028, lz * 0.028 + seed) * 0.7 + noise.noise2(lx * 0.07 + seed, lz * 0.07) * 0.3;
+          floor += smoothstep(0.42, 0.85, pr) * 4.5;
         } else {
-          floor = lerp(-4, DEEP, Math.pow(smoothstep(w * 0.4, w * 3.4, d), 0.75));
+          floor = lerp(-4, DEEP, Math.pow(smoothstep(w * 0.4, w * 3.0, d), 0.7));
         }
         return smax(hRim, floor, 3);
       },
       paint: (lx, lz, h, out) => {
         const { d } = rim(lx, lz);
         const reef = Math.exp(-((d / (rimW * 0.9)) ** 2)) * smoothstep(-0.2, -3, h);
-        const patch = smoothstep(-5, -2, h) * smoothstep(0.2, 0.6, noise.noise2(lx * 0.045, lz * 0.045 + seed));
+        const patch = smoothstep(-5, -2.5, h) * smoothstep(0.45, 0.75, noise.noise2(lx * 0.028, lz * 0.028 + seed));
         paintLow(out, h, Math.max(reef, patch), 0, false, lx + x, lz + z);
       },
     };
@@ -216,56 +217,62 @@ export class Seabed {
         if (!built.has(k)) keys.add(k);
       }
     }
-    const pos = [], col = [], mat = [], ext = [], idx = [];
-    const out = { r: 0, g: 0, b: 0, sand: 1, kind: 0, grass: 0 };
     const n = Math.round(T / step);
+    const perTile = (n + 1) * (n + 1);
+    const tiles = [...keys];
+    // typed buffers sized for every candidate tile (trimmed at the end)
+    const pos = new Float32Array(tiles.length * perTile * 3), col = new Float32Array(tiles.length * perTile * 3);
+    const mat = new Float32Array(tiles.length * perTile * 4), ext = new Float32Array(tiles.length * perTile * 3);
+    const idxA = new Uint32Array(tiles.length * n * n * 6);
+    let nv = 0, ni = 0;
+    const out = { r: 0, g: 0, b: 0, sand: 1, kind: 0, grass: 0 };
     const smp = { h: 0, f: null };
-    const fs = [];
-    for (const k of keys) {
+    const hs = new Float32Array(perTile);
+    const fs = new Array(perTile);
+    for (const k of tiles) {
       const [ti, tj] = k.split(',').map(Number);
-      // skip tiles with nothing above the deep floor
-      const hs = new Float32Array((n + 1) * (n + 1));
-      fs.length = 0;
       let any = false;
       for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
-        const x = ti * T + i * step, z = tj * T + j * step;
-        this.sample(x, z, smp);
+        this.sample(ti * T + i * step, tj * T + j * step, smp);
         hs[j * (n + 1) + i] = smp.h;
-        fs.push(smp.f);
+        fs[j * (n + 1) + i] = smp.f;
         if (smp.h > -110) any = true;
       }
       built.add(k);
       if (slice) await slice();
       if (!any) continue;
-      const base = pos.length / 3;
+      const base = nv;
       for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
         const x = ti * T + i * step, z = tj * T + j * step;
-        const h = hs[j * (n + 1) + i];
-        pos.push(x, Math.max(h, -130), z);
-        const f = fs[j * (n + 1) + i];
+        const q = j * (n + 1) + i;
+        const h = hs[q];
+        pos[nv * 3] = x; pos[nv * 3 + 1] = Math.max(h, -130); pos[nv * 3 + 2] = z;
+        const f = fs[q];
         if (f) f.paint(x - f.x, z - f.z, h, out);
         else paintLow(out, h, 0, 0, false, x, z);
-        col.push(out.r, out.g, out.b);
-        mat.push(out.grass, out.sand, out.kind, 0);
-        ext.push(1, h, 0);
+        col[nv * 3] = out.r; col[nv * 3 + 1] = out.g; col[nv * 3 + 2] = out.b;
+        mat[nv * 4] = out.grass; mat[nv * 4 + 1] = out.sand; mat[nv * 4 + 2] = out.kind; mat[nv * 4 + 3] = 0;
+        ext[nv * 3] = 1; ext[nv * 3 + 1] = h; ext[nv * 3 + 2] = 0;
+        nv++;
       }
       for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
         const a = base + j * (n + 1) + i, b = a + 1, c = a + (n + 1), d = c + 1;
         const ha = hs[j * (n + 1) + i], hb = hs[j * (n + 1) + i + 1], hc = hs[(j + 1) * (n + 1) + i], hd = hs[(j + 1) * (n + 1) + i + 1];
         if (Math.max(ha, hb, hc, hd) < -115) continue;
-        idx.push(a, c, b, b, c, d);
+        idxA[ni++] = a; idxA[ni++] = c; idxA[ni++] = b; idxA[ni++] = b; idxA[ni++] = c; idxA[ni++] = d;
       }
     }
-    if (!idx.length) return [];
-    const P = new Float32Array(pos);
-    const I = P.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
+    const idx = idxA.subarray(0, ni);
+    if (!ni) return [];
+    const P = pos.slice(0, nv * 3);
+    const I = nv > 65535 ? idx.slice() : Uint16Array.from(idx);
     const N = computeNormals(P, I);
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(P, 3));
     geo.setAttribute('normal', new BufferAttribute(N, 3));
-    geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
-    geo.setAttribute('aMat', new BufferAttribute(new Float32Array(mat), 4));
-    geo.setAttribute('aExt', new BufferAttribute(new Float32Array(ext), 3));
+    geo.setAttribute('color', new BufferAttribute(col.slice(0, nv * 3), 3));
+    geo.setAttribute('aMat', new BufferAttribute(mat.slice(0, nv * 4), 4));
+    geo.setAttribute('aExt', new BufferAttribute(ext.slice(0, nv * 3), 3));
     geo.setIndex(new BufferAttribute(I, 1));
     geo.computeBoundingSphere();
     const mesh = new Mesh(geo, terrainMaterial());

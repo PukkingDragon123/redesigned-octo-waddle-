@@ -69,8 +69,8 @@ export const G = {
   uWaterTint: { value: new Color(0.012, 0.075, 0.1) },
   // extinction per metre (rgb): red goes first, blue-green travels furthest
   uWaterAbsorb: { value: new Vector3(0.3, 0.07, 0.045) },
-  // x caustic strength, y caustic scale (1/m), z night plankton glow, w unused
-  uWaterParams: { value: new Vector4(1, 0.35, 0, 0) },
+  // x caustic strength, y caustic scale (1/m), z night plankton glow, w wave band (m, ~2x rms height)
+  uWaterParams: { value: new Vector4(1, 0.55, 0, 0) },
   // resolved opaque colour of the frame (refraction through the sea surface); set by the ocean
   uSceneTex: { value: null },
   // equirect sky radiance (reflections, Snell's window); rendered each frame by the ocean
@@ -80,6 +80,16 @@ export const G = {
   uSeaScatter: { value: new Color(0.05, 0.4, 0.38) },
   // x: total slope variance of the waves (far roughness), y: mean foam cover, z: wave rms (m), w: shallow tint mix
   uSeaFar: { value: new Vector4(0.01, 0, 0.3, 0) },
+
+  // Shadows of the nearest cumulus towers (Clouds.js): xz centre, radius, cloud base height.
+  // sampleShadow() darkens everything under them, so their shade drifts over sea and islands.
+  uCloudShade: { value: Array.from({ length: 16 }, () => new Vector4(0, 0, 0, 0)) },
+  // x: strength 0..1, y: active count
+  uCloudShadeK: { value: new Vector2(0, 0) },
+  // The biggest cumulus as seen from the camera (Clouds.js), so the sea can reflect them:
+  // xyz direction, w angular radius (rad); count in uCloudBlobN
+  uCloudBlobs: { value: Array.from({ length: 12 }, () => new Vector4(0, 1, 0, 0)) },
+  uCloudBlobN: { value: 0 },
 };
 
 /** Convenience to merge the global uniform references into a material's uniforms. */

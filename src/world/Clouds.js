@@ -177,8 +177,10 @@ void main() {
   light = mix(light, light * light * (3.0 - 2.0 * light), 0.4);
   // backlit masses are thick and dim in the middle
   light *= 1.0 - vBacklit * 0.35 * (1.0 - vPeriph);
-  vec3 col = mix(uCloudShadow, uCloudLit, light);
-  col *= mix(0.92, 1.04, N.y * 0.5 + 0.5);
+  // shade: skylight fills the upper shadows, the darker sea below fills the base
+  vec3 shade = uCloudShadow * mix(0.72, 1.08, smoothstep(-0.6, 0.7, N.y));
+  vec3 col = mix(shade, uCloudLit, light);
+  col *= mix(0.9, 1.04, N.y * 0.5 + 0.5);
   col += uSkyAmbient * 0.04;
   col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.6;
   // silver lining only along the outer silhouette of the cloud
@@ -196,6 +198,8 @@ void main() {
   float front = vViewZ - z * vRadius * 0.9;
   float thick = max(vRadius * 0.6, 2.0);
   a *= clamp((sceneZ - front) / thick, 0.0, 1.0);
+  // sea fog melts into the sea instead of being cut by it
+  a *= smoothstep(uSeaLevel - 0.5, uSeaLevel + max(vRadius * 0.35, 1.5), vWorld.y);
   if (a < 0.003) discard;
   gl_FragColor = vec4(col * a, a);
 }
@@ -253,6 +257,8 @@ export class Clouds {
     this.playerInCloud = 0;
     this.maxDist = 7500;
     this.budget = 7000;
+    // how dark cloud shade is on the sea and land (0 off)
+    this.shadowStrength = 0.7;
     this._fwd = new Vector3();
   }
 
@@ -268,40 +274,71 @@ export class Clouds {
   }
 
   /**
-   * A cumulus: flat base, cauliflower dome. w = width, h = height (m).
-   * opts: { seed, opacity, moisture, dark, density }
+   * A cumulus: a flat base at the condensation level, a few rounded towers rising from it with
+   * cauliflower billows over their sunlit tops. w = width, h = height (m); center.y is the base.
+   * opts: { seed, opacity, moisture, dark, density, towers, maxPuffs, depth, sparse, minR }
    */
   cumulus(center, w, h, opts = {}) {
     const r = rng(opts.seed ?? 1);
     const start = this.count;
-    const n = Math.round(clamp((w * h) / (opts.sparse ? 900 : 420), 6, opts.maxPuffs ?? 140) * (opts.density ?? 1));
-    const ax = w * 0.5, az = w * 0.5 * (opts.depth ?? lerp(0.6, 1.0, r()));
+    const ax = w * 0.5, az = w * 0.5 * (opts.depth ?? lerp(0.55, 0.95, r()));
     const base = center.y;
-    const v = new Vector3();
     const cc = new Vector3(center.x, base + h * 0.4, center.z);
     const rad = Math.max(ax, az, h * 0.6);
-    for (let i = 0; i < n; i++) {
-      // sample inside a dome
-      let x, y, z, tries = 0;
-      for (;;) {
-        x = (r() * 2 - 1);
-        z = (r() * 2 - 1);
-        y = r();
-        const dome = 1 - (x * x + z * z);
-        if (dome > 0 && y * y < dome) break;
-        if (++tries > 30) { x = 0; z = 0; y = 0.3; break; }
-      }
-      const thick = Math.sqrt(Math.max(0, 1 - (x * x + z * z))) - y; // distance to dome surface
-      let pr = lerp(Math.min(ax, h) * 0.18, Math.min(ax, h) * 0.42, clamp(thick * 1.4, 0, 1)) * lerp(0.75, 1.2, r());
-      pr = Math.max(pr, opts.minR ?? 6);
-      const px = center.x + x * ax * 0.82;
-      const pz = center.z + z * az * 0.82;
-      let py = base + y * h * 0.82 + pr * 0.35;
-      py = Math.max(py, base + pr * 0.45);
-      v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
-      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * lerp(0.85, 1, r()), opts.moisture ?? 0, opts.dark ?? 0);
+    // towers: one main dome and a few shoulders, tallest near the middle
+    const nT = opts.towers ?? Math.max(1, Math.min(6, Math.round(1 + w / 140 + r() * 1.5)));
+    const towers = [];
+    let wsum = 0;
+    for (let i = 0; i < nT; i++) {
+      const main = i === 0;
+      const a = r() * Math.PI * 2, d = main ? r() * 0.15 : lerp(0.3, 0.75, Math.sqrt(r()));
+      const tx = center.x + Math.cos(a) * ax * d, tz = center.z + Math.sin(a) * az * d;
+      const tr = (main ? lerp(0.42, 0.55, r()) : lerp(0.24, 0.4, r())) * Math.min(ax, az) * 1.25;
+      const th = h * (main ? 1 : lerp(0.45, 0.8, r()) * (1 - d * 0.35));
+      const t = { x: tx, z: tz, rx: tr, ry: th * 0.6, rz: tr * lerp(0.85, 1.1, r()), cy: base + th * 0.42 };
+      t.wgt = t.rx * (t.ry + t.rx);
+      wsum += t.wgt;
+      towers.push(t);
     }
-    const cl = { center: cc.clone(), radius: rad * 1.3, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'cumulus' };
+    const n = Math.round(clamp((w * h) / (opts.sparse ? 520 : 300), 14, opts.maxPuffs ?? 240) * (opts.density ?? 1));
+    const v = new Vector3();
+    const minR = opts.minR ?? 5;
+    const add = (px, py, pz, pr, op) => {
+      v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
+      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * op, opts.moisture ?? 0, opts.dark ?? 0);
+    };
+    // a few big core puffs keep the body solid from any angle
+    for (const t of towers) add(t.x, Math.max(t.cy, base + t.rx * 0.5), t.z, Math.max(minR, Math.min(t.rx, t.ry) * 0.8), 0.9);
+    for (let i = 0; i < n; i++) {
+      // pick a tower by size, then a point on its upper shell
+      let k = r() * wsum, t = towers[0];
+      for (const tt of towers) { k -= tt.wgt; if (k <= 0) { t = tt; break; } }
+      const u = r() * 2 - 1, phi = r() * Math.PI * 2;
+      let dy = lerp(-0.35, 1, Math.sqrt((u + 1) * 0.5));
+      const ring = Math.sqrt(Math.max(0, 1 - dy * dy));
+      const shell = lerp(0.78, 1.0, r());
+      let px = t.x + Math.cos(phi) * ring * t.rx * shell;
+      let pz = t.z + Math.sin(phi) * ring * t.rz * shell;
+      let py = t.cy + dy * t.ry * shell;
+      // billows shrink toward the cauliflower tops and widen at the flat base
+      const top = smoothstep(0.1, 0.9, dy);
+      let pr = Math.min(t.rx, t.ry) * lerp(0.36, 0.2, top) * lerp(0.75, 1.2, r());
+      pr = Math.max(pr, minR);
+      // the base is flat: nothing hangs below the condensation level
+      if (py - pr * 0.45 < base) py = base + pr * 0.45;
+      add(px, py, pz, pr, lerp(0.85, 1, r()));
+    }
+    // a skirt of flatter puffs along the base hides the spheres' lower curves
+    const nb = Math.round(n * 0.12);
+    for (let i = 0; i < nb; i++) {
+      const t = towers[Math.floor(r() * towers.length)];
+      const phi = r() * Math.PI * 2, d = Math.sqrt(r()) * 0.9;
+      const pr = Math.max(minR, t.rx * lerp(0.3, 0.45, r()));
+      add(t.x + Math.cos(phi) * t.rx * d, base + pr * 0.42, t.z + Math.sin(phi) * t.rz * d, pr, 0.75);
+    }
+    const cl = { center: cc.clone(), radius: rad * 1.3, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'cumulus',
+      // footprints for cast shadows: the towers (xz, radius) on the cloud base
+      towers: towers.map((t) => ({ x: t.x, z: t.z, r: Math.max(t.rx, t.rz) * 0.95, y: base })), opacity: opts.opacity ?? 1 };
     this.clusters.push(cl);
     return cl;
   }
@@ -378,7 +415,67 @@ export class Clouds {
     return this.clusters.filter((c) => c.moisture > 0.3);
   }
 
+  /** Publish the shadows of the cloud towers nearest the focus (sampleShadow uses them). */
+  _shadows(focus) {
+    const u = G.uCloudShade.value;
+    const drift = this.uniforms.uDrift.value;
+    const sun = G.uSunDir.value;
+    const sy = Math.max(sun.y, 0.12);
+    const list = this._shadeList || (this._shadeList = []);
+    list.length = 0;
+    for (const cl of this.clusters) {
+      if (!cl.towers) continue;
+      for (const t of cl.towers) {
+        // where the tower's shade lands at the focus height
+        const k = (t.y - focus.y) / sy;
+        const x = t.x + drift.x, z = t.z + drift.z;
+        const gx = x - sun.x * k, gz = z - sun.z * k;
+        const d2 = (gx - focus.x) ** 2 + (gz - focus.z) ** 2;
+        if (d2 > (2600 + t.r) ** 2) continue;
+        t._d2 = d2;
+        t._x = x;
+        t._z = z;
+        list.push(t);
+      }
+    }
+    list.sort((a, b) => a._d2 - b._d2);
+    const n = Math.min(16, list.length);
+    for (let i = 0; i < 16; i++) {
+      if (i < n) u[i].set(list[i]._x, list[i]._z, list[i].r, list[i].y);
+      else u[i].set(0, 0, 0, 0);
+    }
+    // shade needs a sun to cast it
+    const k = smoothstep(0.02, 0.2, sun.y) * this.shadowStrength;
+    G.uCloudShadeK.value.set(n > 0 ? k : 0, n);
+  }
+
+  /** The biggest clouds as seen from the camera, for the sea's reflection map. */
+  _blobs(cam) {
+    const u = G.uCloudBlobs.value;
+    const drift = this.uniforms.uDrift.value;
+    const list = this._blobList || (this._blobList = []);
+    list.length = 0;
+    for (const cl of this.clusters) {
+      if (cl.kind !== 'cumulus') continue;
+      const x = cl.center.x + drift.x - cam.x, y = cl.center.y + drift.y - cam.y, z = cl.center.z + drift.z - cam.z;
+      const d = Math.hypot(x, y, z);
+      if (d < cl.radius * 1.2 || y < -cl.radius * 0.3) continue;
+      cl._ang = Math.atan(cl.radius * 0.62 / d);
+      cl._dx = x / d; cl._dy = y / d; cl._dz = z / d;
+      list.push(cl);
+    }
+    list.sort((a, b) => b._ang - a._ang);
+    const n = Math.min(12, list.length);
+    for (let i = 0; i < 12; i++) {
+      if (i < n) u[i].set(list[i]._dx, list[i]._dy, list[i]._dz, list[i]._ang);
+      else u[i].set(0, 1, 0, 0);
+    }
+    G.uCloudBlobN.value = n;
+  }
+
   update(dt, camera, playerPos) {
+    this._shadows(playerPos || camera.position);
+    this._blobs(camera.position);
     const cam = camera.position;
     const fwd = camera.getWorldDirection(this._fwd);
     const d = this.data;

@@ -47,17 +47,19 @@ export class LogSpiral {
     const th = (Math.atan2(z, x) - this.rot) * this.dir;
     const phiR = Math.log(rr / this.a) / this.b;
     const k = Math.round((phiR - th) / TAU);
+    // one exp for the middle arm; its neighbours are a whorl ratio away
+    const E = this._E || (this._E = Math.exp(this.b * TAU));
+    const rMid = this.a * Math.exp(this.b * (th + TAU * k));
     for (let dk = -1; dk <= 1; dk++) {
-      let phi = th + TAU * (k + dk);
-      const inRange = phi >= this.phi0 && phi <= this.phi1;
-      phi = clamp(phi, this.phi0, this.phi1);
-      let d;
-      if (inRange) d = Math.abs(rr - this.rho(phi)) * this.cosA;
-      else {
+      const phi0 = th + TAU * (k + dk);
+      if (phi0 >= this.phi0 && phi0 <= this.phi1) {
+        const rp = dk === 0 ? rMid : dk < 0 ? rMid / E : rMid * E;
+        cb(phi0, Math.abs(rr - rp) * this.cosA);
+      } else {
+        const phi = clamp(phi0, this.phi0, this.phi1);
         const ang = this.dir * phi + this.rot, rp = this.rho(phi);
-        d = Math.hypot(x - Math.cos(ang) * rp, z - Math.sin(ang) * rp);
+        cb(phi, Math.hypot(x - Math.cos(ang) * rp, z - Math.sin(ang) * rp));
       }
-      cb(phi, d);
     }
   }
   /**
@@ -360,7 +362,7 @@ export function finishGeometry(mesh, paint, opts = {}) {
   const pos = new Float32Array(mesh.p);
   const idx = nV > 65535 ? new Uint32Array(mesh.idx) : new Uint16Array(mesh.idx);
   const nor = computeNormals(pos, idx);
-  const curv = computeCurvature(pos, nor, idx);
+  const curv = opts.curvature === false ? new Float32Array(nV) : computeCurvature(pos, nor, idx);
   const col = new Float32Array(nV * 3);
   const mat = new Float32Array(nV * 4);
   const ext = new Float32Array(nV * 3);
@@ -495,3 +497,82 @@ export function terrace(x, k = 0.7) {
 }
 
 export { clamp, lerp, smoothstep, TAU };
+
+/**
+ * Top surface of a geometry as a height grid: every up-facing triangle is rasterised into cells of
+ * `cell` metres (keeping the highest surface), so a vertical query returns the ground a plant or a
+ * landing creature would stand on, ledges and overhangs included. Local coordinates.
+ */
+export function topSurface(geo, cell = 1) {
+  const pos = geo.attributes.position.array, nor = geo.attributes.normal.array;
+  const idx = geo.index.array;
+  const bb = geo.boundingBox || (geo.computeBoundingBox(), geo.boundingBox);
+  const x0 = bb.min.x, z0 = bb.min.z;
+  const nx = Math.max(2, Math.ceil((bb.max.x - x0) / cell) + 1), nz = Math.max(2, Math.ceil((bb.max.z - z0) / cell) + 1);
+  const Y = new Float32Array(nx * nz).fill(-1e9);
+  const N = new Float32Array(nx * nz * 3);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+    const ny = nor[a * 3 + 1] + nor[b * 3 + 1] + nor[c * 3 + 1];
+    if (ny < 1.05) continue; // only ground a plant can stand on (slopes under ~70 degrees)
+    const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+    const bx = pos[b * 3], by = pos[b * 3 + 1], bz = pos[b * 3 + 2];
+    const cx = pos[c * 3], cy = pos[c * 3 + 1], cz = pos[c * 3 + 2];
+    const det = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+    if (Math.abs(det) < 1e-9) continue;
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - x0) / cell)), i1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx, cx) - x0) / cell));
+    const j0 = Math.max(0, Math.floor((Math.min(az, bz, cz) - z0) / cell)), j1 = Math.min(nz - 1, Math.ceil((Math.max(az, bz, cz) - z0) / cell));
+    for (let j = j0; j <= j1; j++) {
+      const z = z0 + j * cell;
+      for (let i = i0; i <= i1; i++) {
+        const x = x0 + i * cell;
+        const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / det;
+        const l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / det;
+        const l3 = 1 - l1 - l2;
+        if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue;
+        const y = l1 * ay + l2 * by + l3 * cy;
+        const k = j * nx + i;
+        if (y > Y[k]) {
+          Y[k] = y;
+          N[k * 3] = l1 * nor[a * 3] + l2 * nor[b * 3] + l3 * nor[c * 3];
+          N[k * 3 + 1] = l1 * nor[a * 3 + 1] + l2 * nor[b * 3 + 1] + l3 * nor[c * 3 + 1];
+          N[k * 3 + 2] = l1 * nor[a * 3 + 2] + l2 * nor[b * 3 + 2] + l3 * nor[c * 3 + 2];
+        }
+      }
+    }
+  }
+  return {
+    x0, z0, nx, nz, cell, Y, N,
+    /** Ground at a local point: { y, nx, ny, nz } (bilinear) or null where there is no top surface. */
+    sample(lx, lz, out = { y: 0, nx: 0, ny: 1, nz: 0 }) {
+      const fx = (lx - x0) / cell, fz = (lz - z0) / cell;
+      const i = Math.floor(fx), j = Math.floor(fz);
+      if (i < 0 || j < 0 || i >= nx - 1 || j >= nz - 1) return null;
+      const u = fx - i, v = fz - j;
+      const k00 = j * nx + i, k10 = k00 + 1, k01 = k00 + nx, k11 = k01 + 1;
+      const y00 = Y[k00], y10 = Y[k10], y01 = Y[k01], y11 = Y[k11];
+      if (y00 < -1e8 || y10 < -1e8 || y01 < -1e8 || y11 < -1e8) {
+        // at the edge of a surface: the nearest covered cell, if any
+        const kn = (u < 0.5 ? (v < 0.5 ? k00 : k01) : (v < 0.5 ? k10 : k11));
+        if (Y[kn] < -1e8) return null;
+        out.y = Y[kn];
+        const l = Math.hypot(N[kn * 3], N[kn * 3 + 1], N[kn * 3 + 2]) || 1;
+        out.nx = N[kn * 3] / l; out.ny = N[kn * 3 + 1] / l; out.nz = N[kn * 3 + 2] / l;
+        return out;
+      }
+      // bilinear, but never across a cliff (fall back to the nearest cell)
+      const mx = Math.max(y00, y10, y01, y11), mn = Math.min(y00, y10, y01, y11);
+      let kk = k00;
+      if (mx - mn > cell * 2.5) {
+        kk = (u < 0.5 ? (v < 0.5 ? k00 : k01) : (v < 0.5 ? k10 : k11));
+        out.y = Y[kk];
+      } else {
+        out.y = (y00 * (1 - u) + y10 * u) * (1 - v) + (y01 * (1 - u) + y11 * u) * v;
+        kk = u + v < 1 ? k00 : k11;
+      }
+      const l = Math.hypot(N[kk * 3], N[kk * 3 + 1], N[kk * 3 + 2]) || 1;
+      out.nx = N[kk * 3] / l; out.ny = N[kk * 3 + 1] / l; out.nz = N[kk * 3 + 2] / l;
+      return out;
+    },
+  };
+}

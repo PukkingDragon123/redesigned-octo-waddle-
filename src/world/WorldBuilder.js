@@ -7,19 +7,34 @@
 // buildChapter() then builds geometry chapter by chapter, time-sliced so the title menu stays
 // smooth while the world grows behind it.
 import { Group, Vector3 } from 'three';
-import { buildIsland, stackShape, coilShape, ammoniteShape, peakShape } from './Islands.js';
+import { buildIsland, buildScree, stackShape, coilShape, ammoniteShape, peakShape } from './Islands.js';
 import { Seabed, DEEP } from './Seabed.js';
 import { buildWaterfall } from './Water.js';
-import { buildSpiralArch } from './Landmarks.js';
+import { buildSpiralArch, causeway, basaltMesh } from './Landmarks.js';
+import { Backdrop } from './Backdrop.js';
+import { FloraSet, SurfaceIndex, populateIsland, populateRims, populateSeabed } from './Flora.js';
+import { SPECIES, populateTrees } from './Trees.js';
 import { rng, lerp, clamp, smoothstep, TAU } from '../core/math.js';
+import { topSurface } from './Spirals.js';
+import { terrainMaterial } from '../render/materials.js';
 
 const nextFrame = () => new Promise((res) => requestAnimationFrame(() => res()));
 export const CHAPTER_ORDER = ['cradle', 'valleys', 'krill', 'forest', 'song', 'night', 'storm', 'falcon', 'wall', 'oasis'];
 const SHAPES = { stack: stackShape, coil: coilShape, ammonite: ammoniteShape, peak: peakShape };
+// the flora biome of each chapter, and its accent trees ({ kind, max, per: m2 of meadow per tree })
+const BIOME = { cradle: 'lagoon', valleys: 'reach', krill: 'shoals', forest: 'forest', song: 'golden', night: 'night', storm: 'storm', falcon: 'storm', wall: 'storm', oasis: 'oasis' };
+const TREES = {
+  cradle: { kind: 'coil', max: 3, per: 3500 }, valleys: { kind: 'coil', max: 3, per: 4000 }, krill: { kind: 'coil', max: 1, per: 6000 },
+  forest: { kind: 'giantFern', max: 4, per: 2500, spacing: 45 }, song: { kind: 'coil', max: 2, per: 4000 }, night: { kind: 'coil', max: 1, per: 6000 },
+  storm: null, falcon: null, wall: null, oasis: { kind: 'blossom', max: 4, per: 2500 },
+};
+const FLORA_NEAR = 520, TREES_NEAR = 1900;
 const _v = new Vector3(), _w = new Vector3();
+import { Matrix4 } from 'three';
+const _m4 = new Matrix4();
 
 export class WorldBuilder {
-  constructor(game, path) {
+  constructor(game, path, opts = {}) {
     this.game = game;
     this.path = path;
     this.groups = {};
@@ -42,7 +57,10 @@ export class WorldBuilder {
     this._v = new Vector3();
     this.lodDist = 650;
     for (const id of CHAPTER_ORDER) this.plan[id] = { islands: [], extras: [], features: [] };
-    this.layout();
+    this.shelters = []; // calm lagoon water: [x, z, radius, strength] for the ocean
+    this.chapterOpts = {};
+    if (opts.layout !== false) this.layout();
+    for (const sh of this.shelters) game.ocean?.shelter?.(...sh);
   }
 
   group(id) {
@@ -114,6 +132,13 @@ export class WorldBuilder {
       seed: params.seed ?? 1, falls: o.falls ?? 0, mesh: null, far: null, rim: null, opts: o,
     };
     if (o.avoid !== false) this._clearIslands(rec);
+    // how close the route ever comes (islands far off the route never need their near detail)
+    let rd = Infinity;
+    for (let q = Math.max(0, s - shape.R - 2200); q <= Math.min(this.path.length, s + shape.R + 2200); q += 40) {
+      this.path.pointAt(q, _w);
+      rd = Math.min(rd, Math.hypot(_w.x - rec.pos.x, _w.z - rec.pos.z) - shape.R);
+    }
+    rec.routeDist = o.near ? 0 : rd;
     this.islands.push(rec);
     this.plan[chapter].islands.push(rec);
     const volcanic = rec.style.rock === 'volcanic' || rec.style.rock === 'basalt';
@@ -149,6 +174,13 @@ export class WorldBuilder {
 
   extra(chapter, fn) { this.plan[chapter].extras.push(fn); }
 
+  /** A free-standing region outside the route (dev showcases): { biome, trees }. */
+  addChapter(id, o = {}) {
+    this.plan[id] ||= { islands: [], extras: [], features: [] };
+    this.chapterOpts[id] = o;
+    return id;
+  }
+
   // ---- layout ------------------------------------------------------------------------------
   layout() {
     const P = this.path;
@@ -160,6 +192,7 @@ export class WorldBuilder {
       const id = 'cradle', r = R(id);
       const C = this.at(150, 0);
       this.atoll(id, C.x, C.z, { a: 255, b: 0.045, turns: 1.14, rimW: 40, lagoon: -6.5, motu: 0.62, rot: 1.9, seed: 21 });
+      this.shelters.push([C.x, C.z, 330, 0.9]);
       this.island(id, 'ammonite', { R: 62, yaw: 0.15, seed: 101 }, 300, -250, { clear: 60 });
       this.island(id, 'stack', { R: 17, H: 78, lobes: 2, twist: 0.6, seed: 102, caves: [{ th: 0.2, w: 0.3, h: 9, depth: 0.4 }] }, 40, -210, { style: { rock: 'limestone' } });
       this.island(id, 'stack', { R: 10, H: 52, lobes: 3, twist: 1.1, seed: 103 }, 120, -150, { clear: 35, style: { rock: 'limestone' } });
@@ -195,7 +228,8 @@ export class WorldBuilder {
         const Rr = big ? lerp(16, 26, r()) : lerp(7, 15, r());
         const H = Rr * lerp(3.2, 5.5, r());
         const lat = side * lerp(110, 230, r());
-        this.island(id, 'stack', { R: Rr, H, lobes: r() < 0.5 ? 2 : 3, twist: lerp(0.4, 1.3, r()), seed: 210 + k, cap: r() < 0.25 ? 'point' : 'dome', topFrac: lerp(0.55, 0.95, r()) }, s, lat, { clear: 34, style: { rock: r() < 0.5 ? 'banded' : 'limestone' }, falls: big && r() < 0.5 ? 1 : 0 });
+        const caves = big ? [{ th: r() * TAU, w: lerp(0.18, 0.32, r()), h: lerp(6, 12, r()), depth: lerp(0.3, 0.45, r()) }] : [];
+        this.island(id, 'stack', { R: Rr, H, lobes: r() < 0.5 ? 2 : 3, twist: lerp(0.4, 1.3, r()), seed: 210 + k, cap: r() < 0.25 ? 'point' : 'dome', topFrac: lerp(0.55, 0.95, r()), caves }, s, lat, { clear: 34, style: { rock: r() < 0.5 ? 'banded' : 'limestone' }, falls: big && r() < 0.5 ? 1 : 0 });
         if (r() < 0.5) this.island(id, 'stack', { R: Rr * 0.45, H: H * lerp(0.35, 0.6, r()), lobes: 2, twist: 1.2, seed: 240 + k, cap: 'point', topFrac: 0.35 }, s + lerp(-40, 40, r()), lat + side * lerp(30, 50, r()), { clear: 30 });
       }
       // the Spiral Arch spans the route where it dips lowest
@@ -242,12 +276,14 @@ export class WorldBuilder {
       for (let k = 0; k < 5; k++) {
         const s = lerp(3950, 5350, r());
         const side = r() < 0.5 ? -1 : 1;
-        this.island(id, 'stack', { R: lerp(12, 20, r()), H: lerp(70, 130, r()), lobes: 3, twist: lerp(0.6, 1.4, r()), seed: 420 + k, topFrac: 0.7 }, s, side * lerp(130, 190, r()), { clear: 36, rookery: true });
+        const H = lerp(70, 130, r());
+        const rec = this.island(id, 'stack', { R: lerp(12, 20, r()), H, lobes: 3, twist: lerp(0.6, 1.4, r()), seed: 420 + k, topFrac: 0.7 }, s, side * lerp(130, 190, r()), { clear: 36, rookery: true });
+        // a skimmer rookery on every ledge of the stack
+        this.reptiles(id, rec.pos.clone().setY(H * 0.85), 'skimmer', Math.round(lerp(10, 18, r())));
       }
       this.island(id, 'peak', { R: 85, H: 220, turns: 2.2, seed: 430 }, 4700, 800, { style: { rock: 'warm' } });
       for (let k = 0; k < 5; k++) this.fish(id, lerp(3950, 5350, r()), (r() < 0.5 ? -1 : 1) * lerp(160, 300, r()), lerp(3, 6, r()), 'glintfin', Math.round(lerp(200, 500, r())));
       for (let k = 0; k < 4; k++) this.reptiles(id, this.at(lerp(4000, 5300, r()), (r() < 0.5 ? -1 : 1) * lerp(150, 260, r())).setY(lerp(60, 110, r())), 'coilwing', Math.round(lerp(70, 120, r())));
-      for (let k = 0; k < 3; k++) this.reptiles(id, this.at(lerp(4000, 5300, r()), (r() < 0.5 ? -1 : 1) * lerp(130, 180, r())).setY(lerp(50, 80, r())), 'skimmer', Math.round(lerp(10, 16, r())));
       this.extra(id, (w) => {
         for (let k = 0; k < 6; k++) w.game.clouds?.sheet?.(w.at(lerp(3950, 5350, (k + 0.5) / 6), (r() - 0.5) * 400).setY(lerp(14, 30, r())), 800, 500, 16, { seed: 1200 + k, opacity: 0.42, minR: 24, maxR: 52, spacing: 7000 });
         w._clouds(id, 8, { yMin: 380, yMax: 650, latMin: 400, latMax: 1400 });
@@ -259,6 +295,7 @@ export class WorldBuilder {
       const id = 'song', r = R(id);
       const c = this.path.pointAt(5800);
       this.songCenter = c.clone();
+      this.shelters.push([c.x, c.z, 520, 0.6]);
       const fwd = this.path.tangentAt(5800);
       const inA = Math.atan2(-fwd.z, -fwd.x), outA = Math.atan2(fwd.z, fwd.x);
       const n = 13;
@@ -355,6 +392,7 @@ export class WorldBuilder {
       const id = 'oasis', r = R(id);
       const mt = this.at(11150, -150);
       this.atoll(id, mt.x + 40, mt.z + 120, { a: 470, b: 0.05, turns: 1.16, rimW: 60, lagoon: -8, motu: 0.72, rot: -0.4, seed: 31 });
+      this.shelters.push([mt.x + 40, mt.z + 120, 560, 0.85]);
       const Hin = 44;
       this.island(id, 'coil', { a: 30, b: 0.19, turns: 1.6, kw: 0.24, Hin, fall: 1.7, seed: 1001, steps: 10, horn: { R: 40, H: Hin + 8, cap: 'dome', topFrac: 0.92, twist: 0.25, lobes: 2, lobeAmp: 0.08, taperPow: 2.2, capH: 4, notch: 0.12 } }, 11150, -40, { pos: mt, clear: false, avoid: false, falls: 4, central: true });
       this.motherTree = new Vector3(mt.x, Hin + 8 + 3, mt.z);
@@ -376,6 +414,7 @@ export class WorldBuilder {
       for (let k = 0; k < 3; k++) this.fish(id, lerp(10300, 11800, r()), (r() - 0.5) * 500, lerp(5, 7.5, r()), 'lanternjack', 2);
       for (let k = 0; k < 5; k++) this.reptiles(id, mt.clone().add(new Vector3((r() - 0.5) * 600, lerp(50, 140, r()), (r() - 0.5) * 600)), 'coilwing', Math.round(lerp(80, 140, r())));
       for (let k = 0; k < 3; k++) this.reptiles(id, mt.clone().add(new Vector3((r() - 0.5) * 900, lerp(30, 60, r()), (r() - 0.5) * 900)), 'skimmer', 10);
+      this.extra(id, (w) => w._motherTree());
       this.extra(id, (w) => w._clouds(id, 14, { yMin: 380, yMax: 800, latMin: 600, latMax: 1800, s0: 9950, s1: 12400 }));
     }
   }
@@ -393,8 +432,8 @@ export class WorldBuilder {
     }
   }
 
-  _arch(id, sArch) {
-    const f = this.path.frameAt(sArch);
+  _arch(id, sArch, at = null) {
+    const f = at ? { pos: at.center, right: at.span, fwd: at.along } : this.path.frameAt(sArch);
     const arch = buildSpiralArch({ center: f.pos, span: f.right, along: f.fwd, halfSpan: 150, apexY: 118, thick: 15, twist: 1.5, seed: 7 });
     this.group(id).add(arch.mesh);
     this.game.engine.shadows?.addCaster(arch.mesh);
@@ -403,8 +442,10 @@ export class WorldBuilder {
       this.islands.push({ chapter: id, kind: 'stack', shape: ft.shape, pos: new Vector3(ft.pos.x, 0, ft.pos.z), R: ft.shape.R, H: ft.shape.H, style: {}, mesh: null, far: null, landmark: true });
     }
     for (let i = 0; i < arch.tops.length; i += 4) this.perches.push({ p: arch.tops[i].p.clone(), n: new Vector3(0, 1, 0), chapter: id });
-    this.archInfo = { s: sArch, pos: f.pos.clone(), apex: arch.apex };
-    this.arch = arch;
+    if (!at) {
+      this.archInfo = { s: sArch, pos: f.pos.clone(), apex: arch.apex };
+      this.arch = arch;
+    }
   }
 
   // ---- building -------------------------------------------------------------------------------
@@ -427,18 +468,52 @@ export class WorldBuilder {
       if (performance.now() - tk > budget) { await nextFrame(); tk = performance.now(); }
     };
     const plan = this.plan[id];
+    const prof = this.timing ||= {};
+    const tm = (k, t0) => { prof[k] = (prof[k] || 0) + performance.now() - t0; };
     for (const rec of plan.islands) {
       this._buildIsland(rec, g);
       await slice();
     }
+    let t0 = performance.now();
     for (const fn of plan.extras) { fn(this); await slice(); }
+    tm('extras', t0);
+    if (!this.backdrop && this.withBackdrop !== false) {
+      // the painted horizon: anchored mid-route so it drifts slowly as the herd travels
+      t0 = performance.now();
+      this.backdrop = new Backdrop(this.game, { anchor: this.path.pointAt(this.path.length * 0.5) });
+      tm('backdrop', t0);
+      await slice();
+    }
+    t0 = performance.now();
     const meshes = await this.seabed.buildFor(plan.features, this._tiles, {}, slice);
     for (const m of meshes) g.add(m);
+    tm('seabed', t0);
+    t0 = performance.now();
+    // reef and beach flora, palms on the motus
+    for (const f of this.builtinFlora === false ? [] : plan.features) {
+      const set = new FloraSet('flora-reef');
+      const n = Math.round(clamp((f.R * f.R) / 300, 40, f.kind === 'atoll' ? 1400 : 600) * (this.floraDensity ?? 1));
+      populateSeabed(set, this.seabed, f, BIOME[id], Math.round(f.x * 0.37 + f.z), n);
+      if (f.kind === 'atoll' || f.kind === 'shelf') this._motus(set, f, id);
+      if (!set.count) continue;
+      set.build(this.game.engine.shadows);
+      set.group.userData.center = new Vector3(f.x, 0, f.z);
+      set.group.userData.R = f.R;
+      g.add(set.group);
+      (this.reefFlora ||= []).push({ group: set.group, chapter: id, center: set.group.userData.center, R: f.R, trees: set.trees });
+      await slice();
+    }
+    tm('reef', t0);
+    const imp = this._imp?.[id];
+    if (imp && imp.count) g.add(imp.build(null));
     this.done.add(id);
   }
 
   _buildIsland(rec, g) {
-    const isl = buildIsland({ shape: rec.shape, style: Object.assign({ seed: rec.seed }, rec.style, rec.opts?.forming ? { heat: formingHeat(rec) } : {}), seed: rec.seed, lod: rec.R > 22 });
+    const prof = this.timing ||= {};
+    let t0 = performance.now();
+    const far = rec.routeDist > 700;
+    const isl = buildIsland({ shape: rec.shape, style: Object.assign({ seed: rec.seed }, rec.style, rec.opts?.forming ? { heat: formingHeat(rec) } : {}), seed: rec.seed, lod: rec.R > 22 && !far, detail: far ? 0.55 : 1 });
     isl.mesh.position.copy(rec.pos);
     g.add(isl.mesh);
     this.game.engine.shadows?.addCaster(isl.mesh);
@@ -451,6 +526,85 @@ export class WorldBuilder {
     rec.far = isl.far;
     rec.rim = isl.rim;
     rec.geo = isl.geo0;
+    // living flora on the rock, its rims and crests
+    const volcanic = rec.style.rock === 'volcanic';
+    const biome = rec.opts?.biome ?? (volcanic ? 'volcanic' : BIOME[rec.chapter] || this.chapterOpts[rec.chapter]?.biome || 'reach');
+    prof.rock = (prof.rock || 0) + performance.now() - t0;
+    t0 = performance.now();
+    const needsFlora = rec.routeDist < FLORA_NEAR + 150 && this.builtinFlora !== false;
+    const needsTrees = rec.routeDist < TREES_NEAR && this.builtinFlora !== false;
+    const S = needsFlora || needsTrees ? new SurfaceIndex(isl.geo0) : null;
+    if (needsFlora) {
+      const fl = populateIsland(isl.geo0, biome, rec.seed, { index: S, density: this.floraDensity ?? 1, origin: rec.pos, seabedAt: (x, z) => this.seabed.heightAt(x, z) });
+      populateRims(fl, (isl.rim || []).filter((q, i) => i % 2 === 0), biome, rec.seed);
+      fl.build(this.game.engine.shadows);
+      fl.group.position.copy(rec.pos);
+      g.add(fl.group);
+      rec.flora = fl.group;
+    }
+    let tc = rec.opts?.trees === false ? null : (rec.opts?.giant ? { kind: 'giantFern', max: 3, per: 2000, spacing: 45 } : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null));
+    // spires and stacks wear wind-bent pines; storms leave only the hardiest
+    if (rec.kind === 'stack' && !rec.opts?.giant) tc = { kind: 'pine', max: rec.chapter === 'storm' || rec.chapter === 'falcon' ? 1 : 3, per: 900, spacing: 9 };
+    if (tc && !volcanic && needsTrees) {
+      const ts = populateTrees(S, tc.kind, rec.seed, tc);
+      // giant fiddleheads are solid enough to bump into, and bird-reptiles perch on their coils
+      if (tc.kind === 'giantFern') {
+        for (const list of ts.items.values()) {
+          for (const it of list) {
+            _w.setFromMatrixPosition(it.m).add(rec.pos);
+            const sc = _v.setFromMatrixScale(it.m).x;
+            this.capsules.push({ a: _w.clone(), b: _w.clone().add(new Vector3(0, 60 * sc, 0)), r: 2.5 * sc, chapter: rec.chapter });
+            this.perches.push({ p: _w.clone().add(new Vector3(0, 66 * sc, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter });
+          }
+        }
+      }
+      // the Coil Forest's giant coil-trunk tree crowns the island's central horn
+      if (rec.opts?.giant && rec.shape.horn) {
+        const hp = new Vector3(0, rec.shape.horn.top + (rec.shape.horn.H - rec.shape.horn.top) * 0.6, 0);
+        const H = lerp(120, 160, (rec.seed % 7) / 7);
+        ts.add('giantCoil-' + (rec.seed % 3), () => SPECIES.giantCoilTree(9400 + (rec.seed % 3), 140), hp, H / 140, rec.seed, [0, 0, 1, 1]);
+        const wp = hp.clone().add(rec.pos);
+        this.capsules.push({ a: wp.clone(), b: wp.clone().add(new Vector3(0, H * 0.7, 0)), r: H * 0.06, chapter: rec.chapter });
+        this.sphereColliders.push({ p: wp.clone().add(new Vector3(0, H * 0.82, 0)), r: H * 0.16, chapter: rec.chapter, soft: true });
+        for (let q = 0; q < 6; q++) this.perches.push({ p: wp.clone().add(new Vector3(Math.cos(q) * H * 0.25, H * (0.6 + 0.06 * q), Math.sin(q) * H * 0.25)), n: new Vector3(0, 1, 0), chapter: rec.chapter });
+      }
+      if (ts.count) {
+        // coilwings roost in the crowns
+        for (const [key, list] of ts.items) {
+          const Hh = key.startsWith('gfern') ? 66 : key.startsWith('giantCoil') ? 120 : key.startsWith('pine') ? 14 : key.startsWith('blossom') ? 16 : key.startsWith('palm') ? 14 : 20;
+          for (const it of list) {
+            _w.setFromMatrixPosition(it.m).add(rec.pos);
+            const sc = _v.setFromMatrixScale(it.m).x;
+            this.perches.push({ p: _w.clone().add(new Vector3(0, Hh * sc * 0.92, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter, tree: true });
+          }
+        }
+        // far painted impostors for every tree (they take over where the 3D trees fade out)
+        const imp = this._impostors(rec.chapter);
+        for (const [key, list] of ts.items) {
+          const kind = key.startsWith('pine') ? 'pine' : key.startsWith('blossom') ? 'blossom' : key.startsWith('gfern') || key.startsWith('giantCoil') ? 'giant' : key.startsWith('palm') ? 'palm' : 'coil';
+          const H = kind === 'giant' ? 110 : kind === 'pine' ? 16 : kind === 'blossom' ? 18 : 22;
+          for (const it of list) {
+            _w.setFromMatrixPosition(it.m).add(rec.pos);
+            const sc = _v.setFromMatrixScale(it.m).x;
+            imp.add('imp-' + kind, () => SPECIES.impostor(kind, H), _w, sc, 0, [0, 0, 1, 1]);
+          }
+        }
+        ts.build(this.game.engine.shadows);
+        ts.group.position.copy(rec.pos);
+        g.add(ts.group);
+        rec.trees = ts.group;
+      }
+    }
+    // scree: boulders fallen at the foot of the cliffs
+    if (rec.routeDist < FLORA_NEAR + 150) {
+      const sc = buildScree(rec, (x, z) => this.seabed.heightAt(x, z), Math.round(clamp(rec.R * 0.9, 12, 110)));
+      if (sc) {
+        g.add(sc);
+        this.game.engine.shadows?.addCaster(sc);
+        rec.scree = sc;
+      }
+    }
+    prof.flora = (prof.flora || 0) + performance.now() - t0;
     const r = rng(rec.seed * 13 + 7);
     // perches: the summit and a few high rim points
     const bb = isl.geo0.boundingBox;
@@ -461,6 +615,18 @@ export class WorldBuilder {
       for (let i = 0; i < pos.length; i += 3) if (pos[i + 1] > by) { by = pos[i + 1]; best = i; }
       if (best >= 0) top.set(pos[best] + rec.pos.x, pos[best + 1], pos[best + 2] + rec.pos.z);
       if (top.y > 12) this.perches.push({ p: top.clone(), n: new Vector3(0, 1, 0), chapter: rec.chapter });
+    }
+    // rookeries: skimmers nest on the strata ledges all the way up the stack
+    if (rec.opts?.rookery && rec.shape.layers && rec.shape.radius) {
+      for (const L of rec.shape.layers) {
+        if (L.y1 < 10 || L.y1 > rec.shape.top - 4) continue;
+        for (let q = 0; q < 2; q++) {
+          const th = r() * TAU;
+          const c = rec.shape.center(L.y1);
+          const rr = rec.shape.radius(th, L.y1 + 0.6) + 0.4;
+          this.perches.push({ p: new Vector3(rec.pos.x + c[0] + Math.cos(th) * rr, L.y1 + 0.6, rec.pos.z + c[1] + Math.sin(th) * rr), n: new Vector3(0, 1, 0), chapter: rec.chapter, ledge: true });
+        }
+      }
     }
     const rims = (isl.rim || []).filter((q) => q.y > 14);
     const nPerch = Math.min(rims.length, rec.opts?.rookery ? 14 : 4);
@@ -486,7 +652,7 @@ export class WorldBuilder {
         used.push(q);
       }
     }
-    // forming islands: steam vents along the young outer arm
+    // forming islands: steam vents along the young outer arm, cooling basalt where it meets the sea
     if (rec.opts?.forming && rec.shape.spiral) {
       const sp = rec.shape.spiral;
       for (let k = 0; k < 6; k++) {
@@ -495,12 +661,68 @@ export class WorldBuilder {
         const p = sp.point(phi);
         this.vents.push({ p: new Vector3(p.x + rec.pos.x, Math.max(0.5, rec.shape.topAt(t)), p.z + rec.pos.z), strength: lerp(0.5, 1, t), chapter: rec.chapter });
       }
+      const cols = [];
+      for (let k = 0; k < 4; k++) {
+        const t = lerp(0.45, 0.85, k / 3);
+        const phi = rec.shape.phiAt(t);
+        const p = sp.point(phi), tg = sp.tangent(phi);
+        // on the outer flank of the arm, stepping down into the sea
+        const out = new Vector3(tg.z, 0, -tg.x);
+        if (out.x * p.x + out.z * p.z < 0) out.negate();
+        const c = new Vector3(p.x + rec.pos.x, 0, p.z + rec.pos.z).addScaledVector(out, rec.shape.halfW(t) * 1.05);
+        cols.push(...causeway(c, out.clone().negate(), 140, rec.seed * 5 + k, { rise: 6, base: -1.2 }));
+      }
+      if (cols.length) {
+        const bm = basaltMesh(cols);
+        g.add(bm);
+        this.game.engine.shadows?.addCaster(bm);
+        rec.basalt = bm;
+      }
     }
+  }
+
+  /** Palms (and in the Oasis blossom trees) on beaches and motus above the water. */
+  _motus(set, f, id) {
+    const r = rng(Math.round(f.x * 0.13 + f.z * 0.71));
+    const want = f.kind === 'atoll' ? 60 : 4;
+    let placed = 0;
+    for (let i = 0; i < want * 12 && placed < want; i++) {
+      const a = r() * TAU, d = Math.sqrt(r()) * f.R * 0.9;
+      const x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d;
+      const h = this.seabed.heightAt(x, z);
+      if (h < 1.1 || h > 3.2) continue;
+      const p = new Vector3(x, h - 0.2, z);
+      const v = Math.floor(r() * 4);
+      if (id === 'oasis' && r() < 0.25) set.add(`blossom-${v % 3}`, () => SPECIES.blossomTree(9600 + (v % 3), 18), p, lerp(0.6, 1.0, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      else if (r() < 0.3) set.add(`cycad-${v % 3}`, () => SPECIES.cycad(9850 + (v % 3), 5), p, lerp(0.7, 1.3, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      else set.add(`palm-${v}`, () => SPECIES.palm(9800 + v, 14), p, lerp(0.7, 1.25, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      placed++;
+    }
+  }
+
+  /** The chapter's far-tree impostor set (built when the chapter finishes). */
+  _impostors(id) {
+    this._imp ||= {};
+    return (this._imp[id] ||= new FloraSet('tree-impostors'));
+  }
+
+  _motherTree() {
+    if (!this.motherTree) return;
+    const set = new FloraSet('mother-tree');
+    set.add('mother', () => SPECIES.motherTree(5, 210), this.motherTree.clone().setY(this.motherTree.y - 3), 1, 0.4, [0, 0, 1, 1]);
+    set.build(this.game.engine.shadows);
+    this.group('oasis').add(set.group);
+    this.motherTreeMesh = set.group;
   }
 
   // ---- runtime ----------------------------------------------------------------------------------
   /** Hide chapters far from the current path position; pick island LODs by camera distance. */
   updateVisibility(s) {
+    // if the game does not call update(dt) itself (before this), keep the world alive from here
+    const now = this.game.time;
+    const dt = this._visT === undefined ? 0 : now - this._visT;
+    this._visT = now;
+    if (this._updT !== now && dt > 0) this.update(Math.min(dt, 0.1));
     for (const ch of this.path.chapters) {
       const g = this.groups[ch.id];
       if (!g) continue;
@@ -510,13 +732,142 @@ export class WorldBuilder {
     for (const l of this.lakes) l.visible = this.groups[l.userData.chapter]?.visible ?? true;
     const cam = this.game.engine.camera.position;
     for (const rec of this.islands) {
-      if (!rec.mesh || !rec.far) continue;
+      if (!rec.mesh) continue;
       if (!this.groups[rec.chapter]?.visible) continue;
       const d = Math.hypot(cam.x - rec.pos.x, cam.z - rec.pos.z) - rec.R;
-      const near = d < this.lodDist + rec.R * 0.5;
-      rec.mesh.visible = near;
-      rec.far.visible = !near;
+      if (rec.far) {
+        const near = d < this.lodDist + rec.R * 0.5;
+        rec.mesh.visible = near;
+        rec.far.visible = !near;
+      }
+      if (rec.flora) rec.flora.visible = d < FLORA_NEAR;
+      if (rec.scree) rec.scree.visible = d < FLORA_NEAR + 200;
+      if (rec.trees) rec.trees.visible = d < TREES_NEAR;
     }
+    if (this.reefFlora) {
+      for (const rf of this.reefFlora) {
+        if (!this.groups[rf.chapter]?.visible) continue;
+        const d = Math.hypot(cam.x - rf.center.x, cam.z - rf.center.z) - rf.R;
+        rf.group.visible = d < FLORA_NEAR;
+      }
+    }
+  }
+
+  /**
+   * Per-frame life of the world: steam from forming islands, foam where waterfalls meet the sea.
+   * Cheap (only near, visible things). updateVisibility() calls it when the game does not.
+   */
+  update(dt) {
+    this._updT = this.game.time;
+    if (!(dt > 0)) return;
+    const g = this.game;
+    const cam = g.engine.camera.position;
+    const t = g.time;
+    // steam vents: billowing white plumes where young rock meets the sea
+    if (g.mist?.emit) {
+      for (const v of this.vents) {
+        if (!this.groups[v.chapter]?.visible) continue;
+        const d = Math.hypot(cam.x - v.p.x, cam.z - v.p.z);
+        if (d > 1600) continue;
+        v.acc = (v.acc || 0) + dt * v.strength * (d < 600 ? 6 : 2.5);
+        while (v.acc > 1) {
+          v.acc -= 1;
+          const k = Math.random();
+          _v.set(v.p.x + (Math.random() - 0.5) * 6, v.p.y + Math.random() * 2, v.p.z + (Math.random() - 0.5) * 6);
+          _w.set((Math.random() - 0.5) * 1.5, 2.5 + k * 3, (Math.random() - 0.5) * 1.5);
+          g.mist.emit({ pos: _v, vel: _w, life: 7 + k * 5, size: 6 + k * 6, sizeEnd: 30 + k * 30, alpha: 0.32, drag: 0.15, kind: 0, fadeIn: 1.2 });
+        }
+      }
+    }
+    // plunge pools: rings of foam where the falls hit the water
+    const ocean = g.ocean;
+    if (ocean?.splash) {
+      for (const w of this.waterfalls) {
+        if (!w.visible) continue;
+        const lip = w.userData.lip;
+        if (Math.abs(lip.x - cam.x) > 500 || Math.abs(lip.z - cam.z) > 500) continue;
+        w.userData.foamT = (w.userData.foamT ?? Math.random()) - dt;
+        if (w.userData.foamT > 0) continue;
+        w.userData.foamT = 0.7 + Math.random() * 0.5;
+        const out = w.userData.out;
+        _v.set(lip.x + out.x * 5, 0, lip.z + out.z * 5);
+        ocean.splash(_v, 0.22, w.userData.width * 0.8);
+      }
+    }
+    void t;
+  }
+
+  /**
+   * The ground a plant or a landing creature stands on at (x, z): the highest up-facing island
+   * surface (meadows, ledges, beaches at the rock's foot) or else the sea floor / atoll sand.
+   * Returns { y, normal: Vector3, island: rec | null }. Island grids are built on first use.
+   */
+  groundAt(x, z, out = { y: 0, normal: new Vector3(0, 1, 0), island: null }) {
+    let best = -1e9, bestRec = null;
+    const smp = this._gs ||= { y: 0, nx: 0, ny: 1, nz: 0 };
+    for (const rec of this.islands) {
+      if (!rec.geo) continue;
+      const dx = x - rec.pos.x, dz = z - rec.pos.z;
+      if (dx * dx + dz * dz > rec.R * rec.R * 2.2) continue;
+      rec.ground ||= topSurface(rec.geo, rec.R > 120 ? 1.5 : 1);
+      const g = rec.ground.sample(dx, dz, smp);
+      if (g && g.y > best) { best = g.y; bestRec = rec; out.normal.set(g.nx, g.ny, g.nz); }
+    }
+    const sb = this.seabed.heightAt(x, z);
+    if (sb >= best) {
+      best = sb;
+      bestRec = null;
+      const e = 1.5;
+      out.normal.set(this.seabed.heightAt(x - e, z) - this.seabed.heightAt(x + e, z), 2 * e, this.seabed.heightAt(x, z - e) - this.seabed.heightAt(x, z + e)).normalize();
+    }
+    out.y = best;
+    out.island = bestRec;
+    return out;
+  }
+
+  /**
+   * Flora patches for an external plant system (e.g. AlienFlora.addPatch): per island a meadow /
+   * cliff / shore patch over its rock, and a reef patch over every shelf or atoll. Each sample(x, z)
+   * returns { y, normal, slope, wet, tidal } or null. Set world.builtinFlora = false before building
+   * to leave the planting to that system.
+   */
+  floraPatches(id) {
+    const out = [];
+    const mk = (center, radius, biome, density) => {
+      const g = { y: 0, normal: new Vector3(0, 1, 0), island: null };
+      return {
+        center, radius, biome, density, chapter: id,
+        sample: (x, z) => {
+          this.groundAt(x, z, g);
+          if (g.y < -24) return null;
+          const n = g.normal.clone();
+          return { y: g.y, normal: n, slope: 1 - n.y, wet: g.y < 3 ? 0.9 : 0.55, tidal: smoothstep(1.4, 0, Math.abs(g.y + 0.2)) };
+        },
+      };
+    };
+    for (const rec of this.plan[id].islands) {
+      if (rec.routeDist > FLORA_NEAR + 150) continue;
+      const c = new Vector3(rec.pos.x, 0, rec.pos.z);
+      const volcanic = rec.style.rock === 'volcanic';
+      const lush = id === 'oasis' ? 'oasis' : 'meadow';
+      out.push(mk(c, rec.R, volcanic ? 'volcanic' : lush, id === 'storm' || id === 'falcon' ? 0.4 : 1));
+      out.push(mk(c, rec.R, 'cliff', volcanic ? 0.3 : 0.8));
+      out.push(mk(c, rec.R * 1.15, 'shore', 0.8));
+    }
+    for (const f of this.plan[id].features) out.push(mk(new Vector3(f.x, 0, f.z), f.R * 0.8, 'reef', f.kind === 'atoll' ? 0.5 : 0.7));
+    return out;
+  }
+
+  /**
+   * Quality 0..1 (like the engine presets): terrain micro detail fades sooner, flora thins out in
+   * chapters built afterwards, island LODs switch closer.
+   */
+  setQuality(q) {
+    this.quality = clamp(q, 0, 1);
+    const m = terrainMaterial();
+    if (m.uniforms.uDetail) m.uniforms.uDetail.value = lerp(0.55, 1, this.quality);
+    this.floraDensity = lerp(0.45, 1, this.quality);
+    this.lodDist = lerp(420, 650, this.quality);
   }
 
   /** Height of the sea floor (reefs, lagoons, beaches above the water; -200 in the open sea). */

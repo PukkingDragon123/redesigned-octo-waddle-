@@ -48,10 +48,10 @@ const MAXW = 64;
 // Sea state keys: 0 glassy, 0.3 calm, 0.6 lively, 1 storm (6-12 m swells).
 const KEYS = [0, 0.3, 0.6, 1];
 const HS = [0.035, 0.6, 2.2, 9.0]; // significant height of the wind sea (m)
-const TP = [2.4, 5.2, 7.6, 10.5]; // peak period (s)
+const TP = [2.4, 5.2, 7.4, 9.2]; // peak period (s)
 const HSW = [0.14, 0.42, 0.85, 2.4]; // swell height (m)
-const CHOP = [0.55, 0.85, 1.0, 1.1];
-const FOAMJ = [-0.4, 0.18, 0.42, 0.66]; // Jacobian below which crests break into foam
+const CHOP = [0.55, 0.85, 1.05, 1.25];
+const FOAMJ = [-0.4, 0.2, 0.5, 0.86]; // Jacobian below which crests break into foam
 function keyed(arr, s) {
   if (s <= 0) return arr[0];
   for (let i = 1; i < KEYS.length; i++) {
@@ -132,8 +132,8 @@ uniform float uAlpha;   // c^2 dt / dx^2
 uniform float uDamp;
 uniform float uFoamDecay;
 uniform float uGlowDecay;
-uniform vec4 uSrc[16];  // uv x, uv y, radius (uv), velocity impulse (m/s)
-uniform vec4 uSrcB[16]; // foam, glow, ring (0 disc / 1 ring), unused
+uniform vec4 uSrc[16];  // uv x, uv y, radius (uv), height (m)
+uniform vec4 uSrcB[16]; // foam, glow, mode (0 disc kick, 1 ring kick, 2 hull pressure), unused
 uniform int uSrcN;
 uniform float uFoamGen;
 uniform float uCell;
@@ -149,6 +149,7 @@ void main() {
   vec4 d = at(uv - vec2(0.0, uTexel.y)), u = at(uv + vec2(0.0, uTexel.y));
   float lap = l.r + r.r + d.r + u.r - 4.0 * s.r;
   float v = (s.g + uAlpha * lap) * uDamp;
+  float h0 = s.r;
   float foam = s.b;
   float glow = s.a;
   for (int i = 0; i < 16; i++) {
@@ -156,19 +157,26 @@ void main() {
     vec4 a = uSrc[i];
     vec4 b = uSrcB[i];
     float q = length(vUv - a.xy) / max(a.z, 1e-5);
-    float k = b.z > 0.5 ? exp(-pow((q - 0.75) * 4.0, 2.0)) : exp(-q * q * 2.5);
     float disc = exp(-q * q * 2.0);
-    v += a.w * k;
+    if (b.z > 1.5) {
+      // a hull pushing the water down as it passes: the rebound behind it is the wake
+      h0 = mix(h0, min(h0, a.w), disc * 0.35);
+      v *= 1.0 - disc * 0.2;
+    } else {
+      float k = b.z > 0.5 ? exp(-pow((q - 0.75) * 4.0, 2.0)) : exp(-q * q * 2.5);
+      h0 += a.w * k;
+    }
     foam += b.x * disc;
     glow += b.y * disc;
   }
-  float h = s.r + v * uDt;
+  float h = h0 + v * uDt;
   // steep ripple fronts whiten a little
   float slope = length(vec2(r.r - l.r, u.r - d.r)) * 0.5 / uCell;
   foam += max(slope - 0.25, 0.0) * uFoamGen;
-  // foam spreads slowly and thins as it ages
+  // foam spreads slowly and thins as it ages: thick fresh foam collapses fast, lace lingers
   float fa = (l.b + r.b + d.b + u.b) * 0.25;
-  foam = mix(foam, fa, 0.06) * uFoamDecay;
+  float fast = smoothstep(0.5, 1.4, foam);
+  foam = mix(foam, fa, 0.06) * mix(uFoamDecay, uFoamDecay * uFoamDecay * uFoamDecay * uFoamDecay * uFoamDecay, fast);
   glow = mix(glow, (l.a + r.a + d.a + u.a) * 0.25, 0.08) * uGlowDecay;
   // absorbing border
   vec2 e = min(vUv, 1.0 - vUv);
@@ -195,9 +203,9 @@ varying vec2 vGrid;
 varying float vViewZ;
 varying float vShelter;
 varying float vDispY;
-varying float vCrest;
+varying vec2 vCrest;
 varying float vSpacing;
-uniform float uCrestNorm;
+uniform vec2 uCrestNorm;
 
 vec2 casUv(vec2 p, vec4 c) { return vec2(dot(p, c.xy), dot(p, vec2(-c.y, c.x))); }
 float shelterAt(vec2 p) {
@@ -215,10 +223,10 @@ void main() {
   float sp = aSpacing;
   vec3 D = vec3(0.0);
   D += textureLod(uA0, casUv(grid, uCas[0]), max(log2(sp / uCas[0].z), 0.0)).xyz;
-  vec3 D12 = textureLod(uA1, casUv(grid, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
-  D12 += textureLod(uA2, casUv(grid, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
-  D += D12;
-  vCrest = D12.y * uCrestNorm;
+  D += textureLod(uA1, casUv(grid, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
+  vec3 D2 = textureLod(uA2, casUv(grid, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
+  vCrest = vec2(D2.y * uCrestNorm.x, D.y * uCrestNorm.y);
+  D += D2;
   float sh = shelterAt(grid);
   D *= sh;
   if (uSimXf.w > 0.0) {
@@ -270,10 +278,62 @@ varying vec2 vGrid;
 varying float vViewZ;
 varying float vShelter;
 varying float vDispY;
-varying float vCrest;
+varying vec2 vCrest;
 varying float vSpacing;
 uniform vec2 uFoamJ;
 uniform int uDebug;
+uniform vec4 uRings[8];   // splash ring trains: x, z, start time, strength
+uniform vec4 uWakeP[64];  // 4 wake trails x 16 points, head first: x, z, time, speed
+uniform vec4 uWakeB[4];   // per trail: bounds centre xz, bounds radius, body width
+uniform vec4 uWakeN;      // points per trail
+
+// Kelvin wake behind a trail: chevrons of divergent waves inside a 19.5 degree wedge, strongest
+// along the cusp lines. Returns the slope (dh/dx, dh/dz) and the arm crest mask in z.
+vec3 kelvinWake(vec2 p, int tr, float n) {
+  vec4 B = uWakeB[tr];
+  if (n < 2.0 || length(p - B.xy) > B.z) return vec3(0.0);
+  float best = 1e9, sAt = 0.0, side = 1.0, v = 0.0, born = 0.0, acc = 0.0;
+  vec2 dirAt = vec2(1.0, 0.0);
+  for (int i = 0; i < 15; i++) {
+    if (float(i + 1) >= n) break;
+    vec4 a = uWakeP[tr * 16 + i], b = uWakeP[tr * 16 + i + 1];
+    vec2 seg = b.xy - a.xy;
+    float L = max(length(seg), 1e-3);
+    float t = clamp(dot(p - a.xy, seg) / (L * L), 0.0, 1.0);
+    vec2 q = a.xy + seg * t;
+    float d = length(p - q);
+    if (d < best) {
+      best = d;
+      sAt = acc + t * L;
+      vec2 sd = seg / L;
+      side = sign(sd.x * (p.y - a.y) - sd.y * (p.x - a.x));
+      dirAt = sd;
+      v = mix(a.w, b.w, t);
+      born = mix(a.z, b.z, t);
+    }
+    acc += L;
+  }
+  float W = B.w;
+  float u = sAt;                       // metres behind the head
+  float w = best;                      // metres from the track
+  float edge = u * 0.354 + W * 0.6;    // tan(19.47 deg)
+  if (w > edge + 6.0) return vec3(0.0);
+  float age = max(uTime - born, 0.0);
+  float lam = 1.1 + v * 0.32;
+  float K = 6.2831 / lam;
+  const float ca = 0.819, sa = 0.574; // chevron crests at 35 degrees to the track
+  float ph = K * (w * ca - u * sa);
+  float arm = exp(-pow((w - edge) / (lam * 1.2 + u * 0.05), 2.0));
+  float inside = smoothstep(edge + lam, edge - lam * 0.5, w);
+  float A = 0.07 * clamp(v / 6.0, 0.0, 2.0) * (0.35 * inside + arm) * exp(-age / 7.0) * smoothstep(0.0, W * 0.5 + 1.0, u);
+  // slope in track coordinates (u back along the track, w out to this side)
+  float c = cos(ph);
+  float dw = A * K * ca * c, du = -A * K * sa * c;
+  vec2 back = dirAt;
+  vec2 outw = vec2(-back.y, back.x) * side;
+  vec2 g = back * du + outw * dw;
+  return vec3(g, arm * max(sin(ph), 0.0) * A * 6.0);
+}
 
 vec2 casUv(vec2 p, vec4 c) { return vec2(dot(p, c.xy), dot(p, vec2(-c.y, c.x))); }
 
@@ -334,11 +394,11 @@ void main() {
            + (max(c2.x - b2.x * b2.x, 0.0) + max(d3.z - d3.x * d3.x, 0.0)) * shs * shs;
   float vz = (max(c0.y - b0.y * b0.y, 0.0) + max(c1.y - b1.y * b1.y, 0.0)) * sh * sh
            + (max(c2.y - b2.y * b2.y, 0.0) + max(d3.w - d3.y * d3.y, 0.0)) * shs * shs;
-  float cap = uOcean.x * mix(0.25, 1.0, sh) * patchy;
+  float cap = uOcean.x * mix(0.25, 1.0, sh) * patchy * mix(1.0, 0.45, 1.0 - smoothstep(18.0, 70.0, dist));
   float crestFoam = (c0.w * 1.0 + c1.w * 0.9 + c2.w * 0.55) * sh;
 
   // interaction sheet: ripples, wakes, splash foam, plankton glow
-  float simFoam = 0.0, simGlow = 0.0;
+  float simFoam = 0.0, simGlow = 0.0, simH = 0.0;
   if (uSimXf.w > 0.0) {
     vec2 su = (p - uSimXf.xy) / uSimXf.z + 0.5;
     if (su.x > 0.0 && su.y > 0.0 && su.x < 1.0 && su.y < 1.0) {
@@ -351,7 +411,73 @@ void main() {
       hz += (hu - hd) / cell;
       simFoam = s0.b;
       simGlow = s0.a;
+      simH = s0.r;
     }
+  }
+
+  // splash ring trains: ripples run out through an envelope that spreads at half their speed
+  // (deep-water dispersion), fading as they widen
+  for (int i = 0; i < 8; i++) {
+    vec4 rg = uRings[i];
+    float age = uTime - rg.z;
+    if (rg.w <= 0.0 || age < 0.0 || age > 9.0) continue;
+    vec2 dv = p - rg.xy;
+    float r = length(dv);
+    float cg = 1.6 + rg.w * 0.4;
+    float rc = cg * age + 1.0;
+    float wdt = 1.2 + age * 0.9;
+    float env = exp(-pow((r - rc) / wdt, 2.0));
+    if (env < 0.003) continue;
+    float kk = 6.2831 / (1.4 + age * 0.35 + rg.w * 0.4);
+    float A = rg.w * 0.35 / (1.0 + age * 0.6) / sqrt(1.0 + r * 0.25);
+    float dh = A * kk * cos(kk * (r - 2.0 * cg * age)) * env;
+    vec2 dir = dv / max(r, 1e-3);
+    hx += dir.x * dh;
+    hz += dir.y * dh;
+  }
+
+  // capillary ripples right under the eye: two drifting layers of fine noise relief
+  float capNear = 1.0 - smoothstep(18.0, 70.0, dist);
+  if (capNear > 0.0) {
+    vec2 wdir = uWindDir;
+    vec2 qa = p / 2.3 + wdir * uTime * 0.21;
+    vec2 qb = p / 1.37 + vec2(-wdir.y, wdir.x) * uTime * 0.13 + 0.5;
+    const float e = 1.0 / 256.0;
+    float a0 = texture2D(uNoise, qa).b, ax = texture2D(uNoise, qa + vec2(e, 0.0)).b, az = texture2D(uNoise, qa + vec2(0.0, e)).b;
+    float b0 = texture2D(uNoise, qb).b, bx = texture2D(uNoise, qb + vec2(e, 0.0)).b, bz = texture2D(uNoise, qb + vec2(0.0, e)).b;
+    float amp = (0.006 + 0.03 * sqrt(uOcean.x)) * capNear * shs;
+    hx += ((ax - a0) * 256.0 / 2.3 + (bx - b0) * 256.0 / 1.37 * 0.6) * amp;
+    hz += ((az - a0) * 256.0 / 2.3 + (bz - b0) * 256.0 / 1.37 * 0.6) * amp;
+  }
+
+  // wakes of whales moving at the surface
+  float wakeArm = 0.0;
+  for (int i = 0; i < 4; i++) {
+    float n = uWakeN[i];
+    if (n < 2.0) continue;
+    vec3 kw = kelvinWake(p, i, n);
+    hx += kw.x;
+    hz += kw.y;
+    wakeArm += kw.z;
+  }
+
+  // rain: expanding ring ripples where drops land (two staggered layers of cells)
+  if (uWet > 0.02 && dist < 120.0) {
+    vec2 rg = vec2(0.0);
+    for (int l = 0; l < 2; l++) {
+      vec2 q = p * (l == 0 ? 0.9 : 1.37) + float(l) * 7.31;
+      vec2 ci = floor(q), cf = fract(q);
+      vec2 o = hash22(ci + float(l) * 13.0);
+      float ph = fract(uTime * 1.3 + o.x * 7.0);
+      vec2 dv = cf - (0.25 + o * 0.5);
+      float r = length(dv);
+      float ring = r - ph * 0.45;
+      float w = exp(-ring * ring * 900.0) * (1.0 - ph) * (1.0 - ph);
+      rg += dv / max(r, 1e-3) * sin(ring * 90.0) * w;
+    }
+    float rk = uWet * 0.35 * (1.0 - smoothstep(40.0, 120.0, dist));
+    hx += rg.x * rk;
+    hz += rg.y * rk;
   }
 
   // normal of the displaced (trochoidal) surface
@@ -388,15 +514,18 @@ void main() {
       env = mix(env, ss.rgb, ss.a * smoothstep(0.35, 0.05, rough));
     }
     float shadow = sampleShadow(P + vec3(0.0, 0.3, 0.0), vec3(0.0, 1.0, 0.0));
-    vec3 spec = seaGlitter(N, V, uSunDir, s2 + 1.2e-4, uSunColor) * shadow;
-    spec += seaGlitter(N, V, uMoonDir, s2 + 1.2e-4, uMoonColor * 0.35) * uNight;
+    vec3 spec = seaGlitter(N, V, uSunDir, s2 + 1.2e-4, uSunColor) * shadow * (1.0 - uStorm * 0.85);
+    spec += seaGlitter(N, V, uMoonDir, s2 + 1.2e-4, uMoonColor * 0.9) * uNight;
 
     // what lies below: refracted scene through the water column
     float sceneZ = sceneDepthAt(suv);
     vec3 Nv = mat3(viewMatrix) * N;
     float thick0 = max(sceneZ - surfZ, 0.0);
     vec2 off = Nv.xy * uOcean.z * min(thick0, 8.0) / max(surfZ, 1.0);
-    vec2 ruv = clamp(suv - off, vec2(0.001), vec2(0.999));
+    // no bending near the frame edges (there is nothing to fetch beyond them)
+    vec2 eg = smoothstep(0.0, 0.06, suv) * smoothstep(1.0, 0.94, suv);
+    off *= eg.x * eg.y;
+    vec2 ruv = clamp(suv - off, vec2(0.0005), vec2(0.9995));
     float rz = sceneDepthAt(ruv);
     if (rz < surfZ + 0.05) { ruv = suv; rz = sceneZ; }
     bool open = rz > uNearFar.y * 0.95;
@@ -408,13 +537,17 @@ void main() {
     vec3 Lh = normalize(vec3(uSunDir.x, 0.0, uSunDir.z) + vec3(1e-4));
     float toward = pow(clamp(dot(-V, Lh) * 0.5 + 0.5, 0.0, 1.0), 4.0);
     // thin water near the tops of the short wind waves, backlit; strongest with a low sun
-    float crest = smoothstep(0.2, 1.8, vCrest);
+    float crest = smoothstep(0.2, 1.8, vCrest.x);
     float face = pow(1.0 - nv, 2.0);
+    // the big swells: light through the thin, steep upper part of a wave face
+    float big = smoothstep(0.9, 2.6, vCrest.y) * smoothstep(0.85, 0.4, J) * face * 2.0;
+    crest = max(crest, big);
     float sunUp = smoothstep(-0.05, 0.2, uSunDir.y);
     float lowSun = mix(1.0, 0.45, smoothstep(0.3, 0.8, uSunDir.y));
     float sss = crest * toward * (0.25 + face * 1.6) * sunUp * lowSun * mix(0.35, 1.0, shadow);
     sss *= (1.0 - farK);
-    vec3 body = uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) + uSeaScatter * sss;
+    // light scattered up from inside the water dims under island and cloud shade
+    vec3 body = (uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) + uSeaScatter * sss) * mix(0.6, 1.0, shadow);
 
     float Tf = 1.0 - F;
     vec3 S = env * F + spec;
@@ -428,35 +561,54 @@ void main() {
     float bub1 = texture2D(uNoise, (p + uDrift * 0.08) / 9.0).g;
     float bub2 = texture2D(uNoise, (p - uDrift * 0.05) / 3.1 + 0.37).g;
     float lace = texture2D(uNoise, (p + uDrift * 0.06) / 23.0).r;
-    float bubbles = bub1 * 0.6 + bub2 * 0.4;
+    float bub3 = texture2D(uNoise, (p + uDrift * 0.03) / 1.15 + 0.71).g;
+    float near = 1.0 - smoothstep(12.0, 45.0, dist);
+    float bubbles = mix(bub1 * 0.6 + bub2 * 0.4, bub1 * 0.45 + bub2 * 0.3 + bub3 * 0.25, near);
     // whitecaps and the lace they leave behind
     float cover = crestFoam * uFoamCtl.x;
     // storm streaks along the wind
     float streak = texture2D(uNoise, vec2(wa.x / 140.0, wa.y / 9.0) + uDrift / 900.0).b;
     streak = smoothstep(0.55, 0.85, streak) * smoothstep(0.35, 0.75, lace) * uFoamCtl.y;
-    cover += streak * 0.6 + simFoam;
+    cover += streak * 0.6 + simFoam + wakeArm * 0.6;
     // where the sea meets rock, whales and fish at the surface
     float shore = 0.0;
     if (!open) {
       float wz = max(sceneZ - surfZ, 0.0);
       float churn = texture2D(uNoise, p / 4.3 + vec2(uTime * 0.03, -uTime * 0.021)).g;
-      shore = smoothstep(0.75, 0.0, wz) * (0.45 + 0.55 * churn) * uFoamCtl.z;
+      shore = smoothstep(0.55, 0.0, wz) * (0.4 + 0.6 * churn) * uFoamCtl.z;
       cover += shore;
     }
     // coverage eats into the bubble pattern: sparse specks, then lace, then solid foam
     float pat = clamp((bubbles * 0.6 + lace * 0.4 - 0.3) * 2.0, 0.0, 1.0);
     float thr = 1.0 - min(cover, 1.2);
     float foamA = smoothstep(thr - 0.12, thr + 0.06, pat) * smoothstep(0.0, 0.12, cover);
+    // far away the lace is below a pixel: show its average cover instead of sparkling specks
+    float farFoam = smoothstep(60.0, 500.0, dist);
+    foamA = mix(foamA, clamp(cover * 0.75, 0.0, 0.9), farFoam);
     foamA = clamp(foamA, 0.0, 1.0) * (1.0 - farK * 0.6);
     vec3 foamLit = uSunColor * (max(dot(N, uSunDir), 0.0) * 0.8 + 0.2) * mix(0.35, 1.0, shadow) + uSkyAmbient * 0.9;
     foamLit += uMoonColor * uNight * 0.5;
     vec3 foamCol = foamLit * mix(0.78, 0.95, bub2);
+    // churned water full of bubbles glows pale turquoise around and under the foam
+    float aer = smoothstep(0.04, 0.7, cover) * (1.0 - foamA) * (1.0 - farK);
+    col += (uSeaScatter * 1.6 + uSkyAmbient * 0.12) * mix(0.4, 1.0, shadow) * aer * 0.55 * (1.0 - f);
     col = mix(col, foamCol * (1.0 - f) + C * f, foamA);
     dbg = vec4(foamA, cover, pat, 0.0);
 
     // night: plankton flare where the water is churned
-    float glow = (simGlow * 1.2 + crestFoam * 0.25 + shore * 0.5 + simFoam * 0.3) * uWaterParams.z;
+    float glow = (simGlow * 1.2 + crestFoam * 0.25 + shore * 0.5 + simFoam * 0.3 + wakeArm * 0.4) * uWaterParams.z;
     col += vec3(0.08, 0.55, 0.85) * glow * (0.6 + 0.4 * bub1) * (1.0 - f);
+    // and a sparse field of single motes blinking as the swell lifts them
+    if (uWaterParams.z > 0.01 && dist < 90.0) {
+      vec2 cp = p * 1.7;
+      vec2 ci = floor(cp);
+      vec2 o = hash22(ci);
+      float on = step(0.93, o.x);
+      vec2 dd = fract(cp) - (0.2 + o * 0.6);
+      float blink = pow(max(sin(uTime * (0.6 + o.y * 1.5) + o.x * 40.0 + vDispY * 3.0), 0.0), 6.0);
+      float mote = on * exp(-dot(dd, dd) * 900.0) * blink * (1.0 - smoothstep(30.0, 90.0, dist));
+      col += vec3(0.15, 0.7, 1.0) * mote * uWaterParams.z * 0.9 * (1.0 - f);
+    }
 
     // far: blend to exactly what the sky dome draws beyond the mesh
     vec3 far = seaFarColor(-V);
@@ -475,7 +627,8 @@ void main() {
     vec3 through = vec3(0.0);
     if (!tir) {
       vec3 Tv = mat3(viewMatrix) * T;
-      vec2 ruv = clamp(suv + Tv.xy * 0.03, vec2(0.001), vec2(0.999));
+      vec2 eg = smoothstep(0.0, 0.06, suv) * smoothstep(1.0, 0.94, suv);
+      vec2 ruv = clamp(suv + Tv.xy * 0.03 * eg.x * eg.y, vec2(0.0005), vec2(0.9995));
       float rz = sceneDepthAt(ruv);
       if (rz > uNearFar.y * 0.95 || rz < surfZ) {
         vec3 sky = skyEnv(normalize(vec3(T.x, max(T.y, 0.0), T.z)), 0.5);
@@ -486,8 +639,9 @@ void main() {
         through = texture2D(uSceneTex, ruv).rgb;
       }
     }
+    // outside Snell's window the surface is a rippled mirror of the darker water below
     vec3 Rd = reflect(I, Nd);
-    vec3 below = waterFogColor(Rd, max(uSeaLevel - P.y, 0.0) + 15.0);
+    vec3 below = waterFogColor(Rd, max(uSeaLevel - P.y, 0.0) + 22.0) * (0.55 + 0.45 * smoothstep(-1.0, 0.0, Rd.y));
     below = below * Tp + fogc * (1.0 - Tp);
     col = through * (1.0 - F) + below * F;
     float foamU = clamp(crestFoam * uFoamCtl.x + simFoam, 0.0, 1.0);
@@ -497,9 +651,10 @@ void main() {
   if (uDebug == 1) col = vec3(crestFoam, simFoam, 0.0);
   else if (uDebug == 2) col = vec3(Jt * 0.5, J * 0.5, 0.0);
   else if (uDebug == 3) col = N * 0.5 + 0.5;
-  else if (uDebug == 4) col = vec3(sqrt(s2) * 4.0, patchy * 0.5, vCrest * 0.25 + 0.5);
+  else if (uDebug == 4) col = vec3(sqrt(s2) * 4.0, patchy * 0.5, vCrest.x * 0.25 + 0.5);
   else if (uDebug == 5) col = vec3(vDispY * 0.1 + 0.5);
   else if (uDebug == 6) col = dbg.xyz;
+  else if (uDebug == 7) col = vec3(simH * 2.0 + 0.5, simFoam, simGlow);
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -734,25 +889,27 @@ export class Ocean {
         w.A = Math.sqrt(Math.max(w.aw * sw + w.as * ss, 0));
         slopeVar += (w.A * w.k) ** 2 * 0.25;
         m0 += w.A * w.A * 0.5;
-        if (c.def.disp && w.A > 0.0015) active.push(w);
+        if (c.def.disp && w.A > 0.003) active.push(w);
       }
     }
     active.sort((a, b) => b.A - a.A);
+    this._specV = (this._specV || 0) + 1;
     this.chop = keyed(CHOP, s);
     this.foamJ = keyed(FOAMJ, s);
     // each cascade breaks at its share of the whole sea's compression
-    let sigT = 0, m12 = 0;
+    let sigT = 0, m12 = 0, m01 = 0;
     for (const c of this.cascades) {
       let v = 0;
       for (const w of c.waves) v += (w.A * w.k) ** 2 * 0.5;
       c.sig = c.def.disp ? this.chop * Math.sqrt(v) : 0;
       sigT += c.sig * c.sig;
-      if (c.def.disp && c.def.L < 1000) for (const w of c.waves) m12 += w.A * w.A * 0.5;
+      if (c.def.disp && c.def.L < 100) for (const w of c.waves) m12 += w.A * w.A * 0.5;
+      else if (c.def.disp) for (const w of c.waves) m01 += w.A * w.A * 0.5;
     }
     sigT = Math.sqrt(sigT);
     for (const c of this.cascades) c.foamJ = 1 - (1 - this.foamJ) * (sigT > 0 ? c.sig / sigT : 1);
     if (this.uniforms) {
-      this.uniforms.uCrestNorm.value = 1 / Math.max(Math.sqrt(m12), 0.01);
+      this.uniforms.uCrestNorm.value.set(1 / Math.max(Math.sqrt(m12), 0.01), 1 / Math.max(Math.sqrt(m01), 0.05));
       this.uniforms.uFoamJ.value.set(this.foamJ, 2.5);
     }
     this.rms = Math.sqrt(m0);
@@ -828,10 +985,17 @@ export class Ocean {
       uWindDir: { value: new Vector2(Math.sin(WIND0), Math.cos(WIND0)) },
       uDrift: { value: new Vector2() },
       uMeshEdge: { value: 7600 },
-      uCrestNorm: { value: 1 },
+      uCrestNorm: { value: new Vector2(1, 1) },
       uFoamJ: { value: new Vector2(0.3, 3) },
       uDebug: { value: 0 },
+      uRings: { value: Array.from({ length: 8 }, () => new Vector4(0, 0, -99, 0)) },
+      uWakeP: { value: Array.from({ length: 64 }, () => new Vector4()) },
+      uWakeB: { value: Array.from({ length: 4 }, () => new Vector4()) },
+      uWakeN: { value: new Vector4() },
     });
+    this._ringI = 0;
+    // wake trails of things moving at the surface (matched frame to frame by position)
+    this.trails = Array.from({ length: 4 }, () => ({ pts: [], seen: -99, width: 2 }));
     this.material = new ShaderMaterial({
       vertexShader: OCEAN_VERT,
       fragmentShader: OCEAN_FRAG,
@@ -865,6 +1029,9 @@ export class Ocean {
   }
 
   // ------------------------------------------------------------------ public API
+  /** Current (eased) sea state 0..1. */
+  get seaState() { return this.state; }
+
   /** 0 glassy .. 0.3 calm .. 0.6 lively .. 1 storm, eased over dur seconds. Null: follow the sky. */
   setSeaState(k, { dur = 6 } = {}) {
     if (k === null || k === undefined) {
@@ -914,53 +1081,110 @@ export class Ocean {
   }
 
   /** Displacement and derivatives of the displacing cascades at a tile (Lagrangian) point. */
-  _eval(x, z, t, deriv) {
+  _eval(x, z, t, deriv, count = Infinity) {
     const d = this._d;
+    if (t !== this._phT || this._phV !== this._specV) this._packActive(t);
+    const KX = this._aKx, KZ = this._aKz, AM = this._aA, PH = this._aPh, QX = this._aQx, QZ = this._aQz;
     let dx = 0, dy = 0, dz = 0, hx = 0, hz = 0, dxx = 0, dzz = 0, dxz = 0;
-    const ch = this.chop;
-    const act = this._active;
-    for (let i = 0; i < act.length; i++) {
-      const w = act[i];
-      const th = w.kx * x + w.kz * z + w.phi0 - w.omega * t;
-      const s = Math.sin(th), c = Math.cos(th);
-      const A = w.A;
-      dy += A * c;
-      const q = (ch * A) / w.k;
-      dx -= q * w.kx * s;
-      dz -= q * w.kz * s;
-      if (deriv) {
-        hx -= A * w.kx * s;
-        hz -= A * w.kz * s;
-        dxx -= q * w.kx * w.kx * c;
-        dzz -= q * w.kz * w.kz * c;
-        dxz -= q * w.kx * w.kz * c;
+    const n = Math.min(this._aN, count);
+    if (deriv) {
+      for (let i = 0; i < n; i++) {
+        const kx = KX[i], kz = KZ[i];
+        const th = kx * x + kz * z + PH[i];
+        const s = Math.sin(th), c = Math.cos(th);
+        const A = AM[i], qx = QX[i], qz = QZ[i];
+        dy += A * c;
+        dx -= qx * s;
+        dz -= qz * s;
+        hx -= A * kx * s;
+        hz -= A * kz * s;
+        dxx -= qx * kx * c;
+        dzz -= qz * kz * c;
+        dxz -= qx * kz * c;
+      }
+    } else {
+      for (let i = 0; i < n; i++) {
+        const th = KX[i] * x + KZ[i] * z + PH[i];
+        const s = Math.sin(th);
+        dy += AM[i] * Math.cos(th);
+        dx -= QX[i] * s;
+        dz -= QZ[i] * s;
       }
     }
     d.x = dx; d.y = dy; d.z = dz; d.hx = hx; d.hz = hz; d.dxx = dxx; d.dzz = dzz; d.dxz = dxz;
     return d;
   }
 
-  /** Find the tile point whose displaced position lands on (x, z). */
-  _lagrange(x, z, t) {
+  /** Flat arrays of the displacing waves with their phases at time t (fast CPU evaluation). */
+  _packActive(t) {
+    const act = this._active;
+    const n = act.length;
+    if (!this._aKx || this._aKx.length < n) {
+      const m = Math.max(n, 256);
+      this._aKx = new Float64Array(m); this._aKz = new Float64Array(m); this._aA = new Float64Array(m);
+      this._aPh = new Float64Array(m); this._aQx = new Float64Array(m); this._aQz = new Float64Array(m);
+    }
+    const ch = this.chop;
+    for (let i = 0; i < n; i++) {
+      const w = act[i];
+      this._aKx[i] = w.kx;
+      this._aKz[i] = w.kz;
+      this._aA[i] = w.A;
+      this._aPh[i] = (w.phi0 - w.omega * t) % TAU;
+      const q = (ch * w.A) / w.k;
+      this._aQx[i] = q * w.kx;
+      this._aQz[i] = q * w.kz;
+    }
+    this._aN = n;
+    this._phT = t;
+    this._phV = this._specV;
+  }
+
+  /** Find the tile point whose displaced position lands on (x, z) (Newton on p + D(p) = x).
+   *  The strongest waves steer the solve; returns the last (strong-wave) slopes in _d. */
+  _lagrange(x, z, t, n = this.state > 0.7 ? 80 : 40) {
     let px = x, pz = z;
-    for (let it = 0; it < 4; it++) {
-      const d = this._eval(px, pz, t, false);
-      const sh = this.shelters.length ? this._shelterAt(px, pz) : 1;
-      const nx = x - d.x * sh, nz = z - d.z * sh;
-      if (Math.abs(nx - px) + Math.abs(nz - pz) < 0.004) { px = nx; pz = nz; break; }
-      px = nx;
-      pz = nz;
+    const sheltered = this.shelters.length > 0;
+    let d = null;
+    for (let it = 0; it < 5; it++) {
+      d = this._eval(px, pz, t, true, n);
+      const sh = sheltered ? this._shelterAt(px, pz) : 1;
+      const fx = px + d.x * sh - x, fz = pz + d.z * sh - z;
+      if (Math.abs(fx) + Math.abs(fz) < 0.002) break;
+      const a = 1 + d.dxx * sh, b = d.dxz * sh, c = 1 + d.dzz * sh;
+      let det = a * c - b * b;
+      if (det < 0.25) {
+        // near a fold the Jacobian is unreliable: damped fixed-point step instead
+        px -= fx * 0.6;
+        pz -= fz * 0.6;
+      } else {
+        det = 1 / det;
+        px -= (c * fx - b * fz) * det;
+        pz -= (a * fz - b * fx) * det;
+      }
     }
     this._lx = px;
     this._lz = pz;
+    this._shx = d.hx;
+    this._shz = d.hz;
   }
 
   /** Sea surface height at a world point, now (matches the rendered waves to a few cm). */
   heightAt(x, z, t = G.uTime.value) {
     this._lagrange(x, z, t);
-    const d = this._eval(this._lx, this._lz, t, false);
-    const sh = this.shelters.length ? this._shelterAt(this._lx, this._lz) : 1;
-    return this.level + d.y * sh;
+    const px = this._lx, pz = this._lz;
+    // one Newton step with every wave, and the height carried along it to first order
+    const d = this._eval(px, pz, t, true);
+    const sh = this.shelters.length ? this._shelterAt(px, pz) : 1;
+    const fx = px + d.x * sh - x, fz = pz + d.z * sh - z;
+    const a = 1 + d.dxx * sh, b = d.dxz * sh, c = 1 + d.dzz * sh;
+    const det = a * c - b * b;
+    let ux = 0, uz = 0;
+    if (det > 0.2) {
+      ux = -(c * fx - b * fz) / det;
+      uz = -(a * fz - b * fx) / det;
+    }
+    return this.level + (d.y + d.hx * ux + d.hz * uz) * sh;
   }
 
   /** Surface normal at a world point. */
@@ -984,8 +1208,13 @@ export class Ocean {
   /** Foam ring + spray + wave ring (whale lunges, breaches, slaps). strength ~0.2..3. */
   splash(pos, strength = 1, radius = 4) {
     const s = clamp(strength, 0, 4);
-    this._addSource(pos.x, pos.z, radius, -2.2 * s, 0.9 * s, 1.2 * s, 0);
-    this._addSource(pos.x, pos.z, radius * 1.6, -0.8 * s, 0.35 * s, 0.4 * s, 1);
+    // ring trains (analytic): reuse the oldest slot
+    const rings = this.uniforms.uRings.value;
+    const ring = rings[this._ringI++ % rings.length];
+    ring.set(pos.x, pos.z, G.uTime.value, Math.min(s, 3) * Math.sqrt(Math.max(radius, 1) / 4));
+    // a crater that rebounds into ring waves, ringed by a raised lip, and a sheet of foam
+    this._addSource(pos.x, pos.z, radius, -0.55 * s, 0.6 * s, 1.4 * s, 0);
+    this._addSource(pos.x, pos.z, radius * 1.5, 0.22 * s, 0.5 * s, 0.5 * s, 1);
     this._spray(pos, s, radius);
   }
 
@@ -998,10 +1227,125 @@ export class Ocean {
     const sp = Math.hypot(vel.x, vel.z);
     const dt = this._frameDt || 1 / 60;
     const k = near * clamp(sp / 6, 0, 2.5);
-    this._addSource(pos.x, pos.z, width * 0.7, -5 * k * dt, 1.4 * k * dt, 2.2 * k * dt, 0, true);
+    if (sp > 1.5 && near > 0.2) this._trail(pos.x, pos.z, sp, width);
+    // hull depression (its rebound draws the V wake), churned foam and plankton glow along the track
+    this._addSource(pos.x, pos.z, width * 0.75, -0.5 * near * clamp(sp / 4, 0.3, 1.5), 2.2 * k * dt, 5 * k * dt, 2, true);
     if (sp > 7 && near > 0.5 && Math.random() < dt * sp * 0.25) {
       this._v.set(pos.x + vel.x * 0.08, h + 0.2, pos.z + vel.z * 0.08);
-      this._spray(this._v, 0.25 * clamp(sp / 12, 0, 1.5), width * 0.6);
+      this._spray(this._v, 0.25 * clamp(sp / 12, 0, 1.5), width * 0.6, 0);
+    }
+  }
+
+  /** Extend (or start) the wake trail whose head is at this mover. */
+  _trail(x, z, speed, width) {
+    const now = G.uTime.value;
+    let best = null, bd = Infinity;
+    for (const tr of this.trails) {
+      if (!tr.pts.length || now - tr.seen > 1.5) continue;
+      const h = tr.pts[0];
+      const d = Math.hypot(h.x - x, h.z - z);
+      if (d < bd) { bd = d; best = tr; }
+    }
+    if (!best || bd > speed * 0.4 + width + 3) {
+      // a new trail replaces the stalest one
+      best = this.trails.reduce((a, b) => (a.seen < b.seen ? a : b));
+      best.pts.length = 0;
+      best.pts.push({ x, z, t: now, v: speed }, { x, z, t: now, v: speed });
+    }
+    best.seen = now;
+    best.width = width;
+    const pts = best.pts;
+    // the head follows the mover; a fixed point is laid every few metres behind it
+    const h = pts[0];
+    h.x = x; h.z = z; h.t = now; h.v = speed;
+    const p1 = pts[1];
+    if (Math.hypot(p1.x - x, p1.z - z) > Math.max(3, width * 0.8)) {
+      pts.splice(1, 0, { x, z, t: now, v: speed });
+      if (pts.length > 16) pts.length = 16;
+    }
+    while (pts.length > 2 && now - pts[pts.length - 1].t > 16) pts.pop();
+  }
+
+  _syncTrails() {
+    const u = this.uniforms;
+    const P = u.uWakeP.value, B = u.uWakeB.value, N = u.uWakeN.value;
+    const now = G.uTime.value;
+    for (let i = 0; i < 4; i++) {
+      const tr = this.trails[i];
+      const live = tr.pts.length >= 2 && now - tr.seen < 14;
+      let n = live ? tr.pts.length : 0;
+      let minx = Infinity, maxx = -Infinity, minz = Infinity, maxz = -Infinity, len = 0;
+      for (let j = 0; j < 16; j++) {
+        const v = P[i * 16 + j];
+        if (j < n) {
+          const q = tr.pts[j];
+          v.set(q.x, q.z, q.t, q.v);
+          minx = Math.min(minx, q.x); maxx = Math.max(maxx, q.x);
+          minz = Math.min(minz, q.z); maxz = Math.max(maxz, q.z);
+          if (j > 0) len += Math.hypot(q.x - tr.pts[j - 1].x, q.z - tr.pts[j - 1].z);
+        } else v.set(0, 0, -99, 0);
+      }
+      if (n >= 2) {
+        const cx = (minx + maxx) * 0.5, cz = (minz + maxz) * 0.5;
+        const r = Math.hypot(maxx - minx, maxz - minz) * 0.5 + len * 0.36 + tr.width + 8;
+        B[i].set(cx, cz, r, tr.width);
+      } else {
+        n = 0;
+        B[i].set(0, 0, 0, 0);
+      }
+      N.setComponent(i, n);
+    }
+  }
+
+  /** Gale-torn spray off breaking crests near the camera (lively seas and storms). */
+  _weatherSpray(dt) {
+    const s = this.state;
+    if (s < 0.5 || !this.game.mist || dt <= 0) return;
+    const cam = this.engine.camera.position;
+    const wind = this.game.wind?.base;
+    const wx = wind ? wind.x : 0, wz = wind ? wind.z : 0;
+    const t = G.uTime.value;
+    // a few probes per frame; each breaking crest found throws a sheet of spray downwind
+    this._sprayAcc = (this._sprayAcc || 0) + dt * lerp(4, 40, smoothstep(0.5, 1, s));
+    let tries = Math.min(8, Math.floor(this._sprayAcc));
+    this._sprayAcc -= tries;
+    const v = this._v2;
+    while (tries-- > 0) {
+      const a = Math.random() * TAU, r = 15 + Math.random() * 110;
+      const x = cam.x + Math.cos(a) * r, z = cam.z + Math.sin(a) * r;
+      const d = this._eval(x, z, t, true, 60);
+      const J = (1 + d.dxx) * (1 + d.dzz) - d.dxz * d.dxz;
+      if (J > this.foamJ * 0.8 || d.y < this.rms * 0.6) continue;
+      const k = clamp((this.foamJ - J) * 2, 0.2, 1.2);
+      const px = x + d.x, pz = z + d.z, py = this.level + d.y;
+      for (let i = 0; i < 6; i++) {
+        v.set(wx * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2, 1.5 + Math.random() * 3 * k, wz * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2);
+        this.game.mist.emit({
+          pos: { x: px + (Math.random() - 0.5) * 4, y: py + 0.3, z: pz + (Math.random() - 0.5) * 4 }, vel: v,
+          life: 1.2 + Math.random() * 1.4, size: 0.8 + Math.random() * 1.2, sizeEnd: 3.5 + Math.random() * 3,
+          color: [0.92, 0.95, 1.0], alpha: 0.32 * k, drag: 0.7, gravity: 2.5, kind: 0, fadeIn: 0.1,
+        });
+      }
+    }
+  }
+
+  /** Specks drifting in the water around a submerged camera: depth and motion cues. */
+  _marineSnow(dt) {
+    const mist = this.game.mist;
+    if (!mist || dt <= 0) return;
+    const cam = this.engine.camera.position;
+    this._snowAcc = (this._snowAcc || 0) + dt * 45;
+    const v = this._v2;
+    while (this._snowAcc >= 1) {
+      this._snowAcc -= 1;
+      const a = Math.random() * TAU, r = 1.5 + Math.random() * 14, y = (Math.random() - 0.5) * 12;
+      const py = Math.min(cam.y + y, this.camSurface - 0.3);
+      v.set((Math.random() - 0.5) * 0.15, -0.05 - Math.random() * 0.1, (Math.random() - 0.5) * 0.15);
+      mist.emit({
+        pos: { x: cam.x + Math.cos(a) * r, y: py, z: cam.z + Math.sin(a) * r }, vel: v,
+        life: 5 + Math.random() * 4, size: 0.025 + Math.random() * 0.04, sizeEnd: 0.03,
+        color: [1, 1, 1], alpha: 0.5 + Math.random() * 0.4, drag: 0.05, gravity: 0, kind: 5, fadeIn: 1.2,
+      });
     }
   }
 
@@ -1018,7 +1362,7 @@ export class Ocean {
     this._sources.push({ x, z, r, imp, foam, glow, ring });
   }
 
-  _spray(pos, s, radius) {
+  _spray(pos, s, radius, mistK = 1) {
     const g = this.game;
     const mist = g.mist, glow = g.glow;
     if (!mist) return;
@@ -1036,15 +1380,16 @@ export class Ocean {
         color: [lit, lit, lit], alpha: 0.9, drag: 0.25, gravity: 9.8, kind: 3, fadeIn: 0.02,
       });
     }
-    const m = Math.round(3 + 10 * Math.min(s, 2.5));
+    // a thin veil of mist over the crown, drifting off downwind
+    const m = Math.round((2 + 5 * Math.min(s, 2.5)) * mistK);
     for (let i = 0; i < m; i++) {
       const a = Math.random() * TAU;
-      const rr = Math.random() * radius * 0.7;
-      v.set(Math.cos(a) * 1.5, (1 + Math.random() * 3) * Math.sqrt(s), Math.sin(a) * 1.5);
+      const rr = (0.5 + Math.random() * 0.5) * radius * 0.8;
+      v.set(Math.cos(a) * 1.2, (0.8 + Math.random() * 2.2) * Math.sqrt(s), Math.sin(a) * 1.2);
       mist.emit({
-        pos: { x: pos.x + Math.cos(a) * rr, y: pos.y + 0.5, z: pos.z + Math.sin(a) * rr }, vel: v,
-        life: 2 + Math.random() * 2, size: radius * 0.35 * Math.sqrt(s), sizeEnd: radius * 1.2 * Math.sqrt(s),
-        color: [1, 1, 1], alpha: 0.42, drag: 0.9, gravity: 0.3, kind: 0, fadeIn: 0.08,
+        pos: { x: pos.x + Math.cos(a) * rr, y: pos.y + 0.6, z: pos.z + Math.sin(a) * rr }, vel: v,
+        life: 1.8 + Math.random() * 1.6, size: radius * 0.25 * Math.sqrt(s), sizeEnd: radius * 0.9 * Math.sqrt(s),
+        color: [1, 1, 1], alpha: 0.2, drag: 1.1, gravity: 0.4, kind: 0, fadeIn: 0.1,
       });
     }
     if (glow && G.uWaterParams.value.z > 0.05) {
@@ -1085,16 +1430,22 @@ export class Ocean {
     const u = this.uniforms;
     u.uCenter.value.set(cam.position.x, cam.position.z);
     u.uProj.value.copy(cam.projectionMatrix);
+    this._syncTrails();
     G.uSceneTex.value = this.engine.rt.texture;
   }
 
+  /** Called by the ocean itself before each frame renders (no need to call it from the game). */
   update(dt) {
+    if (this._updT === G.uTime.value && dt > 0) return;
+    this._updT = G.uTime.value;
     const g = this.game;
     // sea state: eased explicit target, or the atmosphere's preset
     if (this.auto) {
       // the atmosphere already eases between presets; storms build on top of it
       const a = g.atmosphere;
-      this.state = clamp((a?.current?.seaState ?? 0.3) + (a?.stormBoost ?? 0) * 0.6, 0, 1);
+      // a rising gale builds the sea on top of the preset (a slow, smoothed response)
+      const gale = smoothstep(5, 15, g.wind?.strength ?? 3) * 0.35;
+      this.state = clamp((a?.current?.seaState ?? 0.3) + (a?.stormBoost ?? 0) * 0.6 + gale, 0, 1);
       this._from = this._to = this.state;
       this._t = 1;
     } else if (this._t < 1) {
@@ -1109,9 +1460,11 @@ export class Ocean {
     u.uWindDir.value.set(Math.sin(this.windDir), Math.cos(this.windDir));
     if (g.wind) u.uDrift.value.set(g.wind.drift.x, g.wind.drift.z);
     u.uOcean.value.x = this.capVar;
-    u.uOcean.value.y = lerp(0.85, 0.15, smoothstep(0.2, 0.8, s));
+    u.uOcean.value.y = lerp(0.5, 0.1, smoothstep(0.2, 0.8, s));
     u.uFoamCtl.value.set(1, smoothstep(0.55, 1.0, s) * 0.9, 1, this.meshEdge * 0.62);
     u.uMeshEdge.value = this.meshEdge;
+    if (this.enabled) this._weatherSpray(dt);
+    if (this.enabled && this.underwater > 0.5) this._marineSnow(dt);
     // camera submersion
     const cam = this.engine.camera.position;
     const h = this.enabled ? this.heightAt(cam.x, cam.z) : -1e9;
@@ -1119,11 +1472,12 @@ export class Ocean {
     const und = this.enabled ? smoothstep(0.12, -0.12, cam.y - h) : 0;
     this.underwater = und;
     G.uUnderwater.value = und;
+    if (this.engine.post) this.engine.post.surfaceY = h;
     G.uSeaLevel.value = this.level;
   }
 
   _renderCascades(r, t, dt) {
-    const decayBase = lerp(2.5, 7, this.state);
+    const decayBase = lerp(2.5, 11, this.state);
     for (const c of this.cascades) {
       const n = c.waves.length;
       for (let i = 0; i < n; i++) {
@@ -1201,7 +1555,7 @@ export class Ocean {
       if (k > 0) u.uShift.value.set(0, 0);
       u.uDt.value = sdt;
       u.uAlpha.value = Math.min(0.4 / sdt, (c * c * sdt) / (cell * cell));
-      u.uDamp.value = Math.exp(-sdt * 0.35);
+      u.uDamp.value = Math.exp(-sdt * 0.16);
       u.uFoamDecay.value = Math.exp(-sdt / 9);
       u.uGlowDecay.value = Math.exp(-sdt / 2.5);
       u.uFoamGen.value = 0.25 * sdt;

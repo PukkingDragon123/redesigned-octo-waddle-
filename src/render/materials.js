@@ -115,7 +115,7 @@ import { TERRAIN_VERT, TERRAIN_FRAG } from '../world/shaders/terrain.js';
 
 export const TERRAIN_PALETTE = {
   grassDark: '#3f6a3a', grassLight: '#8cb35e', grassDry: '#c2b072', grassTeal: '#3f8a76',
-  moss: '#5c7d3a', sandLight: '#efe3c8', sandBlack: '#2b2a2d', lava: '#ff5a1c',
+  moss: '#5c7d3a', sandLight: '#d6c8aa', sandBlack: '#2b2a2d', lava: '#ff5a1c',
 };
 
 let _terrain = null;

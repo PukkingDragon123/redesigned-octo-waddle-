@@ -26,6 +26,9 @@ export const G = {
   uMoonDir: { value: new Vector3(-0.3, 0.6, 0.5).normalize() },
   uMoonColor: { value: new Color(0.3, 0.4, 0.6) },
   uExposure: { value: 1 },
+  // the painted light model (stylizedLight in common.js), set per preset by Atmosphere.js:
+  // x sky fill of the shade, y warm bounce, z shade desaturation, w terminator softness
+  uLightK: { value: new Vector4(0, 0, 0, 0) },
 
   // Weather
   uWind: { value: new Vector3(2, 0, 1) },

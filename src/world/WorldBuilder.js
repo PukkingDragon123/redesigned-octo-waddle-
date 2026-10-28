@@ -14,21 +14,40 @@ import { buildSpiralArch, causeway, basaltMesh } from './Landmarks.js';
 import { Backdrop } from './Backdrop.js';
 import { FloraSet, SurfaceIndex, populateIsland, populateRims, populateSeabed, variants } from './Flora.js';
 import { SPECIES, populateTrees } from './Trees.js';
+import { AlienFlora } from '../flora/AlienFlora.js';
 import { rng, lerp, clamp, smoothstep, TAU } from '../core/math.js';
-import { topSurface } from './Spirals.js';
+import { topSurface, thin } from './Spirals.js';
 import { terrainMaterial } from '../render/materials.js';
 
 const nextFrame = () => new Promise((res) => requestAnimationFrame(() => res()));
 export const CHAPTER_ORDER = ['cradle', 'valleys', 'krill', 'forest', 'song', 'night', 'storm', 'falcon', 'wall', 'oasis'];
 const SHAPES = { stack: stackShape, coil: coilShape, ammonite: ammoniteShape, peak: peakShape };
-// the flora biome of each chapter, and its accent trees ({ kind, max, per: m2 of meadow per tree })
+// the flora biome of each chapter (painted tufts and vines), and its few accent trees
+// ({ kind, max, per: m2 of meadow per tree }). Vur Sok is a world of moving alien plants: trees are
+// rare accents where they tell the story (the Mother Tree, the Coil Forest's giant coil trees, a
+// lone coil tree on a big meadow, palms on the motus, wind-bent pines on some spires); everything
+// else is AlienFlora (src/flora): fiddlehead meadows, tube and bell clumps, anemone colonies, kelp,
+// sea fans and puffballs, plus giant fiddleheads standing in for the old tree groves.
 const BIOME = { cradle: 'lagoon', valleys: 'reach', krill: 'shoals', forest: 'forest', song: 'golden', night: 'night', storm: 'storm', falcon: 'storm', wall: 'storm', oasis: 'oasis' };
 const TREES = {
-  cradle: { kind: 'coil', max: 3, per: 3500, groves: 3 }, valleys: { kind: 'coil', max: 3, per: 4000, groves: 4 }, krill: { kind: 'coil', max: 1, per: 6000, groves: 2 },
-  forest: { kind: 'giantFern', max: 4, per: 2500, spacing: 45, groves: 5 }, song: { kind: 'coil', max: 2, per: 4000, groves: 3 }, night: { kind: 'coil', max: 1, per: 6000, groves: 3 },
-  storm: { kind: 'pine', max: 1, per: 8000, groves: 1 }, falcon: { kind: 'pine', max: 1, per: 8000, groves: 1 }, wall: null, oasis: { kind: 'blossom', max: 4, per: 2500, groves: 5 },
+  cradle: { kind: 'coil', max: 1, per: 9000, spacing: 60 }, valleys: { kind: 'coil', max: 1, per: 9000, spacing: 60 }, krill: null,
+  forest: null, song: { kind: 'coil', max: 1, per: 12000, spacing: 60 }, night: null,
+  storm: null, falcon: null, wall: null, oasis: { kind: 'blossom', max: 2, per: 6000, spacing: 50 },
 };
-const FLORA_NEAR = 520, TREES_NEAR = 1900;
+// AlienFlora per chapter: the biome of the island meadows, a density multiplier, and the giant
+// fiddleheads (hero plants, tree-sized) per island: { per: m2 of meadow per clump, max, scale }
+const ALIEN = {
+  cradle: { biome: 'meadow', dens: 1, giant: { per: 5000, max: 2, scale: [2.2, 4.2] } },
+  valleys: { biome: 'meadow', dens: 1, giant: { per: 4500, max: 3, scale: [2.4, 4.8] } },
+  krill: { biome: 'meadow', dens: 0.8, giant: { per: 8000, max: 1, scale: [2, 3.5] } },
+  forest: { biome: 'oasis', dens: 1.15, giant: { per: 1400, max: 6, scale: [3.6, 8.5] } },
+  song: { biome: 'meadow', dens: 1, giant: { per: 6000, max: 1, scale: [2.4, 4] } },
+  night: { biome: 'meadow', dens: 1, giant: { per: 6000, max: 2, scale: [2.4, 4.4] } },
+  storm: { biome: 'meadow', dens: 0.45, giant: null }, falcon: { biome: 'meadow', dens: 0.45, giant: null }, wall: { biome: 'meadow', dens: 0.4, giant: null },
+  oasis: { biome: 'oasis', dens: 1.25, giant: { per: 3000, max: 4, scale: [2.8, 6] } },
+};
+const FLORA_NEAR = 520, TREES_NEAR = 1900, PAINTED_NEAR = 440;
+const hash01 = (x) => { const v = Math.sin(x * 91.345 + 47.853) * 43758.5453; return v - Math.floor(v); };
 const _v = new Vector3(), _w = new Vector3();
 const _m4 = new Matrix4();
 
@@ -58,8 +77,36 @@ export class WorldBuilder {
     for (const id of CHAPTER_ORDER) this.plan[id] = { islands: [], extras: [], features: [] };
     this.shelters = []; // calm lagoon water: [x, z, radius, strength] for the ocean
     this.chapterOpts = {};
+    // the moving alien flora of the whole route (one instanced system; materials exist from here
+    // so Engine.precompile covers them). Chapters feed it their patches as they are built.
+    this.flora = opts.flora === false ? null : new AlienFlora(game, { seed: opts.seed ?? 7 });
+    if (this.flora) game.engine.scene.add(this.flora.root);
+    this.chapterSets = []; // chapter-wide painted tufts / vines and accent trees: { group, chapter, x, z, r, near }
+    this._sets = {};
     if (opts.layout !== false) this.layout();
     for (const sh of this.shelters) game.ocean?.shelter?.(...sh);
+  }
+
+  /** The chapter's shared painted (tufts, vines) or tree set, in world coordinates. */
+  _set(id, kind) {
+    const S = (this._sets[id] ||= {});
+    return (S[kind] ||= new FloraSet(kind + '-' + id));
+  }
+
+  /** Build a chapter set into the chapter group, with its bounds for distance culling. */
+  _finishSet(id, kind, g, near) {
+    const set = this._sets[id]?.[kind];
+    if (!set || !set.count) return;
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (const list of set.items.values()) {
+      for (const it of list) {
+        const e = it.m.elements;
+        x0 = Math.min(x0, e[12]); x1 = Math.max(x1, e[12]); z0 = Math.min(z0, e[14]); z1 = Math.max(z1, e[14]);
+      }
+    }
+    set.build(this.game.engine.shadows);
+    g.add(set.group);
+    this.chapterSets.push({ group: set.group, chapter: id, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2, near });
   }
 
   group(id) {
@@ -491,23 +538,34 @@ export class WorldBuilder {
     for (const m of meshes) g.add(m);
     tm('seabed', t0);
     t0 = performance.now();
-    // reef and beach flora, palms on the motus (builtinFlora / builtinTrees = false hand them over)
+    // beach tufts and palms on the motus (the reef life itself is AlienFlora's; builtinFlora /
+    // builtinTrees = false hand the painted tufts / the palms over)
+    const alien = !!this.flora;
     for (const f of plan.features) {
-      const set = new FloraSet('flora-reef');
       const n = Math.round(clamp((f.R * f.R) / 300, 40, f.kind === 'atoll' ? 1400 : 600) * (this.floraDensity ?? 1));
-      if (this.builtinFlora !== false) populateSeabed(set, this.seabed, f, BIOME[id], Math.round(f.x * 0.37 + f.z), n);
-      if (this.builtinTrees !== false && (f.kind === 'atoll' || f.kind === 'shelf')) this._motus(set, f, id);
-      if (!set.count) continue;
-      set.build(this.game.engine.shadows);
-      set.group.userData.center = new Vector3(f.x, 0, f.z);
-      set.group.userData.R = f.R;
-      g.add(set.group);
-      (this.reefFlora ||= []).push({ group: set.group, chapter: id, center: set.group.userData.center, R: f.R, trees: set.trees });
+      if (this.builtinFlora !== false) populateSeabed(this._set(id, 'painted'), this.seabed, f, BIOME[id] || this.chapterOpts[id]?.biome, Math.round(f.x * 0.37 + f.z), n, { alien: !alien });
+      if (this.builtinTrees !== false && (f.kind === 'atoll' || f.kind === 'shelf')) this._motus(this._set(id, 'trees'), f, id);
       await slice();
     }
+    this._finishSet(id, 'painted', g, PAINTED_NEAR);
+    this._finishSet(id, 'trees', g, TREES_NEAR);
     tm('reef', t0);
     const imp = this._imp?.[id];
     if (imp && imp.count) g.add(imp.build(null));
+    // the moving alien flora: meadows, cliffs, shores and reefs of every island near the route
+    if (this.flora) {
+      t0 = performance.now();
+      this.prepareGround(id);
+      await slice();
+      for (const p of this.floraPatches(id)) {
+        this.flora.addPatch(p);
+        await slice();
+      }
+      tm('alienScatter', t0);
+      t0 = performance.now();
+      this.flora.build();
+      tm('alienBuild', t0);
+    }
     this.done.add(id);
   }
 
@@ -533,69 +591,70 @@ export class WorldBuilder {
     const biome = rec.opts?.biome ?? (volcanic ? 'volcanic' : BIOME[rec.chapter] || this.chapterOpts[rec.chapter]?.biome || 'reach');
     prof.rock = (prof.rock || 0) + performance.now() - t0;
     t0 = performance.now();
+    const alien = !!this.flora;
     const needsFlora = rec.routeDist < FLORA_NEAR + 150 && this.builtinFlora !== false;
     const needsTrees = rec.routeDist < TREES_NEAR && this.builtinTrees !== false;
-    const S = needsFlora || needsTrees ? new SurfaceIndex(isl.geo0) : null;
+    const needsGiants = alien && rec.routeDist < FLORA_NEAR + 300 && !volcanic;
+    const S = needsFlora || needsTrees || needsGiants ? new SurfaceIndex(isl.geo0) : null;
     if (needsFlora) {
-      const fl = populateIsland(isl.geo0, biome, rec.seed, { index: S, density: this.floraDensity ?? 1, origin: rec.pos, seabedAt: (x, z) => this.seabed.heightAt(x, z) });
-      populateRims(fl, (isl.rim || []).filter((q, i) => i % 2 === 0), biome, rec.seed);
-      fl.build(this.game.engine.shadows);
-      fl.group.position.copy(rec.pos);
-      g.add(fl.group);
-      rec.flora = fl.group;
-    }
-    let tc = rec.opts?.trees === false ? null : (rec.opts?.giant ? { kind: 'giantFern', max: 3, per: 2000, spacing: 45 } : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null));
-    // spires and stacks wear wind-bent pines; storms leave only the hardiest
-    if (rec.kind === 'stack' && !rec.opts?.giant) tc = { kind: 'pine', max: rec.chapter === 'storm' || rec.chapter === 'falcon' ? 1 : 3, per: 900, spacing: 9, groves: rec.R > 15 ? 1 : 0 };
-    if (tc && !volcanic && needsTrees) {
-      const ts = populateTrees(S, tc.kind, rec.seed, tc);
-      // giant fiddleheads are solid enough to bump into, and bird-reptiles perch on their coils
-      if (tc.kind === 'giantFern') {
-        for (const list of ts.items.values()) {
-          for (const it of list) {
-            _w.setFromMatrixPosition(it.m).add(rec.pos);
-            const sc = _v.setFromMatrixScale(it.m).x;
-            this.capsules.push({ a: _w.clone(), b: _w.clone().add(new Vector3(0, 60 * sc, 0)), r: 2.5 * sc, chapter: rec.chapter });
-            this.perches.push({ p: _w.clone().add(new Vector3(0, 66 * sc, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter });
-          }
-        }
+      // painted tufts and vine curtains (the alien plants come from AlienFlora patches)
+      const set = alien ? this._set(rec.chapter, 'painted') : null;
+      const fl = populateIsland(isl.geo0, biome, rec.seed, { index: S, density: this.floraDensity ?? 1, origin: rec.pos, seabedAt: (x, z) => this.seabed.heightAt(x, z), set, offset: set ? rec.pos : null, alien: !alien, tufts: alien ? 1.4 : 1 });
+      const rims = (isl.rim || []).filter((q, i) => i % 2 === 0);
+      if (set) populateRims(set, rims, biome, rec.seed, rec.pos, { kelp: false, vines: 1.3 });
+      else {
+        populateRims(fl, rims, biome, rec.seed);
+        fl.build(this.game.engine.shadows);
+        fl.group.position.copy(rec.pos);
+        g.add(fl.group);
+        rec.flora = fl.group;
       }
-      // the Coil Forest's giant coil-trunk tree crowns the island's central horn
-      if (rec.opts?.giant && rec.shape.horn) {
+    }
+    // giant fiddleheads: tree-sized croziers that coil and uncoil, the alien stand-in for groves
+    const AL = ALIEN[rec.chapter] || this.chapterOpts[rec.chapter]?.alien || ALIEN.valleys;
+    if (needsGiants && AL.giant) this._giants(rec, S, AL.giant);
+    let tc = rec.opts?.trees === false ? null : (rec.opts?.giant ? (rec.seed % 2 === 0 ? { kind: 'giantFern', max: 1, per: 4000, spacing: 45 } : null) : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null));
+    // a few spires wear wind-bent pines (one in three; storms leave a lone one on one in four)
+    if (rec.kind === 'stack' && !rec.opts?.giant) {
+      const harsh = rec.chapter === 'storm' || rec.chapter === 'falcon';
+      tc = hash01(rec.seed * 1.37) < (harsh ? 0.25 : 0.34) ? { kind: 'pine', max: harsh ? 1 : 2, per: 900, spacing: 9 } : null;
+    }
+    const giantCoil = rec.opts?.giant && rec.shape.horn && needsTrees;
+    if ((tc || giantCoil) && !volcanic && needsTrees) {
+      const ts = this._set(rec.chapter, 'trees');
+      const before = new Map();
+      for (const [k, l] of ts.items) before.set(k, l.length);
+      if (tc) populateTrees(S, tc.kind, rec.seed, Object.assign({ groves: 0 }, tc, { set: ts, offset: rec.pos }));
+      const added = [];
+      for (const [k, l] of ts.items) for (let i = before.get(k) || 0; i < l.length; i++) added.push([k, l[i]]);
+      // giant fiddle-trees are solid enough to bump into, and bird-reptiles perch on their coils
+      for (const [key, it] of added) {
+        if (!key.startsWith('gfern')) continue;
+        _w.setFromMatrixPosition(it.m);
+        const sc = _v.setFromMatrixScale(it.m).x;
+        this.capsules.push({ a: _w.clone(), b: _w.clone().add(new Vector3(0, 60 * sc, 0)), r: 2.5 * sc, chapter: rec.chapter });
+        this.perches.push({ p: _w.clone().add(new Vector3(0, 66 * sc, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter });
+      }
+      // the Coil Forest's giant coil-trunk tree crowns the island's central horn (its signature)
+      if (giantCoil) {
         const hp = new Vector3(0, rec.shape.horn.top + (rec.shape.horn.H - rec.shape.horn.top) * 0.6, 0);
         const H = lerp(120, 160, (rec.seed % 7) / 7);
-        ts.add('giantCoil-' + (rec.seed % 3), () => SPECIES.giantCoilTree(9400 + (rec.seed % 3), 140), hp, H / 140, rec.seed, [0, 0, 1, 1]);
         const wp = hp.clone().add(rec.pos);
+        added.push(['giantCoil-' + (rec.seed % 3), ts.add('giantCoil-' + (rec.seed % 3), () => SPECIES.giantCoilTree(9400 + (rec.seed % 3), 140), wp, H / 140, rec.seed, [0, 0, 1, 1])]);
         this.capsules.push({ a: wp.clone(), b: wp.clone().add(new Vector3(0, H * 0.7, 0)), r: H * 0.06, chapter: rec.chapter });
         this.sphereColliders.push({ p: wp.clone().add(new Vector3(0, H * 0.82, 0)), r: H * 0.16, chapter: rec.chapter, soft: true });
         for (let q = 0; q < 6; q++) this.perches.push({ p: wp.clone().add(new Vector3(Math.cos(q) * H * 0.25, H * (0.6 + 0.06 * q), Math.sin(q) * H * 0.25)), n: new Vector3(0, 1, 0), chapter: rec.chapter });
       }
-      if (ts.count) {
-        // coilwings roost in the crowns
-        for (const [key, list] of ts.items) {
-          if (key.startsWith('grove')) continue;
-          const Hh = key.startsWith('gfern') ? 66 : key.startsWith('giantCoil') ? 120 : key.startsWith('pine') ? 14 : key.startsWith('blossom') ? 16 : key.startsWith('palm') ? 14 : 20;
-          for (const it of list) {
-            _w.setFromMatrixPosition(it.m).add(rec.pos);
-            const sc = _v.setFromMatrixScale(it.m).x;
-            this.perches.push({ p: _w.clone().add(new Vector3(0, Hh * sc * 0.92, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter, tree: true });
-          }
-        }
-        // far painted impostors for every tree (they take over where the 3D trees fade out)
-        const imp = this._impostors(rec.chapter);
-        for (const [key, list] of ts.items) {
-          const kind = key.startsWith('pine') ? 'pine' : key.startsWith('blossom') ? 'blossom' : key.startsWith('gfern') || key.startsWith('giantCoil') ? 'giant' : key.startsWith('palm') ? 'palm' : key.startsWith('grove') ? 'fern' : 'coil';
-          const H = kind === 'giant' ? 110 : kind === 'pine' ? 16 : kind === 'blossom' ? 18 : kind === 'fern' ? 4 : 22;
-          for (const it of list) {
-            _w.setFromMatrixPosition(it.m).add(rec.pos);
-            const sc = _v.setFromMatrixScale(it.m).x;
-            imp.add('imp-' + kind, () => SPECIES.impostor(kind, H), _w, sc, 0, [0, 0, 1, 1]);
-          }
-        }
-        ts.build(this.game.engine.shadows);
-        ts.group.position.copy(rec.pos);
-        g.add(ts.group);
-        rec.trees = ts.group;
+      // coilwings roost in the crowns; far painted impostors take over where the 3D trees fade out
+      const imp = this._impostors(rec.chapter);
+      for (const [key, it] of added) {
+        _w.setFromMatrixPosition(it.m);
+        const sc = _v.setFromMatrixScale(it.m).x;
+        const Hh = key.startsWith('gfern') ? 66 : key.startsWith('giantCoil') ? 120 : key.startsWith('pine') ? 14 : key.startsWith('blossom') ? 16 : key.startsWith('palm') ? 14 : 20;
+        this.perches.push({ p: _w.clone().add(new Vector3(0, Hh * sc * 0.92, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter, tree: true });
+        const kind = key.startsWith('pine') ? 'pine' : key.startsWith('blossom') ? 'blossom' : key.startsWith('gfern') || key.startsWith('giantCoil') ? 'giant' : key.startsWith('palm') ? 'palm' : 'coil';
+        const H = kind === 'giant' ? 110 : kind === 'pine' ? 16 : kind === 'blossom' ? 18 : 22;
+        imp.add('imp-' + kind, () => SPECIES.impostor(kind, H), _w, sc, 0, [0, 0, 1, 1]);
       }
     }
     // scree: boulders fallen at the foot of the cliffs
@@ -689,7 +748,9 @@ export class WorldBuilder {
     const r = rng(Math.round(f.x * 0.13 + f.z * 0.71));
     // each variant is a draw call: a reef keeps two palm shapes, one cycad and two blossom trees
     const V = variants(Math.round(f.x * 0.29 - f.z * 0.17), { palm: [[0, 1, 2, 3], 2], cycad: [[0, 1, 2], 1], blossom: [[0, 1, 2], 2] });
-    const want = f.kind === 'atoll' ? 60 : 4;
+    // a few palms only: atolls keep a handful per motu, one shelf in three a lone palm or two
+    const want = f.kind === 'atoll' ? 16 : hash01(f.x * 0.013 + f.z * 0.007) < 0.35 ? 2 : 0;
+    if (!want) return;
     let placed = 0;
     for (let i = 0; i < want * 12 && placed < want; i++) {
       const a = r() * TAU, d = Math.sqrt(r()) * f.R * 0.9;
@@ -703,6 +764,39 @@ export class WorldBuilder {
       else if (r() < 0.3) set.add(`cycad-${cv}`, () => SPECIES.cycad(9850 + cv, 5), p, lerp(0.7, 1.3, r()), r() * TAU, [r() * 6, 0, 1, 1]);
       else set.add(`palm-${pv}`, () => SPECIES.palm(9800 + pv, 14), p, lerp(0.7, 1.25, r()), r() * TAU, [r() * 6, 0, 1, 1]);
       placed++;
+    }
+  }
+
+  /**
+   * Giant fiddleheads on an island's meadows: a tall parent crozier with a few smaller ones around
+   * it, coiling and uncoiling, recoiling when whales pass (AlienFlora hero plants). The biggest are
+   * solid (capsules) and bird-reptiles perch on their crowns.
+   */
+  _giants(rec, S, cfg) {
+    const r = rng(rec.seed * 29 + 13);
+    const meadow = (ny, y, gr) => (gr > 0.4 && ny > 0.78 && y > 5 ? gr : 0);
+    const A = S.weights(meadow);
+    const n = Math.round(clamp(A / cfg.per + (r() - 0.5), 0, cfg.max));
+    if (!n) return;
+    const spots = thin(S.sample(n * 4, r), 14 + cfg.scale[1] * 2, new Map()).slice(0, n);
+    const up = _v.set(0, 1, 0);
+    const p = new Vector3();
+    for (const sm of spots) {
+      const members = 1 + Math.floor(r() * 3);
+      for (let i = 0; i < members; i++) {
+        const parent = i === 0;
+        const sc = parent ? lerp(cfg.scale[0], cfg.scale[1], Math.pow(r(), 0.8)) : lerp(cfg.scale[0] * 0.45, cfg.scale[0] * 0.9, r());
+        const a = r() * TAU, d = parent ? 0 : lerp(2.5, 5, r()) * cfg.scale[0];
+        p.set(sm.p.x + Math.cos(a) * d + rec.pos.x, 0, sm.p.z + Math.sin(a) * d + rec.pos.z);
+        const g = this.groundAt(p.x, p.z, this._gg ||= { y: 0, normal: new Vector3(0, 1, 0), island: null });
+        if (g.y < 3 || g.normal.y < 0.7) continue;
+        p.y = g.y - 0.1 * sc;
+        this.flora.place('fiddle', p, up, sc, r(), { palette: r() < 0.7 ? 0 : 3, hue: (r() - 0.5) * 0.4, aux: r() * 0.9 });
+        if (sc >= 3.5) {
+          this.capsules.push({ a: p.clone(), b: p.clone().add(new Vector3(0, 2.6 * sc, 0)), r: 0.32 * sc, chapter: rec.chapter });
+          this.perches.push({ p: p.clone().add(new Vector3(0, 3.3 * sc, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter, tree: true });
+        }
+      }
     }
   }
 
@@ -769,14 +863,11 @@ export class WorldBuilder {
       }
       if (rec.flora) rec.flora.visible = d < FLORA_NEAR;
       if (rec.scree) rec.scree.visible = d < FLORA_NEAR + 200;
-      if (rec.trees) rec.trees.visible = d < TREES_NEAR;
     }
-    if (this.reefFlora) {
-      for (const rf of this.reefFlora) {
-        if (!this.groups[rf.chapter]?.visible) continue;
-        const d = Math.hypot(cam.x - rf.center.x, cam.z - rf.center.z) - rf.R;
-        rf.group.visible = d < FLORA_NEAR;
-      }
+    // chapter-wide painted tufts / vines and accent trees: on while the camera is near their extent
+    for (const cs of this.chapterSets) {
+      if (!this.groups[cs.chapter]?.visible) continue;
+      cs.group.visible = Math.hypot(cam.x - cs.x, cam.z - cs.z) - cs.r < cs.near;
     }
   }
 
@@ -853,6 +944,33 @@ export class WorldBuilder {
     return out;
   }
 
+  /** groundAt() over a short list of candidate islands (flora scattering: many samples per patch). */
+  _groundNear(list, x, z, out) {
+    let best = -1e9, bestRec = null;
+    const smp = this._gs ||= { y: 0, nx: 0, ny: 1, nz: 0 };
+    for (let i = 0; i < list.length; i++) {
+      const rec = list[i];
+      const dx = x - rec.pos.x, dz = z - rec.pos.z;
+      if (dx * dx + dz * dz > rec.R * rec.R * 2.2) continue;
+      rec.ground ||= topSurface(rec.geo, rec.R > 120 ? 1.5 : 1);
+      const g = rec.ground.sample(dx, dz, smp);
+      if (g && g.y > best) { best = g.y; bestRec = rec; out.normal.set(g.nx, g.ny, g.nz); }
+    }
+    const sb = this.seabed.heightAt(x, z);
+    if (sb >= best) {
+      best = sb;
+      bestRec = null;
+      if (sb > -200) {
+        // forward differences (two more lookups instead of four)
+        const e = 1.5;
+        out.normal.set(sb - this.seabed.heightAt(x + e, z), e, sb - this.seabed.heightAt(x, z + e)).normalize();
+      } else out.normal.set(0, 1, 0);
+    }
+    out.y = best;
+    out.island = bestRec;
+    return out;
+  }
+
   /** Builds now (instead of on first use, 1-20 ms each) the height grids groundAt() reads for a chapter. */
   prepareGround(id) {
     for (const rec of this.islands) if (rec.chapter === id && rec.geo && !rec.ground) rec.ground = topSurface(rec.geo, rec.R > 120 ? 1.5 : 1);
@@ -867,28 +985,36 @@ export class WorldBuilder {
    */
   floraPatches(id) {
     const out = [];
+    // a route of islands is seen from 20-120 m up: tall plants carry it, ground cover only matters
+    // close up, so filler (moss cushions, sprouts) and the small anemones are thinned out
+    const MULT = { moss: 0.16, sprouts: 0.1, anemone: 0.7 };
+    const REEF = { moss: 0.1, anemone: 0.8, seafan: 0.9, kelp: 1, tubes: 0.8 };
     const mk = (center, radius, biome, density) => {
       const g = { y: 0, normal: new Vector3(0, 1, 0), island: null };
+      // only the islands that can reach into this patch (groundAt would test every island)
+      const near = this.islands.filter((rec) => rec.geo && Math.hypot(rec.pos.x - center.x, rec.pos.z - center.z) < radius + rec.R * 1.5 + 5);
       return {
-        center, radius, biome, density, chapter: id,
+        center, radius, biome, density, chapter: id, mult: biome === 'reef' ? REEF : MULT, fillerCap: 2500,
         sample: (x, z) => {
-          this.groundAt(x, z, g);
+          this._groundNear(near, x, z, g);
           if (g.y < -24) return null;
           const n = g.normal.clone();
           return { y: g.y, normal: n, slope: 1 - n.y, wet: g.y < 3 ? 0.9 : 0.55, tidal: smoothstep(1.4, 0, Math.abs(g.y + 0.2)) };
         },
       };
     };
+    const AL = ALIEN[id] || this.chapterOpts[id]?.alien || ALIEN.valleys;
+    const q = this.floraDensity ?? 1;
     for (const rec of this.plan[id].islands) {
       if (rec.routeDist > FLORA_NEAR + 150) continue;
       const c = new Vector3(rec.pos.x, 0, rec.pos.z);
       const volcanic = rec.style.rock === 'volcanic';
-      const lush = id === 'oasis' ? 'oasis' : 'meadow';
-      out.push(mk(c, rec.R, volcanic ? 'volcanic' : lush, id === 'storm' || id === 'falcon' ? 0.4 : 1));
-      out.push(mk(c, rec.R, 'cliff', volcanic ? 0.3 : 0.8));
-      out.push(mk(c, rec.R * 1.15, 'shore', 0.8));
+      const k = AL.dens * q;
+      out.push(mk(c, rec.R, volcanic ? 'volcanic' : AL.biome, k));
+      out.push(mk(c, rec.R, 'cliff', (volcanic ? 0.3 : 0.9) * Math.max(k, 0.6)));
+      out.push(mk(c, rec.R * 1.15, 'shore', 0.85 * Math.max(k, 0.6)));
     }
-    for (const f of this.plan[id].features) out.push(mk(new Vector3(f.x, 0, f.z), f.R * 0.8, 'reef', f.kind === 'atoll' ? 0.5 : 0.7));
+    for (const f of this.plan[id].features) out.push(mk(new Vector3(f.x, 0, f.z), f.R * 0.8, 'reef', (f.kind === 'atoll' ? 0.5 : 0.7) * Math.max(AL.dens, 0.6) * q));
     return out;
   }
 
@@ -902,6 +1028,7 @@ export class WorldBuilder {
     if (m.uniforms.uDetail) m.uniforms.uDetail.value = lerp(0.55, 1, this.quality);
     this.floraDensity = lerp(0.45, 1, this.quality);
     this.lodDist = lerp(420, 650, this.quality);
+    this.flora?.setQuality(Math.max(0.4, this.quality));
   }
 
   /** Height of the sea floor (reefs, lagoons, beaches above the water; -200 in the open sea). */

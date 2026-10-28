@@ -403,8 +403,32 @@ export class PostFX {
     this._v2 = new Vector3();
     this._v3 = new Vector3();
     this.surfaceY = 0;
-    // optional painterly pass (src/render/painterly PainterlyPost): set engine.post.painterly = pp
+    // the painterly pass (src/render/painterly PainterlyPost), attached by the engine: the composite
+    // renders into its LDR target and the paint pass draws the screen
     this.painterly = null;
+    this._ppOpts = { time: 0 };
+  }
+
+  /** Compile every post program for the targets it renders into (Engine.precompile calls this). */
+  precompile(renderer) {
+    const prev = renderer.getRenderTarget();
+    const cam = this.engine.camera;
+    try {
+      const into = [
+        [this.mips[0], [this.prefilter, this.down, this.up]],
+        [this.rayA, [this.rayMask, this.rayBlur, this.shafts]],
+        [this.painterly?.ldrTarget || null, [this.composite]],
+      ];
+      for (const [target, passes] of into) {
+        renderer.setRenderTarget(target);
+        for (const p of passes) renderer.compile(p.mesh, cam);
+      }
+    } catch (e) {
+      console.warn('[post] precompile', e);
+    } finally {
+      renderer.setRenderTarget(prev);
+    }
+    this.warmup(renderer);
   }
 
   /** Compile the passes that only run in some situations (under water) now, not mid-game. */
@@ -508,15 +532,19 @@ export class PostFX {
     }
     this.composite.uniforms.tScene.value = src;
     // the painterly pass (src/render/painterly) paints the graded frame when it is attached
+    // (switched off, PainterlyPost still passes the frame through, so the composite keeps rendering
+    // into the same target and no program variant is ever compiled mid-game)
     const pp = this.painterly;
-    if (pp && pp.enabled !== false && pp.ldrTarget && pp.apply) {
+    if (pp && pp.ldrTarget && pp.apply) {
       if (pp.width !== this.engine.width || pp.height !== this.engine.height) pp.setSize?.(this.engine.width, this.engine.height);
       const vig = this.composite.uniforms.uVignette;
       const v0 = vig.value;
-      vig.value = v0 * 0.5; // the paint pass owns the soft edge darkening
+      const on = pp.enabled !== false && pp.paintEnabled !== false;
+      vig.value = on ? v0 * 0.5 : v0; // the paint pass owns the soft edge darkening
       this.composite.render(renderer, pp.ldrTarget);
       vig.value = v0;
-      pp.apply(pp.ldrTarget.texture, sceneRT.depthTexture, camera, null, { time: G.uTime.value });
+      this._ppOpts.time = G.uTime.value;
+      pp.apply(pp.ldrTarget.texture, sceneRT.depthTexture, camera, null, this._ppOpts);
       return;
     }
     this.composite.render(renderer, null);

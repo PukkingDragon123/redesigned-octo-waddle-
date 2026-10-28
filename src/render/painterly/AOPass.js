@@ -637,7 +637,9 @@ export class AOPass {
     a.tAO.value = this.texture;
     a.tZ.value = this._zTex;
     a.uSplit.value = this.split;
-    const sun = lum(sunColor || G.uSunColor.value), amb = lum(ambient || G.uSkyAmbient.value);
+    // the shade is lit by the sky ambient plus the painted fill (stylizedLight's uLightK.x)
+    const fill = 1 + 0.85 * (G.uLightK?.value.x ?? 0);
+    const sun = lum(sunColor || G.uSunColor.value), amb = lum(ambient || G.uSkyAmbient.value) * fill;
     a.uApply.value.set(p.strength, p.litFloor, sun, amb);
     a.tRaw.value = this.raw.texture;
     // bounce follows the sun's share of the light (none at night or under heavy overcast)

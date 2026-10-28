@@ -9,6 +9,12 @@
 //   tufts       grass, tendril, reed and flower tufts (painted cards) that sway in the wind
 //   vines       painted curtains hanging from cliff rims
 // Each species is a handful of seeded templates, instanced per island.
+//
+// In the game the moving alien plants (fiddleheads, anemones, kelp, tubes, bells, fans, puffballs,
+// moss) come from src/flora (AlienFlora). With opts.alien === false the populate functions below
+// only add the painted 2D elements AlienFlora lacks: grass, tendril, reed and flower tufts and the
+// vine curtains hanging from cliff rims. opts.set / opts.offset add them into a shared (chapter)
+// set in world coordinates instead of a new per-island set (one draw call per kind per chapter).
 import {
   BufferGeometry, Float32BufferAttribute, InstancedMesh, InstancedBufferAttribute, ShaderMaterial,
   DoubleSide, Color, Matrix4, Quaternion, Vector3, Group,
@@ -347,7 +353,9 @@ export class FloraSet {
       _q.premultiply(qa);
     }
     _m.compose(pos, _q, _s.set(scale, scale, scale));
-    this.items.get(key).push({ m: _m.clone(), inst });
+    const it = { m: _m.clone(), inst };
+    this.items.get(key).push(it);
+    return it;
   }
   build(shadows = null, fade = null) {
     for (const [key, list] of this.items) {
@@ -418,9 +426,12 @@ export function variants(seed, spec) {
 export function populateIsland(geo, biome, seed, opts = {}) {
   const r = rng(seed * 31 + 7);
   const B = BIOMES[biome] || BIOMES.reach;
-  const set = new FloraSet('flora-island');
+  const set = opts.set || new FloraSet('flora-island');
   const S = opts.index || new SurfaceIndex(geo);
   const dens = opts.density ?? 1;
+  const alien = opts.alien !== false;
+  const off = opts.offset || null;
+  const at = (p) => (off ? p.add(off) : p);
   const V = variants(seed, {
     fern: [[0, 1, 2, 3], 2], fernPal: [B.pal, 2], puff: [[0, 1, 2], 2], puffPal: [['puff', 'puffBlue'], 1], moss: [[0, 1, 2], 2],
     tuftPal: [B.tuft, 1], tubes: [[0, 1, 2], 2], tubesPal: [['tubes', 'tubesTeal'], 1], bells: [[0, 1, 2], 2],
@@ -431,7 +442,7 @@ export function populateIsland(geo, biome, seed, opts = {}) {
   const k = S.weights(meadow) / 1000 * dens;
   const grid = new Map();
   // fiddlehead groves (clustered)
-  const ferns = thin(S.sample(Math.round(B.fern * k * 1.6), r), 6, grid).slice(0, Math.round(B.fern * k));
+  const ferns = alien ? thin(S.sample(Math.round(B.fern * k * 1.6), r), 6, grid).slice(0, Math.round(B.fern * k)) : [];
   for (const sm of ferns) {
     const n = 1 + Math.floor(r() * 4);
     for (let i = 0; i < n; i++) {
@@ -442,23 +453,29 @@ export function populateIsland(geo, biome, seed, opts = {}) {
       set.add(`fern-${v}-${pk}`, () => SPECIES.fiddlehead(1000 + v, 4, FLORA_PAL[pk]), p, sz / 4, r() * TAU, inst(r));
     }
   }
-  for (const sm of S.sample(Math.round(B.puffs * k), r)) {
+  for (const sm of S.sample(alien ? Math.round(B.puffs * k) : 0, r)) {
     const v = V('puff', Math.floor(r() * 3)), pk = V('puffPal', r() < 0.5 ? 0 : 1);
     set.add(`puffs-${v}-${pk}`, () => SPECIES.puffs(2000 + v, 2, FLORA_PAL[pk]), sm.p.clone().setY(sm.p.y - 0.1), lerp(0.6, 1.6, r()), r() * TAU, inst(r));
   }
-  for (const sm of S.sample(Math.round(B.moss * k), r)) {
+  for (const sm of S.sample(alien ? Math.round(B.moss * k) : 0, r)) {
     const v = V('moss', Math.floor(r() * 3));
     set.add(`moss-${v}`, () => SPECIES.moss(3000 + v, 2.4, FLORA_PAL.moss), sm.p.clone().setY(sm.p.y - 0.3), lerp(0.7, 1.8, r()), r() * TAU, inst(r));
   }
   // tufts: grass, tendrils, flowers, reeds
-  for (const sm of S.sample(Math.round(B.tufts * k), r)) {
+  const tk0 = opts.tuftPal ?? null; // a chapter can pin one tuft palette (fewer draw calls)
+  for (const sm of S.sample(Math.round(B.tufts * k * (opts.tufts ?? 1)), r)) {
     const pick = r();
     const slot = pick < 0.45 ? SLOT.grassA : pick < 0.7 ? SLOT.grassB : pick < 0.85 ? SLOT.tendril : SLOT.reed;
-    const tk = V('tuftPal', Math.floor(r() * B.tuft.length));
-    set.add(`tuft-${slot}-${tk}`, () => SPECIES.tuft(4000 + slot, 1, FLORA_PAL[tk], slot), sm.p.clone().setY(sm.p.y - 0.05), lerp(0.7, 1.6, r()), r() * TAU, inst(r));
+    const tkr = V('tuftPal', Math.floor(r() * B.tuft.length));
+    const tk = tk0 || tkr;
+    set.add(`tuft-${slot}-${tk}`, () => SPECIES.tuft(4000 + slot, 1, FLORA_PAL[tk], slot), at(sm.p.clone().setY(sm.p.y - 0.05)), lerp(0.7, 1.6, r()), r() * TAU, inst(r));
   }
-  for (const sm of S.sample(Math.round(B.flowers * k), r)) {
-    set.add('tuft-flowers', () => SPECIES.tuft(4100, 1, FLORA_PAL.flowers, SLOT.flowers), sm.p.clone().setY(sm.p.y - 0.05), lerp(0.6, 1.1, r()), r() * TAU, inst(r));
+  for (const sm of S.sample(Math.round(B.flowers * k * (opts.tufts ?? 1)), r)) {
+    set.add('tuft-flowers', () => SPECIES.tuft(4100, 1, FLORA_PAL.flowers, SLOT.flowers), at(sm.p.clone().setY(sm.p.y - 0.05)), lerp(0.6, 1.1, r()), r() * TAU, inst(r));
+  }
+  if (!alien) {
+    set.index = S;
+    return set;
   }
   // cliff dwellers: tube and bell clusters growing out of ledges and crevices
   const cArea = S.weights((ny, y) => (ny > 0.25 && ny < 0.75 && y > 6 ? 1 : 0)) / 1000 * dens;
@@ -491,17 +508,21 @@ export function populateIsland(geo, biome, seed, opts = {}) {
 
 
 /** Rim dwellers: kelp ribbons streaming from cliff edges and vine curtains hanging below them. */
-export function populateRims(set, rims, biome, seed) {
+export function populateRims(set, rims, biome, seed, offset = null, opts = {}) {
   const r = rng(seed * 17 + 3);
   const B = BIOMES[biome] || BIOMES.reach;
-  const V = variants(seed + 11, { kelp: [[0, 1, 2], 2], kelpPal: [['kelp', 'kelpRed'], 1], vines: [[0, 1, 2], 2] });
-  for (const q of rims) {
-    if (q.y < 8) continue;
+  const V = variants(seed + 11, { kelp: [[0, 1, 2], 2], kelpPal: [['kelp', 'kelpRed'], 1], vines: [[0, 1, 2], opts.vineKinds ?? 2] });
+  const ox = offset ? offset.x : 0, oy = offset ? offset.y : 0, oz = offset ? offset.z : 0;
+  const kelpK = opts.kelp === false ? 0 : 1;
+  const vineK = opts.vines ?? 1;
+  for (const q0 of rims) {
+    if (q0.y < 8) continue;
+    const q = offset ? { x: q0.x + ox, y: q0.y + oy, z: q0.z + oz, ox: q0.ox, oz: q0.oz } : q0;
     const pick = r();
-    if (pick < 0.08 * B.kelpRim) {
+    if (pick < 0.08 * B.kelpRim * kelpK) {
       const v = V('kelp', Math.floor(r() * 3)), pk = V('kelpPal', r() < 0.6 ? 0 : 1);
       set.add(`kelp-${v}-${pk}`, () => SPECIES.kelp(9000 + v, 8, FLORA_PAL[pk]), new Vector3(q.x, q.y - 0.5, q.z), lerp(0.6, 1.5, r()), r() * TAU, inst(r));
-    } else if (pick < 0.08 * B.kelpRim + 0.12) {
+    } else if (pick < 0.08 * B.kelpRim * kelpK + 0.12 * vineK) {
       const v = V('vines', Math.floor(r() * 3));
       const len = lerp(6, Math.min(26, q.y * 0.6), r());
       set.add(`vines-${v}`, () => SPECIES.vines(9100 + v, 10, FLORA_PAL.vine), new Vector3(q.x + (q.ox || 0) * 0.6, q.y - 0.3, q.z + (q.oz || 0) * 0.6), len / 10, Math.atan2(-(q.oz || 0), q.ox || 1) + Math.PI / 2, inst(r));
@@ -510,8 +531,9 @@ export function populateRims(set, rims, biome, seed) {
 }
 
 /** Reef and beach flora from the seabed (world coordinates; set group stays at the origin). */
-export function populateSeabed(set, seabed, feature, biome, seed, count) {
+export function populateSeabed(set, seabed, feature, biome, seed, count, opts = {}) {
   const r = rng(seed * 13 + 5);
+  const alien = opts.alien !== false;
   const B = BIOMES[biome] || BIOMES.reach;
   const V = variants(seed, {
     anem: [[0, 1, 2], 2], anemPal: [['anemone', 'anemoneTeal', 'anemoneViolet'], 2], fan: [[0, 1], 1], fanPal: [['fan', 'fanCoral'], 2],
@@ -523,6 +545,7 @@ export function populateSeabed(set, seabed, feature, biome, seed, count) {
     const h = seabed.heightAt(x, z);
     const p = new Vector3(x, h - 0.1, z);
     // reef life clusters on the reef crest and the coral heads, not across open lagoon sand
+    if (!alien && h < 0.9) continue;
     if (h > -9 && h < -1.6 && (h > -4 || r() < 0.25)) {
       const pick = r();
       if (pick < 0.45) {
@@ -538,13 +561,13 @@ export function populateSeabed(set, seabed, feature, biome, seed, count) {
       }
     } else if (h > 0.9 && h < 3) {
       // beaches and motus: puffballs, tendrils, reeds
-      const pick = r();
+      const pick = alien ? r() : 0.3 + r() * 0.7;
       if (pick < 0.3) {
         const v = V('puff', Math.floor(r() * 3)), pk = V('puffPal', r() < 0.5 ? 0 : 1);
         set.add(`puffs-${v}-${pk}`, () => SPECIES.puffs(2000 + v, 2, FLORA_PAL[pk]), p, lerp(0.6, 1.4, r()), r() * TAU, inst(r));
       } else {
         const slot = pick < 0.65 ? SLOT.tendril : SLOT.reed;
-        const tk = V('tuftPal', Math.floor(r() * B.tuft.length));
+        const tk = opts.tuftPal || V('tuftPal', Math.floor(r() * B.tuft.length));
         set.add(`tuft-${slot}-${tk}`, () => SPECIES.tuft(4000 + slot, 1, FLORA_PAL[tk], slot), p, lerp(0.8, 1.6, r()), r() * TAU, inst(r));
       }
     }

@@ -153,6 +153,7 @@ uniform vec2 uDofHalf;
 uniform vec4 uKuw;        // x radius (px), y anisotropy alpha, z mix, w highlight protection
 uniform vec4 uKuwDepth;   // x near start (m), y full strength from (m), z near scale, w far scale
 uniform float uHard;      // sector variance hardness
+uniform vec4 uStroke;     // x fine texture kept under the strokes, y bristle streaks, z bristle length (px at 1080p)
 uniform vec4 uGradeA;     // x split tone, y vibrance, z loud-colour calming, w S-curve
 uniform vec3 uShadeTone;
 uniform vec3 uLightTone;
@@ -268,6 +269,20 @@ void main() {
         vec3 k = kuwahara(uv, ax, by);
         // a painter keeps the sparkle (eye glints, specular dots) and paints over dark speckle
         keep = smoothstep(0.08, 0.24, dot(src - k, LUMA)) * uKuw.w;
+        // and suggests the fine texture rather than erasing it: some of it stays under the strokes
+        // (less along strong coherent edges, where the stroke itself draws the form), so textured
+        // surfaces read as brushwork instead of flat posterised cells
+        k += (src - k) * uStroke.x * (1.0 - 0.5 * A);
+        // bristles: fine grain fixed to the canvas, smeared along the stroke direction (a short line
+        // integral), so every stroke carries a brush texture that follows the form
+        if (uStroke.y > 0.0) {
+          vec2 fp = gl_FragCoord.xy / uGrain.z;
+          vec2 st = t * (uStroke.z * 0.25);
+          float bn = 0.0;
+          for (int i = -2; i <= 2; i++) bn += pNoise((fp + st * float(i)) * 0.6);
+          bn = bn * 0.2 - 0.5;
+          k *= 1.0 + bn * uStroke.y * (0.4 + 0.6 * A) * min(r / uKuw.x, 1.0);
+        }
         col = mix(src, mix(k, src, keep), uKuw.z);
       }
       if (uDebug > 0.5) col = vec3(r / max(uKuw.x, 1e-3), A, keep);
@@ -325,6 +340,9 @@ export const PAINT_DEFAULTS = {
   alpha: 0.75, // anisotropy (smaller: longer strokes along edges)
   mix: 1.0,
   hardness: 140, // sector variance hardness (higher: crisper, more posterised strokes)
+  texture: 0.3, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
+  bristle: 0.12, // brush-bristle streaks along the strokes
+  bristleLen: 9, // their length (px at 1080p)
   detail: 0.85, // how much small bright detail (eye glints, sparkle) the filter must keep
   nearStart: 3, // metres: from here the filter eases in...
   nearFull: 45, // ...to full strength
@@ -420,6 +438,7 @@ export class PaintPass {
       tColor: { value: null }, tTensor: { value: null }, tDepth: { value: null }, tDof: { value: null },
       uTexel: { value: new Vector2() }, uDofHalf: { value: new Vector2(1, 1) },
       uKuw: { value: new Vector4() }, uKuwDepth: { value: new Vector4() }, uHard: { value: 140 },
+      uStroke: { value: new Vector4() },
       uGradeA: { value: new Vector4() }, uShadeTone: { value: new Vector3() }, uLightTone: { value: new Vector3() },
       uShadeLift: { value: new Vector3() }, uGradeB: { value: new Vector4() },
       uBlack: { value: new Vector3() }, uWhite: { value: new Vector3() },
@@ -558,6 +577,7 @@ export class PaintPass {
     U.uKuw.value.set(p.radius * Math.max(res, 0.5) * s, p.alpha, p.mix, p.detail);
     U.uKuwDepth.value.set(p.nearStart, p.nearFull, p.nearScale, p.farScale);
     U.uHard.value = p.hardness;
+    U.uStroke.value.set(p.texture, p.bristle * s, p.bristleLen, 0);
     U.uGradeA.value.set(p.split * s, p.vibrance * s, p.calm * s, p.curve * s);
     U.uShadeTone.value.set(p.shadeTone.r, p.shadeTone.g, p.shadeTone.b);
     U.uLightTone.value.set(p.lightTone.r, p.lightTone.g, p.lightTone.b);

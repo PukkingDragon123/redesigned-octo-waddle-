@@ -207,6 +207,7 @@ export class WhaleModel {
       uFurShade: { value: g.furShade ?? 0.72 },
       uFurTip: { value: g.furTip ?? 1.12 },
       uBlowLoc: { value: new Vector4(P.blow.t, P.blow.len * 0.5, P.blow.gap, P.blow.splay) },
+      uPleat: { value: new Vector4(P.pleats.t0, P.pleats.t1, P.pleats.n, 0) },
     };
   }
 

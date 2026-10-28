@@ -39,6 +39,7 @@ uniform vec3 uWaterAbsorb;
 uniform vec4 uWaterParams;
 uniform vec4 uCloudShade[16];
 uniform vec2 uCloudShadeK;
+uniform vec4 uLightK;
 `;
 
 export const NOISE = /* glsl */ `
@@ -181,18 +182,30 @@ vec3 hemiAmbient(vec3 N) {
   return mix(uBounce, uSkyAmbient, smoothstep(0.0, 1.0, up));
 }
 
+// uLightK (Atmosphere, per preset; a material without it falls back to the plain model):
+//   x sky fill: the whole bright sky lights what the sun does not reach (Tiny Glade's luminous,
+//     filled shade; full by day, little at night and in storms)
+//   y warm bounce from sunlit ground and sea, strongest on faces turned down and sideways
+//   z shade calm: how much the shade side desaturates (cool, slightly muted shadows)
+//   w terminator softness: how far the light wraps around the form (soft, painted turning)
 vec3 stylizedLight(Surface s) {
   float NdL = dot(s.N, uSunDir);
   float h = NdL * 0.5 + 0.5;
   float ramp = smoothstep(0.5 - s.wrap, 0.5 + s.wrap * 0.7, h);
   // soften the cel ramp toward a wrapped falloff: light turns the form gently, like paint
   float soft = smoothstep(0.5 - s.wrap * 1.9, 0.5 + s.wrap * 1.5, h);
-  ramp = mix(ramp, soft, 0.35);
+  ramp = mix(ramp, soft, 0.35 + 0.4 * uLightK.w);
   float lit = ramp * s.shadow;
   vec3 hemi = hemiAmbient(s.N);
-  vec3 ambient = hemi * s.ao;
-  // Shadow side keeps the colour but cools it; never black.
+  float upN = s.N.y * 0.5 + 0.5;
+  vec3 fill = hemi * (1.0 + uLightK.x * mix(0.7, 1.0, upN));
+  float sunUp = clamp(uSunDir.y * 4.0, 0.0, 1.0);
+  vec3 warm = uSunColor * vec3(1.0, 0.7, 0.48) * (uLightK.y * 0.055 * sunUp * (1.3 - upN));
+  // occlusion (baked cavities and creases) takes the fill away: creases stay deep in bright shade
+  vec3 ambient = (fill + warm) * s.ao;
+  // Shadow side keeps the colour but cools and calms it; never black.
   vec3 shadowCol = s.albedo * ambient * uShadowTint;
+  shadowCol = mix(shadowCol, vec3(dot(shadowCol, vec3(0.2126, 0.7152, 0.0722))), uLightK.z * (1.0 - s.shadow * ramp));
   vec3 litCol = s.albedo * (uSunColor * mix(0.85, 1.0, s.ao) + ambient * 0.55);
   vec3 col = mix(shadowCol, litCol, lit);
   // Warm, saturated terminator band: reads as subsurface scattering in organic forms.

@@ -185,62 +185,77 @@ export class AlienFlora {
 
   // ---- build -------------------------------------------------------------------------------------
 
-  /** Finalize instancing. May be called again after more patches (rebuilds the instance stores). */
+  /**
+   * Finalize instancing. May be called again after more patches: plants added since the last build
+   * are sorted into new chunks appended to each species' store (the earlier chunks are kept, so a
+   * chapter-by-chapter build costs only the new chapter).
+   */
   build() {
     const t0 = performance.now();
     const allChunks = [];
-    this.grid.clear();
     for (const sp of this.species) {
       const n = sp.raw.length / STRIDE;
-      if (this.built && sp.pos && n === sp.n) {
+      const n0 = this.built && sp.pos ? sp.n : 0;
+      if (n0 === n && sp.pos) {
         // unchanged since the last build: keep the stores, only reset the culling state
         for (const c of sp.chunks) { c.mask = 0; c.inActive = false; c.off[0] = c.off[1] = c.off[2] = -1; c.used = 0; allChunks.push(c); }
         sp.active = [];
         sp.slot[0].fill(-1);
         sp.slot[1].fill(-1);
-        sp.state.fill(0);
-        sp.trig.fill(Infinity);
-        sp.hold.fill(0);
         for (const b of sp.bufs) b.iState.array.fill(0);
         sp.dirty = true;
         continue;
       }
-      sp.n = n;
-      // sort by chunk so each chunk is one contiguous range
-      const keys = new Float64Array(n);
-      const order = new Uint32Array(n);
-      for (let i = 0; i < n; i++) {
+      // the new plants (n0..n), sorted by chunk so each chunk is one contiguous range
+      const m = n - n0;
+      const keys = new Float64Array(m);
+      const order = new Uint32Array(m);
+      for (let j = 0; j < m; j++) {
+        const i = n0 + j;
         const x = sp.raw[i * STRIDE], z = sp.raw[i * STRIDE + 2];
         const rx = Math.floor(x / REGION), rz = Math.floor(z / REGION);
         // dense filler uses smaller chunks: tighter culling and less LOD overlap
         const csz = sp.def.chunk ?? CHUNK;
         const cx = Math.floor(x / csz), cz = Math.floor(z / csz);
         // region-major, then chunk; random order inside a chunk (filler thinning takes a prefix)
-        keys[i] = ((rx + 4096) * 8192 + (rz + 4096)) * 1048576 + ((cx + 4096) & 1023) * 1024 + ((cz + 4096) & 1023) + sp.raw[i * STRIDE + 8] * 0.999;
-        order[i] = i;
+        keys[j] = ((rx + 4096) * 8192 + (rz + 4096)) * 1048576 + ((cx + 4096) & 1023) * 1024 + ((cz + 4096) & 1023) + sp.raw[i * STRIDE + 8] * 0.999;
+        order[j] = j;
       }
       order.sort((a, b) => keys[a] - keys[b]);
-      sp.pos = new Float32Array(n * 4);
-      sp.quat = new Float32Array(n * 4);
-      sp.prm = new Float32Array(n * 4);
-      sp.state = new Float32Array(n);
-      sp.trig = new Float32Array(n).fill(Infinity);
-      sp.hold = new Float32Array(n);
-      sp.chunkOf = new Int32Array(n);
+      const grow = (old, len, fillV = 0) => {
+        const a = new Float32Array(len);
+        if (fillV) a.fill(fillV);
+        if (old) a.set(old.subarray(0, Math.min(old.length, len)));
+        return a;
+      };
+      sp.pos = grow(n0 ? sp.pos : null, n * 4);
+      sp.quat = grow(n0 ? sp.quat : null, n * 4);
+      sp.prm = grow(n0 ? sp.prm : null, n * 4);
+      sp.state = grow(n0 ? sp.state : null, n);
+      sp.trig = grow(n0 ? sp.trig : null, n, Infinity);
+      if (n0) sp.trig.fill(Infinity, n0);
+      sp.hold = grow(n0 ? sp.hold : null, n);
+      const chunkOf = new Int32Array(n);
+      if (n0) chunkOf.set(sp.chunkOf.subarray(0, n0));
+      sp.chunkOf = chunkOf;
       // where each plant sits in the near / mid buffers (-1: not packed there)
       sp.slot = [new Int32Array(n).fill(-1), new Int32Array(n).fill(-1)];
       sp.packCam = new Vector3(1e9, 0, 0);
-      sp.chunks = [];
+      if (!n0) sp.chunks = [];
       sp.active = [];
+      // earlier chunks: fresh culling state (their typed-array views are rebuilt below)
+      for (const c of sp.chunks) { c.mask = 0; c.inActive = false; c.off[0] = c.off[1] = c.off[2] = -1; c.used = 0; }
+      const firstNew = sp.chunks.length;
       let cur = null, curKey = -1;
       const rad = sp.def.radius;
-      for (let k = 0; k < n; k++) {
-        const i = order[k], o = i * STRIDE;
-        const R = sp.raw;
+      const R = sp.raw;
+      for (let j = 0; j < m; j++) {
+        const k = n0 + j;
+        const o = (n0 + order[j]) * STRIDE;
         sp.pos[k * 4] = R[o]; sp.pos[k * 4 + 1] = R[o + 1]; sp.pos[k * 4 + 2] = R[o + 2]; sp.pos[k * 4 + 3] = R[o + 3];
         sp.quat[k * 4] = R[o + 4]; sp.quat[k * 4 + 1] = R[o + 5]; sp.quat[k * 4 + 2] = R[o + 6]; sp.quat[k * 4 + 3] = R[o + 7];
         sp.prm[k * 4] = R[o + 8]; sp.prm[k * 4 + 1] = R[o + 9]; sp.prm[k * 4 + 2] = R[o + 10]; sp.prm[k * 4 + 3] = R[o + 11];
-        const key = Math.floor(keys[i] - R[o + 8] * 0.999 + 0.5);
+        const key = Math.floor(keys[order[j]] - R[o + 8] * 0.999 + 0.5);
         if (key !== curKey) {
           curKey = key;
           cur = { sp, start: k, count: 0, used: 0, x: 0, y: 0, z: 0, r: 0, mask: 0, inActive: false, off: [-1, -1, -1] };
@@ -249,8 +264,10 @@ export class AlienFlora {
         cur.count++;
         sp.chunkOf[k] = sp.chunks.length - 1;
       }
-      // chunk bounding spheres (plants reach up to height * scale)
-      for (const c of sp.chunks) {
+      sp.n = n;
+      // chunk bounding spheres of the new chunks (plants reach up to height * scale)
+      for (let ci = firstNew; ci < sp.chunks.length; ci++) {
+        const c = sp.chunks[ci];
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
         for (let k = c.start; k < c.start + c.count; k++) {
           const x = sp.pos[k * 4], y = sp.pos[k * 4 + 1], z = sp.pos[k * 4 + 2], s = sp.pos[k * 4 + 3];
@@ -264,21 +281,21 @@ export class AlienFlora {
         let smin = 1e9, smax = 0;
         for (let k = c.start; k < c.start + c.count; k++) { const ls = Math.max(1, sp.pos[k * 4 + 3] * 0.6); smin = Math.min(smin, ls); smax = Math.max(smax, ls); }
         c.lsMin = smin; c.lsMax = smax;
-        allChunks.push(c);
-        this._chunkViews(c);
       }
+      for (const c of sp.chunks) { this._chunkViews(c); allChunks.push(c); }
       this._buildMeshes(sp);
-      sp.dirty = true;
-    }
-    // startle lookup grid for the species that react to whales
-    for (const sp of this.species) {
-      if (!sp.def.reacts) continue;
-      for (let k = 0; k < sp.n; k++) {
-        const gk = this._gridKey(Math.floor(sp.pos[k * 4] / GRID), Math.floor(sp.pos[k * 4 + 2] / GRID));
-        let list = this.grid.get(gk);
-        if (!list) this.grid.set(gk, (list = []));
-        list.push(sp.id, k);
+      // startle lookup grid: add the new plants of the species that react to whales
+      if (sp.def.reacts) {
+        if (!n0) sp.gridN = 0;
+        for (let k = sp.gridN || 0; k < sp.n; k++) {
+          const gk = this._gridKey(Math.floor(sp.pos[k * 4] / GRID), Math.floor(sp.pos[k * 4 + 2] / GRID));
+          let list = this.grid.get(gk);
+          if (!list) this.grid.set(gk, (list = []));
+          list.push(sp.id, k);
+        }
+        sp.gridN = sp.n;
       }
+      sp.dirty = true;
     }
     // regions: coarse culling over groups of chunks
     const regionMap = new Map();
@@ -302,6 +319,13 @@ export class AlienFlora {
       reg.r = 0.5 * Math.hypot(reg.x1 - reg.x0, reg.y1 - reg.y0, reg.z1 - reg.z0);
     }
     this.impostor.allocate();
+    // startles in flight refer to buffer slots that no longer exist: let them settle from scratch
+    for (const sp of this.species) {
+      if (!sp.state) continue;
+      sp.state.fill(0);
+      sp.trig.fill(Infinity);
+      sp.hold.fill(0);
+    }
     this.startle.list = [];
     this.startle.set = new Set();
     this.built = true;

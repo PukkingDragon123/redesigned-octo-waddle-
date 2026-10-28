@@ -113,14 +113,21 @@ export default async function (game) {
   window.__eco = eco;
   eco.perches = perches;
   eco.seabedAt = () => floorY;
-  const ballA = eco.addFishSchool(new Vector3(0, -6, -40), 'glintfin', +(p.get('count') || 1400), { seed: 3, palette: 0, mode: p.get('mode') || 'mill' });
+  // &solo=<species>: just a few of one species in open water (with &inspect to study one)
+  const solo = p.get('solo');
+  const pal = p.has('pal') ? +p.get('pal') : undefined;
+  const n = (k, d) => (solo ? (solo === k ? +(p.get('count') || (k === 'lanternjack' ? 1 : 6)) : 0) : +(p.get('count') || d));
+  const mk = (k, pos, d, o) => (n(k, d) > 0 ? eco.addFishSchool(pos, k, n(k, d), Object.assign({ palette: pal }, o)) : null);
+  const ballA = mk('glintfin', new Vector3(0, -6, -40), 1400, { seed: 3, palette: pal ?? 0, mode: p.get('mode') || 'mill' }) || eco.addFishSchool(new Vector3(0, -6, -40), 'glintfin', 1, { seed: 3 });
   if (!p.has('mode')) ballA.wanderT = 1e9;
-  const ballB = eco.addFishSchool(new Vector3(-55, -5, -105), 'glintfin', 800, { seed: 5, palette: 3 });
-  const column = eco.addFishSchool(new Vector3(36, -7, -78), 'spiralback', 220, { seed: 7, palette: 0 });
-  const jacks = eco.addFishSchool(new Vector3(4, -18, -44), 'lanternjack', 2, { seed: 11, palette: 0 });
-  eco.addReptileFlock(new Vector3(-38, 26, -48), 'skimmer', 9, { seed: 13 });
-  eco.addReptileFlock(new Vector3(62, 46, -26), 'coilwing', 90, { seed: 17 });
-  window.__ecoTest = { eaten: 0, ballA, ballB, column, jacks };
+  if (!solo) eco.addFishSchool(new Vector3(-55, -5, -105), 'glintfin', 800, { seed: 5, palette: 3 });
+  const column = mk('spiralback', new Vector3(36, -7, -78), 220, { seed: 7, palette: pal ?? 0 }) || eco.addFishSchool(new Vector3(36, -7, -78), 'spiralback', 1, { seed: 7 });
+  const jacks = mk('lanternjack', new Vector3(4, -18, -44), 2, { seed: 11, palette: pal ?? 0 }) || eco.addFishSchool(new Vector3(4, -18, -44), 'lanternjack', 1, { seed: 11 });
+  if (!solo || solo === 'skimmer') eco.addReptileFlock(new Vector3(-38, 26, -48), 'skimmer', solo ? +(p.get('count') || 3) : 9, { seed: 13, palette: pal });
+  if (!solo || solo === 'coilwing') eco.addReptileFlock(new Vector3(62, 46, -26), 'coilwing', solo ? +(p.get('count') || 12) : 90, { seed: 17, palette: pal });
+  if (p.has('raise')) eco.fish.debugSpecial = +p.get('raise');
+  if (p.has('flare')) eco.fish.debugFlare = +p.get('flare');
+  window.__ecoTest = { eaten: 0, ballA, column, jacks };
 
   // ---- whales: proxies (or real whales) for the bubble net and the roost --------------------
   const whales = [];

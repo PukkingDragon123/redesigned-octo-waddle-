@@ -107,16 +107,18 @@ void main() {
     if (L0 > 1e-5) {
       vec3 dir = d / L0;
       float Lr = L0 / max(s, 1e-3);
-      float s0 = 0.42;
+      // a wave crest: straight rays whose top third rolls back into a curl
+      float s0 = 0.62;
       float sp2 = max(s - s0, 0.0) / (1.0 - s0);
-      float th = 2.6 * pow(sp2, 1.35) + 0.2 * sp2 * sin(ph * 0.5 + aR.w * 6.0);
+      float th = (1.0 + 1.6 * special) * pow(sp2, 1.6) + 0.15 * sp2 * sin(ph * 0.5 + aR.w * 6.0);
       float l = sp2 * Lr * (1.0 - s0);
       vec3 cn = -normalize(vec3(0.0, -dir.z, dir.y));
       vec3 c0 = root + dir * min(s, s0) * Lr;
       vec2 q2 = th > 1e-3 ? (l / th) * vec2(sin(th), 1.0 - cos(th)) : vec2(l, 0.0);
       vec3 pr = c0 + dir * q2.x + cn * q2.y - root;
-      // fold back about the root (x axis) toward the tail
-      float fold = (1.0 - special) * 1.22;
+      // fold back about the root (x axis) until the ray lies almost flat along the back
+      float rake = atan(-dir.z, max(dir.y, 1e-3));
+      float fold = (1.0 - special) * max(1.48 - rake, 0.0);
       pr = rotX(-fold) * pr;
       p = root + pr;
       p.x += s * s * 0.012 * sin(ph * 0.55 + aR.w * 7.0 - s * 3.0) * (0.3 + 0.7 * special);
@@ -130,6 +132,9 @@ void main() {
     // pectorals: folded along the flank when cruising, flared out (glint fins flash, spiralbacks
     // glide) when alarmed or leaping; a slow paddle when hovering
     vec3 d = p - root;
+    // flaring fans the rays apart (about the fin's own normal), like opening a hand fan
+    vec3 fnrm = normalize(vec3(0.35 * side, 1.0, 0.0));
+    d = rotAxis(d, fnrm, flare * (aR.w - 0.5) * 1.1 * side);
     float paddle = 0.12 * sin(ph * 0.35 + side) * (1.0 - flare * 0.6);
     float sweep = mix(-0.32, 0.62, flare) + paddle;
     d = rotY(-side * sweep) * d;
@@ -227,9 +232,10 @@ vec4 fishEye(vec3 L, vec3 eyeC, float r, float split, out float irisK, out float
   float pupil;
   if (split > 0.5) {
     // the spiralback's split eye: an upper pupil for the air, a lower one for the water
-    float pu = length((q - vec2(0.06, 0.3)) * vec2(1.0, 1.6));
-    float pl = length((q - vec2(0.06, -0.28)) * vec2(1.0, 1.55));
-    pupil = max(smoothstep(0.44, 0.36, pu), smoothstep(0.47, 0.39, pl));
+    // (Anableps-like): one pupil pinched into a figure eight by a band of iris
+    float pu = length((q - vec2(0.05, 0.2)) * vec2(1.0, 1.35));
+    float pl = length((q - vec2(0.05, -0.2)) * vec2(1.0, 1.3));
+    pupil = max(smoothstep(0.4, 0.33, pu), smoothstep(0.42, 0.35, pl));
   } else {
     // a big round pupil, slightly forward (fish look ahead)
     pupil = smoothstep(0.66, 0.59, length((q - vec2(0.05, 0.0)) * vec2(0.97, 1.0)));
@@ -240,7 +246,7 @@ vec4 fishEye(vec3 L, vec3 eyeC, float r, float split, out float irisK, out float
   // radial striations in the iris
   float stri = 0.75 + 0.25 * sin(atan(q.y, q.x) * 23.0 + d * 9.0);
   col = mix(col, vec3(0.12, 0.11, 0.09) * stri, irisK);
-  if (split > 0.5) col = mix(col, vec3(0.02), smoothstep(0.08, 0.0, abs(q.y - 0.01)) * eye * 0.85);
+  if (split > 0.5) col = mix(col, vec3(0.16, 0.13, 0.08), smoothstep(0.05, 0.0, abs(q.y)) * eye * 0.6);
   col = mix(col, vec3(0.006, 0.007, 0.01), pupil * eye);
   specK = eye;
   return vec4(col, cover);
@@ -408,8 +414,8 @@ void main() {
     float ospot = smoothstep(0.03, 0.015, length(vec2(L.z - (opz + 0.012), (phi - 0.75) * 0.08)));
     albedo = mix(albedo, vec3(0.02), ospot * 0.85);
     // gape: a deep, upturned mouth line with an underbite
-    float gy = -0.03 + (L.z - 0.5) * 0.35 + 0.02 * smoothstep(0.38, 0.5, L.z);
-    float mouth = smoothstep(0.006, 0.0, abs(L.y - gy)) * smoothstep(0.37, 0.4, L.z);
+    float gy = -0.036 - (L.z - 0.5) * 0.3;
+    float mouth = smoothstep(0.005, 0.0, abs(L.y - gy)) * smoothstep(0.405, 0.43, L.z);
     albedo = mix(albedo, vec3(0.02, 0.01, 0.01), mouth);
     mirror *= 1.0 - mouth;
     float irisK;
@@ -447,7 +453,7 @@ void main() {
     vec3 fin = part < 1.5 ? mix(vec3(0.5, 0.53, 0.55), pC, 0.18 + 0.2 * (1.0 - s)) : mix(vec3(0.45, 0.5, 0.53), pA, 0.45);
     float nR = part < 1.5 ? 14.0 : 8.0;
 #elif SPECIES == 1
-    vec3 fin = part > 1.5 && part < 2.5 ? pC : (part > 7.5 ? vec3(0.55, 0.47, 0.22) : mix(pA, pB, 0.5));
+    vec3 fin = part > 1.5 && part < 2.5 ? pC * 0.7 : (part > 7.5 ? vec3(0.32, 0.28, 0.14) : mix(pA, pB, 0.5));
     float nR = part > 1.5 && part < 2.5 ? 22.0 : 12.0;
 #else
     vec3 fin = mix(pD, pA, 0.35);
@@ -464,12 +470,18 @@ void main() {
     if (part < 1.5) albedo = mix(albedo, vec3(0.05, 0.06, 0.07), smoothstep(0.8, 1.0, s) * smoothstep(0.25, 0.9, abs(ray - 0.5) * 2.0));
 #elif SPECIES == 1
     if (part > 1.5 && part < 2.5) {
-      // sail: eye-spots between the rays and a gold leading edge where it curls
-      float spots = smoothstep(0.3, 0.1, length(vec2(fract(ray * 5.0) - 0.5, (fract(s * 3.0) - 0.5) * 1.6)));
-      albedo = mix(albedo, pD * 0.8, spots * smoothstep(0.2, 0.4, s) * 0.5);
-      albedo = mix(albedo, pD, smoothstep(0.86, 0.99, s) * 0.9);
-      mirror = 0.25;
-      mirTint = iridescence(dot(N, V), 2.4 + tint) * 1.3;
+      // sail: dark eye-spots ringed in gold between the rays, a dusky base, a gold crest that
+      // curls; an iridescent sheen across the membrane
+      vec2 sq = vec2(fract(ray * 6.0) - 0.5, (fract(s * 2.6 + 0.3) - 0.5) * 1.5);
+      float sd = length(sq);
+      float spot = smoothstep(0.24, 0.16, sd) * smoothstep(0.15, 0.35, s) * smoothstep(0.85, 0.62, s);
+      float ringS = smoothstep(0.3, 0.24, sd) * (1.0 - smoothstep(0.24, 0.18, sd)) * smoothstep(0.15, 0.35, s) * smoothstep(0.85, 0.62, s);
+      albedo = mix(albedo, pB * 0.6, smoothstep(0.35, 0.0, s) * 0.7);
+      albedo = mix(albedo, pB * 0.5, spot * 0.85);
+      albedo = mix(albedo, pD * 0.9, ringS * 0.8);
+      albedo = mix(albedo, pD, smoothstep(0.84, 0.97, s) * 0.85);
+      mirror = 0.22;
+      mirTint = iridescence(dot(N, V), 2.4 + tint) * 1.2;
     }
     if (part < 1.5) albedo = mix(albedo, pB, smoothstep(0.35, 0.95, s) * 0.5);
 #else
@@ -487,7 +499,7 @@ void main() {
 #endif
     alpha = (1.0 - smoothstep(edge - 0.035, edge + 0.01, s)) * mix(memA, min(memA + 0.12, 1.0), max(rays, smoothstep(0.3, 0.0, s)));
     if (dot(N, V) < 0.0) N = -N;
-    trans = 0.45;
+    trans = part > 7.5 ? 0.15 : 0.45;
     spec = 0.3;
     gloss = 0.8;
     rim = 0.35;

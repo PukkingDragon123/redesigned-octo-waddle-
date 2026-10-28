@@ -129,6 +129,9 @@ export function scatterPatch(patch, known, emit, shared = null) {
   const sample = patch.sample;
   const density = clamp(patch.density ?? 1, 0, 2);
   const rules = BIOMES[patch.biome] || BIOMES.meadow;
+  // patch.mult: per-species density multipliers ({ moss: 0.2 }); patch.fillerCap: max filler plants
+  // of one species in this patch (a route of islands needs far less ground cover than a showcase)
+  const mult = patch.mult || null;
   const r = rng(((patch.seed ?? 1) * 7919 + 101) >>> 0);
   const area = Math.PI * radius * radius;
   const counts = {};
@@ -188,7 +191,7 @@ export function scatterPatch(patch, known, emit, shared = null) {
     };
     if (rule.filler) {
       // filler is capped per patch so a huge atoll cannot flood memory (drifts stay dense nearby)
-      const target = Math.min(Math.round((area / 100) * rule.dens * density), rule.cap ?? 24000);
+      const target = Math.min(Math.round((area / 100) * rule.dens * density * (mult?.[name] ?? 1)), patch.fillerCap ?? rule.cap ?? 24000);
       const fs = 0.06 + r() * 0.04; // density field frequency (drifts ~10-17 m across)
       const off = r() * 100;
       for (let i = 0; i < target * 1.6 && n < target; i++) {
@@ -212,7 +215,7 @@ export function scatterPatch(patch, known, emit, shared = null) {
       }
     } else {
       const avg = (rule.clump[0] + rule.clump[1]) * 0.5;
-      const clusters = Math.max(0, Math.round((area / 100) * rule.dens * density / avg + (r() - 0.5)));
+      const clusters = Math.max(0, Math.round((area / 100) * rule.dens * density * (mult?.[name] ?? 1) / avg + (r() - 0.5)));
       for (let c = 0; c < clusters; c++) {
         let cx = 0, cz = 0, g0 = null;
         for (let tries = 0; tries < 4 && !g0; tries++) {

@@ -2,6 +2,7 @@
 // the shared stylized model (common.js) plus a physically based wet-skin specular and sky
 // reflection, so the creatures read as real, wet, heavy animals inside the painted world.
 import { UNIFORMS, NOISE, SHADOW, LIGHTING, SEA } from '../../render/shaders/common.js';
+import { PLEATS } from './skinGLSL.js';
 
 const SKIN_PARS = /* glsl */ `
 #include <skinning_pars_vertex>
@@ -144,6 +145,8 @@ ${SHADOW}
 ${LIGHTING}
 ${SEA}
 ${WET}
+${PLEATS}
+uniform vec4 uPleat;
 uniform sampler2D uSkinA;
 uniform sampler2D uSkinB;
 uniform float uBaked;
@@ -218,7 +221,11 @@ void main() {
     float bell = vMask.y;
     if (bell > 0.01) {
       float infl = clamp(uThroat, 0.0, 1.5);
-      float groove = smoothstep(0.32, 0.0, abs(fract(vLoft.y * 68.0) - 0.5) - 0.12 * infl);
+      vec3 pl = pleatAt(vLoft.y, vLoft.x, uPleat.z, uPleat.x, uPleat.y);
+      // stretched, each groove opens wider and shows the tissue in its floor
+      float sb = vLoft.y < 0.5 ? vLoft.y : 1.0 - vLoft.y;
+      float fx = fract(sb / mix(0.13, 0.235, smoothstep(uPleat.x + 0.02, uPleat.x + 0.26, vLoft.x)) * uPleat.z * 0.5);
+      float groove = smoothstep(0.18 + 0.2 * infl, 0.0, abs(fx - 0.5) - 0.02) * pl.y;
       vec3 flesh = vec3(0.78, 0.34, 0.36);
       float vein = smoothstep(0.06, 0.0, abs(vnoise(vTex * vec2(220.0, 90.0)) - 0.5));
       flesh = mix(flesh, vec3(0.5, 0.12, 0.18), vein * 0.6);

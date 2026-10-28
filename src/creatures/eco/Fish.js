@@ -112,6 +112,8 @@ export class FishSystem {
     this.dormantDist = 900;
     this._sorted = [];
     this._res = new Map();
+    this.debugSpecial = null;
+    this.debugFlare = null;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -984,6 +986,16 @@ export class FishSystem {
       sc.acc = 0;
       this._simSchool(sc, sdt, ctx);
       active++;
+    }
+    // dev overrides (inspection): force the sail / fin flare of every fish
+    if (this.debugSpecial != null || this.debugFlare != null) {
+      for (const sc of this.schools) {
+        const S = sc.pool.S;
+        for (let i = sc.start; i < sc.start + sc.count; i++) {
+          if (this.debugSpecial != null && sc.species === 'spiralback') S[i * STRIDE + 14] = this.debugSpecial;
+          if (this.debugFlare != null) S[i * STRIDE + 13] = this.debugFlare;
+        }
+      }
     }
     this._compact(pxPerM, ctx);
     this.stats.active = active;

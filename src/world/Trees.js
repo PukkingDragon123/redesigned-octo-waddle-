@@ -291,7 +291,9 @@ SPECIES.impostor = (kind, H) => {
  */
 export function populateTrees(S, kind, seed, opts = {}) {
   const r = rng(seed * 7 + 11);
-  const set = new FloraSet('trees');
+  // opts.set: add into a shared (chapter) set; opts.offset: island position (world coordinates)
+  const set = opts.set || new FloraSet('trees');
+  const off = opts.offset || null;
   const meadow = (ny, y, gr) => (gr > 0.5 && ny > 0.8 && y > 6 ? gr : 0);
   const A = S.weights(meadow);
   const n = Math.round(clamp(A / (opts.per ?? 2500), 0, opts.max ?? 6));
@@ -299,6 +301,7 @@ export function populateTrees(S, kind, seed, opts = {}) {
   const spots = thin(S.sample(n * 3, r), opts.spacing ?? 22, grid).slice(0, n);
   for (const sm of spots) {
     const p = sm.p.clone().setY(sm.p.y - 0.3);
+    if (off) p.add(off);
     if (kind === 'giantFern') {
       const v = Math.floor(r() * 3);
       set.add(`gfern-${v}`, () => SPECIES.giantFern(9500 + v, 80), p, lerp(0.6, 1.25, r()), r() * TAU, inst(r));
@@ -326,6 +329,7 @@ export function populateTrees(S, kind, seed, opts = {}) {
       for (let i = 0; i < n; i++) {
         const v = V('v', Math.floor(r() * 3)), pk = V('pk', Math.floor(r() * 3));
         const p = sm.p.clone().add(new Vector3((r() - 0.5) * 10, -0.3, (r() - 0.5) * 10));
+        if (off) p.add(off);
         set.add(`grove-${v}-${pk}`, () => Object.assign(SPECIES.fiddlehead(1200 + v, 4, pals[pk]), { fade: [1200, 1700], shadow: true }), p, lerp(1.8, 4.2, Math.pow(r(), 1.3)), r() * TAU, inst(r));
       }
     }

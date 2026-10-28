@@ -52,7 +52,10 @@ export default async function (game) {
     cam.position.copy(camPos);
     cam.lookAt(look);
   };
-  game.devUpdate = () => world.updateVisibility(s);
+  game.devUpdate = (dt) => {
+    world.flora?.update(dt || 0.016, { disturbers: null });
+    world.updateVisibility(s);
+  };
   world.updateVisibility(s);
   game.devWorld = world;
 }

@@ -5,6 +5,7 @@ import {
   Quaternion, SRGBColorSpace,
 } from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/math.js';
+import { CONTROL_LINES } from '../core/Input.js';
 
 // Lettering: Cinzel Decorative for the SKYSONG logo, Cinzel (carved Roman capitals) for the menu
 // lines, Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
@@ -214,30 +215,13 @@ export class Menu {
         ['Back', 'back'],
       ];
     } else if (page === 'controls' && navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches) {
-      entries = [
-        ['Drag — look, and swim where you look', null],
-        ['Two fingers — hum  (hold to sing)', null],
-        ['Double-tap and hold — gather a sonic boom, release', null],
-        ['Flick sideways — barrel roll', null],
-        ['Three fingers — pause', null],
-        ['Back', 'back'],
-      ];
+      entries = [...CONTROL_LINES.touch.map((l) => [l, null]), ['Back', 'back']];
     } else if (page === 'controls') {
-      entries = [
-        ['Mouse — look, and swim where you look', null],
-        ['W  or  left click — swim', null],
-        ['Shift — surge forward', null],
-        ['A  D — turn      Space  C — rise and dive', null],
-        ['Q  E — barrel roll', null],
-        ['F — hum  (hold to sing)', null],
-        ['R  or  right click — hold to gather a sonic boom, release', null],
-        ['Esc — pause', null],
-        ['Back', 'back'],
-      ];
+      entries = [...(this.game.input.usingGamepad ? CONTROL_LINES.gamepad : CONTROL_LINES.keyboard).map((l) => [l, null]), ['Back', 'back']];
     }
     const small = page === 'controls';
-    const h = small ? 2.1 : page === 'settings' ? 2.7 : 3.5;
-    const gap = small ? 2.75 : page === 'settings' ? 3.5 : 4.5;
+    const h = small ? 1.85 : page === 'settings' ? 2.7 : 3.5;
+    const gap = small ? 2.4 : page === 'settings' ? 3.5 : 4.5;
     // under the title on the main and pause pages, vertically centred elsewhere
     const top = page === 'main' || page === 'pause' ? 0 : (entries.length - 1) * gap * 0.5;
     entries.forEach(([label, action], i) => {

@@ -587,8 +587,9 @@ void main() {
   vec3 V = normalize(uCamPos - vWorldPos);
   float top = vFin.w;
   float arm = 1.0 - smoothstep(0.05, 0.3, mem);
-  float ray = vFin2.z;
   vec2 m = vFin2.xy;               // metres along the span and the chord
+  // the finger rays are drawn by hand: each swells and thins along its length and its edges waver
+  float ray = clamp(vFin2.z * (0.75 + 0.5 * vnoise(vec2(m.x * 1.1, m.y * 0.35) + vFin.z * 7.0)) + (vnoise(m * 2.6 + 5.0) - 0.5) * 0.2 * vFin2.z, 0.0, 1.0);
   float id = vFin.z;
   float isWing = step(id, 1.5);
   // countershaded skin: dark above, pale below with dark mottles

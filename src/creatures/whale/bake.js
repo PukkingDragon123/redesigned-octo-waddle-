@@ -135,7 +135,7 @@ void main() {
     vec2 sp = vec2(s * perim, t * L) / (L * 0.016);
     sp += vec2(fbm2(sp * 0.35 + 1.7), fbm2(sp * 0.35 + 9.2)) * 1.6;
     // hand-drawn: a finer pen tremor on top of the slow warp, so no cell edge runs straight
-    sp += (vec2(vnoise(sp * 2.3 + 3.7), vnoise(sp * 2.3 + 8.1)) - 0.5) * 0.32;
+    sp += (vec2(vnoise(sp * 2.3 + 3.7), vnoise(sp * 2.3 + 8.1)) - 0.5) * 0.46;
     vec2 i = floor(sp), f = fract(sp);
     float f1 = 8.0, f2 = 8.0;
     for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {

@@ -287,8 +287,10 @@ void main() {
     rock = mix(rock, mix(rock, vec3(luma(rock)), 0.35) * 1.38, wear * 0.55);
 
     // ---- weathering: rain streaks down the faces, rust seeps below joints, salt crust ----
-    float streakA = texture2D(uNoise, vec2(P.z / 7.0, P.y / 75.0)).b;
-    float streakB = texture2D(uNoise, vec2(P.x / 7.0 + 0.5, P.y / 75.0)).b;
+    // (the streaks meander a little as they run down, never ruled vertical hatching)
+    float sWob = (nm.r - 0.5) * 0.12 + pen.b * 0.05;
+    float streakA = texture2D(uNoise, vec2(P.z / 7.0 + sWob, P.y / 75.0)).b;
+    float streakB = texture2D(uNoise, vec2(P.x / 7.0 + 0.5 + sWob, P.y / 75.0)).b;
     streak = ax.x * streakA + ax.y * streakB;
     float streak2 = ax.x * texture2D(uNoise, vec2(P.z / 2.3, P.y / 30.0)).r + ax.y * texture2D(uNoise, vec2(P.x / 2.3, P.y / 30.0)).r;
     float stain = smoothstep(0.5, 0.78, streak) * steep * (1.0 - scar * 0.8);

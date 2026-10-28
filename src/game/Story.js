@@ -1533,7 +1533,7 @@ export class Story {
     g.wind.sample(calf.pos, calf.wind).multiplyScalar(herd.windShelter * (0.35 + this.weather.level * 0.9));
     // the herd's slipstream: flying with the travelling herd, the young one is carried along
     // (the air it swims through moves with the herd), so it keeps pace at migration speed
-    if (playing && herd.mode === 'travel' && herd.speed > 4) {
+    if (playing && (herd.mode === 'travel' || herd.mode === 'shield') && herd.speed > 4) {
       const fr = herd.frame;
       const near = 1 - smoothstep(120, 320, calf.pos.distanceTo(herd.mother.pos));
       if (fr && near > 0) calf.wind.addScaledVector(fr.fwd, herd.speed * 0.5 * near);
@@ -1698,7 +1698,7 @@ export class Story {
     });
     if (this.state === 'play') {
       const ch = this.path.chapters[this.chapterIndex];
-      if (ch && (ch.mood === 'flight' || ch.mood === 'krill' || ch.mood === 'forest' || ch.mood === 'oasis')) a.setIntensity?.(clamp(calf.vel.length() / 20, 0, 1));
+      if (this.act === 1 && ch && (ch.mood === 'flight' || ch.mood === 'krill' || ch.mood === 'forest' || ch.mood === 'oasis')) a.setIntensity?.(Math.max(clamp(calf.vel.length() / 20, 0, 1), this.activities?.intensity ?? 0));
     }
   }
 

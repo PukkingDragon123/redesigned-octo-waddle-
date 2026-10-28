@@ -209,6 +209,12 @@ export class LifeCycle {
     }
   }
 
+  /** Progress marker (headless checks and the pacing table read stageLog). */
+  mark(stage) {
+    this.stage = stage;
+    (this.stageLog ||= []).push([stage, Math.round(this.game.time * 10) / 10]);
+  }
+
   // ---- events from the story -------------------------------------------------------------------------
   onHum() {
     const S = this.story;
@@ -311,6 +317,7 @@ export class LifeCycle {
   /** "Seasons turn...": a fade to black and a few lines between acts. */
   *seasonsTurn(lines) {
     const S = this.story, g = this.game, C = S.cine;
+    this.mark('skip');
     C.begin({ letterbox: true, hold: true });
     g.fadeRate = 0.5;
     let t = 0;
@@ -352,6 +359,7 @@ export class LifeCycle {
     mate.lc.target.copy(me.pos).addScaledVector(f.right, 30).setY(me.pos.y + 4);
     mate.lc.speed = 9;
     this.autoGoal = () => mate.pos;
+    this.mark('act2');
     // ---- the meeting, as a cinematic
     C.begin({ focus: me, rate: 0.5, snap: true });
     C.card(ACTS[2]);
@@ -364,6 +372,7 @@ export class LifeCycle {
     S.voiceCall(mate, 'answer');
     yield* C.play(C.eye({ whale: mate, side: 1, dist: [0.38, 0.3], fov: [32, 28] }), 3.5);
     C.end();
+    this.mark('circle');
     // ---- she circles, and calls; the player comes to her
     mate.lc.mode = 'steer';
     let a = 0;
@@ -377,6 +386,7 @@ export class LifeCycle {
       if (me.pos.distanceTo(mate.pos) < 45 && t > 4) break;
     }
     this._t0 = undefined;
+    this.mark('duet');
     // ---- the duet: she sings, the player answers
     mate.lc.mode = 'steer';
     const faceSpot = () => mate.lc.target.copy(me.pos).addScaledVector(me.fwd, 22).addScaledVector(me.right, 6).setY(me.pos.y + 2);
@@ -389,6 +399,7 @@ export class LifeCycle {
     keep.done = true;
     S.script.cancel('mateFace');
     mate.drive.lookAt = null;
+    this.mark('dance');
     // ---- the spiral dance: follow her spirals, mirror her rolls, rise together
     S.audio.setIntensity?.(0.6);
     const C0 = _v.copy(me.pos).addScaledVector(me.fwd, 45);
@@ -439,6 +450,8 @@ export class LifeCycle {
       if (t > 50 && harmony > 25) break;
     }
     this.autoGoal = null;
+    this.mark('helix');
+    this.mirrors = mirrors;
     // ---- the rise: an intertwined spiral up through the clouds under the twin moons
     yield* this.helixRise(me, mate);
     this.free = false;
@@ -459,6 +472,7 @@ export class LifeCycle {
     let t = 0, a = a0;
     const T = 22;
     const pA = new Vector3(), pB = new Vector3(), dA = new Vector3(), dB = new Vector3();
+    const fromA = me.pos.clone(), fromB = mate.pos.clone();
     const shot = C.orbit({ center: c, radius: [70, 120], height: [-25, -60], angle: [a0 + 2, a0 + 3.6], fov: [44, 56], lookUp: [0, 60] });
     G.uSongAmp.value = 1.2;
     while (t < T && !C.skipped) {
@@ -473,6 +487,9 @@ export class LifeCycle {
       // tangent of the helix: along the circle and upward
       dA.set(-Math.sin(a), 0.55, Math.cos(a));
       dB.set(-Math.sin(a + Math.PI), 0.55, Math.cos(a + Math.PI));
+      // ease from where they were onto the helix
+      const join = smoothstep(0, 3, t);
+      if (join < 1) { pA.lerp(fromA, 1 - join); pB.lerp(fromB, 1 - join); }
       this.pose(me, pA, dt, dA);
       this.pose(mate, pB, dt, dB);
       me.drive.effort = mate.drive.effort = 0.7;
@@ -515,6 +532,7 @@ export class LifeCycle {
     me.place(_v.copy(P).addScaledVector(f.right, -16).addScaledVector(f.fwd, -10).setY(sea - 3), yaw + 0.5);
     S.player.syncAim();
     newborn.group.scale.setScalar(0.7);
+    this.mark('act3');
     // ---- the birth (gentle, suggestive): light and bubbles, and then there are two
     C.begin({ focus: mate, rate: 0.5, snap: true });
     C.card(ACTS[3]);
@@ -541,6 +559,7 @@ export class LifeCycle {
     newborn.group.scale.setScalar(1);
     mate.drive.sing = 0;
     C.end();
+    this.mark('lift');
     // ---- lift the newborn to the surface for its first breath
     this.kin.add(newborn);
     newborn.lc.mode = 'hold';
@@ -576,6 +595,7 @@ export class LifeCycle {
       if (newborn.pos.y > sy - newborn.radius * 0.6) break;
       if (t > 140) break;
     }
+    this.mark('breath');
     // ---- the first breath
     newborn.pos.y = seaHeight(g, newborn.pos.x, newborn.pos.z) + 0.1;
     newborn.blow(g, 0.9);
@@ -596,6 +616,7 @@ export class LifeCycle {
     yield* C.play(C.low({ subject: newborn, side: [9, 7], back: [-10, -6], height: [0.8, 1.4], fov: 40, lookUp: 0.6 }), 5);
     yield* C.play(C.eye({ whale: newborn, side: -1, dist: [0.9, 0.7], fov: 34 }), 3);
     C.end();
+    this.mark('teach');
     // ---- teach it to fly: it follows you, you call, it answers
     this.calls = 0;
     this.autoGoal = () => _v2.copy(herd.mother.pos).add(_p.set(20, 14, 0));
@@ -608,6 +629,7 @@ export class LifeCycle {
       // without a call for a while, the little one calls first
       if (t > 10 && Math.floor(t) % 12 === 0 && Math.floor(t - dt) % 12 !== 0) S.voiceCall(newborn, 'coo');
     }
+    this.mark('lead');
     // ---- lead it to feed: a shoal in the shallows ahead
     const shoal = S.path.offsetAt(330, -25, 0);
     shoal.y = seaHeight(g, shoal.x, shoal.z) - 3;
@@ -635,6 +657,7 @@ export class LifeCycle {
     newborn.drive.happy = 1;
     S.voiceCall(newborn, 'chirp');
     this.autoGoal = null;
+    this.mark('family');
     // ---- a family, flying
     C.begin({ focus: me, rate: 0.5 });
     C.card(Object.assign({ low: true }, MOMENTS.answer));
@@ -669,6 +692,7 @@ export class LifeCycle {
     const { elder, mate } = this.ensure();
     const s0 = 6290;
     this.setup(4, s0, 'dusk', 'night', elder);
+    this.mark('act4');
     g.fadeRate = -0.5;
     g.atmosphere.transition('night', 50);
     const me = herd.calf;
@@ -686,6 +710,7 @@ export class LifeCycle {
     C.hideCard();
     yield* C.play(C.low({ subject: me, side: [26, 22], back: [-50, -30], height: [1.5, 2.5], fov: 46, lookUp: 4 }), 5);
     C.end();
+    this.mark('leadHerd');
     // ---- leading the migration: the herd keeps pace with its elder
     const sStart = herd.s;
     let t = 0, projT = 0, myS = herd.s + 60;
@@ -697,6 +722,7 @@ export class LifeCycle {
       herd.mode = 'travel';
       herd.targetSpeed = clamp((myS - herd.s - 30) * 0.18, t > 60 ? 6 : 2.5, 13);
     }
+    this.mark('lastSong');
     // ---- the last song, under the spiral galaxy
     const center = _v.copy(me.pos).addScaledVector(me.fwd, 50);
     center.y += 12;
@@ -725,6 +751,7 @@ export class LifeCycle {
     for (const w of herd.whales) w.drive.sing = 0;
     mate.drive.sing = 0;
     G.uSongAmp.value = 0;
+    this.mark('descend');
     // ---- rest: the elder descends into the deep
     S.audio.setMood?.('rest', { fade: 6 });
     S.audio.setIntensity?.(0.5);
@@ -737,7 +764,7 @@ export class LifeCycle {
     surf.y = seaHeight(g, surf.x, surf.z) + 1;
     const bedHere = S.world.seabedAt ? S.world.seabedAt(surf.x + fwd.x * 40, surf.z + fwd.z * 40) : -80;
     const deep = surf.clone().addScaledVector(fwd, 40);
-    deep.y = Math.max(bedHere + me.radius * 1.2, -70);
+    deep.y = Math.max(bedHere + me.radius * 1.2, -36);
     const descend = C.rel({ subject: me, side: [36, 30], up: [10, 2], back: [30, 22], ahead: 4, fov: [46, 40], worldUp: true });
     t = 0;
     const T1 = 9, T2 = 16;
@@ -761,6 +788,7 @@ export class LifeCycle {
     }
     this.pose(me, deep, 0);
     me.drive.sleep = 1;
+    this.mark('garden');
     // ---- the whale fall becomes a garden: a time-lapse
     for (let i = 0; i < 3; i++) S.eco?.addFishSchool?.(_v2.copy(deep).add(_v.set((i - 1) * 18, 4 + i * 2, (i % 2) * 14 - 7)).clone(), i === 1 ? 'spiralback' : 'glintfin', 160);
     C.card(Object.assign({ low: true }, MOMENTS.garden));
@@ -789,6 +817,7 @@ export class LifeCycle {
   /** A new calf wakes beside its mother in the Dawn Lagoon. The title. */
   *dawnAgain() {
     const S = this.story, g = this.game, herd = S.herd, C = S.cine;
+    this.mark('dawn');
     this.restore();
     S.resetWorldState();
     S.state = 'intro';
@@ -827,6 +856,7 @@ export class LifeCycle {
     g.fadeRate = 0.3;
     yield* until(() => g.engine.post.grade.uFade.value >= 0.99 || g.debug, 6);
     C.end({ release: false });
+    this.mark('title');
     S.enterMenu();
   }
 }

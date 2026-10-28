@@ -108,6 +108,14 @@ class Pool {
     this.t = new Float32Array(n); // timers
     this.t2 = new Float32Array(n);
     this.floor = new Float32Array(n);
+    this.wait = new Float32Array(n); // respawn back-off after a failed placement (open sea)
+  }
+  /** A slot that is free (or left behind) may try to respawn now. */
+  ready(i, dt) {
+    this.alive[i] = 0;
+    if (this.wait[i] > 0) { this.wait[i] -= dt; return false; }
+    this.wait[i] = 0.8 + Math.random() * 1.2;
+    return true;
   }
 }
 
@@ -151,6 +159,7 @@ export class ReefLife {
     this._bloomT = -1e9;
     this._rayT = -1e9;
     this._underT = 0;
+    this._scatterCool = 0;
     this.visible = true;
   }
 
@@ -384,7 +393,9 @@ export class ReefLife {
     // the garden follows the camera
     const sx = this._scatterAt.x - cam.x, sz = this._scatterAt.z - cam.z;
     const moved = sx * sx + sz * sz;
-    if (moved > 100) {
+    this._scatterCool -= dt;
+    if (moved > 100 && (this._scatterCool <= 0 || moved > R * R * 0.25)) {
+      this._scatterCool = cam.y > G.uSeaLevel.value + 25 ? 0.6 : 0.15;
       if (moved > R * R * 0.8) this._fill();
       this.scatter(cam.x, cam.z);
       for (const I of this.instList) if (I.kind === 'kelp' || I.kind === 'tubes' || I.kind === 'anemone' || I.kind === 'shell' || I.kind === 'fan') I.fade.set(cam.x, cam.z, I.fade.z, I.fade.w);
@@ -500,7 +511,7 @@ export class ReefLife {
     let n = 0;
     for (let i = 0; i < C.max; i++) {
       if (!C.alive[i] || this._far(C.P[i * 3], C.P[i * 3 + 2])) {
-        if (!this._spawnCrab(i, R * 0.75, R)) continue;
+        if (!C.ready(i, dt) || !this._spawnCrab(i, R * 0.75, R)) continue;
       }
       const k = i * 3;
       const vr = C.vr[i];
@@ -559,7 +570,7 @@ export class ReefLife {
     let n = 0;
     for (let i = 0; i < J.max; i++) {
       if (!J.alive[i] || this._far(J.P[i * 3], J.P[i * 3 + 2])) {
-        if (!this._spawnJelly(i, R * 0.75, R)) continue;
+        if (!J.ready(i, dt) || !this._spawnJelly(i, R * 0.75, R)) continue;
       }
       const k = i * 3;
       const d = this._threat(J.P[k], J.P[k + 1], J.P[k + 2]);
@@ -600,7 +611,7 @@ export class ReefLife {
     let n = 0;
     for (let i = 0; i < Rr.max; i++) {
       if (!Rr.alive[i] || (Rr.a[i] < 0.5 && this._far(Rr.P[i * 3], Rr.P[i * 3 + 2], 1.3))) {
-        if (!this._spawnRay(i, R * 0.8, R)) continue;
+        if (!Rr.ready(i, dt) || !this._spawnRay(i, R * 0.8, R)) continue;
       }
       const k = i * 3;
       const s = Rr.s[i];
@@ -664,7 +675,7 @@ export class ReefLife {
     let n = 0;
     for (let i = 0; i < Pf.max; i++) {
       if (!Pf.alive[i] || this._far(Pf.P[i * 3], Pf.P[i * 3 + 2])) {
-        if (!this._spawnPuffer(i, R * 0.75, R)) continue;
+        if (!Pf.ready(i, dt) || !this._spawnPuffer(i, R * 0.75, R)) continue;
       }
       const k = i * 3;
       const d = this._threat(Pf.P[k], Pf.P[k + 1], Pf.P[k + 2]);
@@ -716,7 +727,7 @@ export class ReefLife {
     let n = 0;
     for (let i = 0; i < E.max; i++) {
       if (!E.alive[i] || this._far(E.P[i * 3], E.P[i * 3 + 2])) {
-        if (!this._spawnEel(i, R * 0.7, R)) continue;
+        if (!E.ready(i, dt) || !this._spawnEel(i, R * 0.7, R)) continue;
       }
       const k = i * 3;
       const sd = E.seed[i] * 50;

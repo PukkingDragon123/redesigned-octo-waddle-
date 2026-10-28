@@ -147,6 +147,8 @@ void main() {
     float depth = uSeaLevel - X.y;
     if (depth < 0.0) continue;
     vec2 S = X.xz + sr.xz * (depth / min(sr.y, -0.2));
+    // the curtains sway with the swell overhead
+    S += vec2(sin(uTime * 0.45 + S.y * 0.04), cos(uTime * 0.37 + S.x * 0.04)) * (0.8 + depth * 0.05);
     // curtains of light: thin ridges of the focusing pattern, drifting with the swell
     float n1 = texture2D(uNoise, S / 11.0 + vec2(uTime * 0.012, uTime * 0.007)).r;
     float n2 = texture2D(uNoise, S / 4.3 - vec2(uTime * 0.02, -uTime * 0.013)).a;
@@ -276,21 +278,29 @@ void main() {
     float ny = vnoise(uv * 38.0 + vec2(0.0, uTime * 5.3) + 7.0) - 0.5;
     offs += vec2(nx, ny) * fall * uHaze.w * 0.012;
   }
-  // under water the whole view wavers a little
+  // under water the whole view wavers: a slow swell of refraction plus a fine shimmer, stronger
+  // toward the edges of the view (the water between the eye and the world is never still)
+  vec2 vdUW = (vUv - 0.5) * vec2(uAspect, 1.0);
+  float edgeUW = dot(vdUW, vdUW);
   if (uUnderwater > 0.0) {
     float wx = vnoise(uv * 9.0 + vec2(uTime * 0.6, 0.0)) - 0.5;
     float wy = vnoise(uv * 9.0 + vec2(3.1, uTime * 0.55)) - 0.5;
-    offs += vec2(wx, wy) * 0.0035 * uUnderwater;
+    float sx = sin(uv.y * 11.0 + uTime * 1.3) + sin(uv.x * 7.0 - uTime * 0.9 + uv.y * 3.0) * 0.6;
+    float sy = cos(uv.x * 10.0 + uTime * 1.1) + cos(uv.y * 6.0 + uTime * 0.7 - uv.x * 2.0) * 0.6;
+    offs += (vec2(wx, wy) * 0.004 + vec2(sx, sy) * 0.0009) * (1.0 + edgeUW * 2.5) * uUnderwater;
   }
   float lensRim = 0.0;
   if (uLens.x > 0.001) offs += lensDrops(uv, uLens.y, lensRim) * uLens.x;
   vec2 suv = uv + offs;
   vec3 col;
-  if (chroma > 0.01) {
+  // a soft chromatic fringe toward the edges under water (the water acts as a weak prism)
+  float uwCA = uUnderwater * edgeUW * 0.006;
+  if (chroma > 0.01 || uwCA > 0.0002) {
     float ca = min(chroma, 1.0) * 0.004;
-    col.r = texture2D(tScene, suv + offs * 0.5 + vec2(ca, 0.0)).r;
+    vec2 rad = vdUW / max(length(vdUW), 1e-3) * vec2(1.0 / uAspect, 1.0) * uwCA;
+    col.r = texture2D(tScene, suv + offs * 0.5 + vec2(ca, 0.0) + rad).r;
     col.g = texture2D(tScene, suv).g;
-    col.b = texture2D(tScene, suv - offs * 0.5 - vec2(ca, 0.0)).b;
+    col.b = texture2D(tScene, suv - offs * 0.5 - vec2(ca, 0.0) - rad * 1.4).b;
   } else {
     col = texture2D(tScene, suv).rgb;
   }
@@ -307,6 +317,12 @@ void main() {
     col = mix(col, uCloudVeil, clamp(veil, 0.0, 0.95));
   }
 
+  // under water: a luminous veil of in-scattered light lifts the deep shadows (never murky mud)
+  if (uUnderwater > 0.0) {
+    float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    vec3 veil = uWaterTint * (0.9 + 0.6 * smoothstep(0.7, 0.0, vUv.y)) + uShaftCol * 6.0;
+    col += veil * 0.18 * uUnderwater * smoothstep(0.25, 0.0, lum);
+  }
   col *= uExposure * (1.0 + uFlash * 0.35);
   col = neutralTonemap(col);
 
@@ -321,7 +337,10 @@ void main() {
   vec2 vd = (vUv - 0.5) * vec2(uAspect, 1.0);
   float vig = smoothstep(0.35, 1.05, length(vd));
   col = mix(col, col * uVignetteColor, vig * uVignette);
-  col *= 1.0 - vig * uUnderwater * 0.35;
+  // deep blue-teal at the edges under water (a tinted falloff, not a black frame), a touch richer colour
+  col = mix(col, col * vec3(0.5, 0.72, 0.9), vig * uUnderwater * 0.7);
+  float lU = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(col, mix(vec3(lU), col, 1.12), uUnderwater);
   col *= 1.0 - uPulse * vig * 0.4;
 
   col = mix(col, uFadeColor, uFade);
@@ -517,7 +536,7 @@ export class PostFX {
       this.rayBlur.render(renderer, this.rayB);
       this.composite.uniforms.tRays.value = this.rayB.texture;
       // scattering of the sunlight toward the eye (the per-channel loss is already in the shafts)
-      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.016 * (1 - G.uStorm.value * 0.7));
+      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.021 * (1 - G.uStorm.value * 0.7));
     } else if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
       this.rayMask.uniforms.tSrc.value = src;
       this.rayMask.uniforms.tDepth.value = sceneRT.depthTexture;

@@ -20,13 +20,13 @@ export const BUG_SPECIES = {
   moth: {
     slots: 12, block: 32, size: 0.62, flap: 9, amp: 0.8, base: 0.3, minPx: 2.2,
     bodyW: 0.1, bodyL: 0.42, wing: [1.0, 0.85, 0.82, 0.8],
-    colA: 0xffc878, colB: 0x7fd8ff, glow: 0xffd28a, glowDay: 0.35, glowNight: 2.4,
+    colA: 0xffb060, colB: 0x6a5cff, glow: 0xffc870, glowDay: 0.35, glowNight: 2.4,
     flee: 6.5, fleeR: 6.5, catchR: 1.9, energy: 0.03, wake: 1, shape: 0, drawDist: 520,
   },
   gnat: {
     slots: 5, block: 96, size: 0.24, flap: 38, amp: 0.55, base: 0.35, minPx: 1.7,
     bodyW: 0.3, bodyL: 0.42, wing: [0.8, 0.5, 0.6, 0.45],
-    colA: 0xc8ff9a, colB: 0x6ff2d8, glow: 0xb8ff8a, glowDay: 0.9, glowNight: 2.0,
+    colA: 0xc8ff9a, colB: 0x6ff2d8, glow: 0xb8ff8a, glowDay: 1.4, glowNight: 2.4,
     flee: 3.2, fleeR: 4.5, catchR: 2.3, energy: 0.009, wake: 0.6, shape: 1, drawDist: 380,
   },
   skitter: {
@@ -178,7 +178,7 @@ void main() {
   vec3 N = normalize(vN);
   float wrap = 0.35 + 0.65 * abs(dot(N, uSunDir));
   float back = pow(max(dot(-vV, uSunDir), 0.0), 4.0) * 0.8; // the sun through the wing
-  vec3 lit = col * (uSkyAmbient * 1.1 + uSunColor * (wrap * 0.55 + back) + uMoonColor * uNight * 0.4);
+  vec3 lit = col * (uSkyAmbient * 0.8 + uSunColor * (wrap * 0.45 + back) + uMoonColor * uNight * 0.4);
   col = lit + uGlowCol * emis * glowK;
   col = mix(col, vFogCol, vFog * 0.92);
   a *= vAlpha;
@@ -365,7 +365,11 @@ export class SkyBugs {
     this.frame++;
     const cam = this.game.engine.camera.position;
     const ocean = this.game.ocean;
-    const seaFn = ocean && ocean.enabled !== false ? (ocean.heightApprox ? ocean.heightApprox.bind(ocean) : ocean.heightAt ? ocean.heightAt.bind(ocean) : null) : null;
+    if (ocean !== this._ocean) {
+      this._ocean = ocean;
+      this._seaFn = ocean ? (ocean.heightApprox ? ocean.heightApprox.bind(ocean) : ocean.heightAt ? ocean.heightAt.bind(ocean) : null) : null;
+    }
+    const seaFn = ocean && ocean.enabled !== false ? this._seaFn : null;
     let want = 0, nearest = Infinity;
     const mx = eater ? eater.mouth.x : 0, my = eater ? eater.mouth.y : 0, mz = eater ? eater.mouth.z : 0;
     const bx = eater ? eater.body.x : 0, by = eater ? eater.body.y : 0, bz = eater ? eater.body.z : 0;

@@ -1428,6 +1428,41 @@ export class Ocean {
         color: [1, 1, 1], alpha: 0.5 + Math.random() * 0.4, drag: 0.05, gravity: 0, kind: 5, fadeIn: 1.2,
       });
     }
+    // drifting plankton: tiny living motes that catch the light (and glow blue-green at night)
+    const glow = this.game.glow;
+    if (!glow) return;
+    const night = G.uNight.value;
+    this._plAcc = (this._plAcc || 0) + dt * (6 + 30 * night);
+    while (this._plAcc >= 1) {
+      this._plAcc -= 1;
+      const a = Math.random() * TAU, r = 2 + Math.random() * 12, y = (Math.random() - 0.5) * 10;
+      const py = Math.min(cam.y + y, this.camSurface - 0.4);
+      v.set((Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * 0.25);
+      const warm = Math.random() < 0.25;
+      glow.emit({
+        pos: this._tp(cam.x + Math.cos(a) * r, py, cam.z + Math.sin(a) * r), vel: v,
+        life: 3 + Math.random() * 4, size: 0.03 + Math.random() * 0.05, sizeEnd: 0.02,
+        color: warm ? [0.9, 0.6, 1.0] : [0.25, 0.95, 0.85], alpha: (0.1 + 0.6 * night) * (0.5 + Math.random() * 0.5),
+        drag: 0.1, gravity: 0, kind: 1, fadeIn: 0.8,
+      });
+    }
+    // now and then a stream of bubbles rises from the sea floor below
+    this._bubAcc = (this._bubAcc || 0) + dt * 0.6;
+    if (this._bubAcc >= 1) {
+      this._bubAcc -= 1;
+      const a = Math.random() * TAU, r = 4 + Math.random() * 14;
+      const bx = cam.x + Math.cos(a) * r, bz = cam.z + Math.sin(a) * r;
+      const floor = this.game.story?.world?.seabedAt?.(bx, bz) ?? this.game.ecoFloor?.(bx, bz) ?? cam.y - 12;
+      const by = Math.max(floor, cam.y - 16);
+      for (let i = 0; i < 10; i++) {
+        v.set((Math.random() - 0.5) * 0.15, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.15);
+        mist.emit({
+          pos: this._tp(bx + (Math.random() - 0.5) * 0.3, by + i * 0.35, bz + (Math.random() - 0.5) * 0.3), vel: v,
+          life: 4 + Math.random() * 3, size: 0.03 + Math.random() * 0.06, sizeEnd: 0.08,
+          color: [0.9, 1, 1], alpha: 0.7, drag: 0.3, gravity: -0.8, kind: 4, fadeIn: 0.1,
+        });
+      }
+    }
   }
 
   _addSource(x, z, r, imp, foam, glow, ring, merge = false) {

@@ -92,6 +92,13 @@ export class CameraRig {
     // never fall behind too far at speed
     const maxLag = dist * 1.6;
     if (this.gPos.distanceTo(whale.pos) > maxLag) this.gPos.sub(whale.pos).setLength(maxLag).add(whale.pos);
+    // the waterline: stay clearly on the whale's side of the sea surface (opts.surfaceY), so the view
+    // is never split half above and half below the water
+    if (opts.surfaceY !== undefined) {
+      const s = opts.surfaceY, below = whale.pos.y < s - 0.4;
+      if (below && this.gPos.y > s - 0.7) this.gPos.y = s - 0.7;
+      else if (!below && this.gPos.y < s + 0.9) this.gPos.y = s + 0.9;
+    }
     this.gFov = damp(this.gFov, clamp(51 + speed * 0.55 + diving * 6 + this.wide * 4, 50, 72), 2, dt);
     this.gRoll = damp(this.gRoll, -whale.roll * 0.28 + (whale.rollSpin > 0 ? 0 : 0), 3, dt);
   }

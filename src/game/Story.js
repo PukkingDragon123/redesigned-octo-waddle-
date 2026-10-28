@@ -13,6 +13,7 @@ import { SonicBooms } from './SonicBoom.js';
 import { Menu } from './Menu.js';
 import { Script, until } from './Script.js';
 import { SongGame } from './SongGame.js';
+import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
 import { ADULTS, CALVES } from '../creatures/WhaleTypes.js';
 import { G } from '../render/Globals.js';
@@ -50,6 +51,11 @@ export class Story {
     this.script = new Script();
     this.audio = new AudioStub();
     this.eco = null;
+    // splashes and spouts from whales meeting the sea (Swim.js)
+    this._onSplash = (kind, pos, k) => {
+      if (kind === 'spout') this.audio.sfx?.('whoosh', { position: pos, gain: 0.25 });
+      else this.audio.sfx?.('splash', { position: pos, gain: clamp(0.35 + k * 0.4, 0, 1.2) });
+    };
     this.falcon = null;
     this.chapterIndex = -1;
     this.voices = new Map();
@@ -1178,6 +1184,8 @@ export class Story {
     }
     this.updateCalf(dt);
     this.herd.update(dt);
+    for (const w of this.herd.whales) if (w !== this.herd.calf) waterStep(w, dt, g, { onSplash: this._onSplash });
+    for (const w of this.gatheringOn ? this.gathering : []) waterStep(w, dt, g);
     const cam = g.engine.camera.position;
     for (const w of this.herd.whales) {
       if (w.role !== 'player') w.animate(dt, cam);
@@ -1246,10 +1254,9 @@ export class Story {
     // wind: the storm buffets the calf unless it shelters in its mother's lee
     g.wind.sample(calf.pos, calf.wind).multiplyScalar(herd.windShelter * (0.35 + this.weather.level * 0.9));
     calf.step(dt);
-    // soft world limits: dense air below, thin air above, the herd's pull around
+    this.calfWater = waterStep(calf, dt, g, { player: true, onSplash: this._onSplash });
+    // soft world limits: the sea below (Swim.js), thin air above, the herd's pull around
     const anchor = herd.anchor;
-    if (calf.pos.y < 55) calf.vel.y += (55 - calf.pos.y) * 0.9 * dt;
-    if (calf.pos.y < 0) calf.vel.y += 12 * dt;
     const ceiling = anchor.y + 260;
     if (calf.pos.y > ceiling) calf.vel.y -= (calf.pos.y - ceiling) * 0.5 * dt;
     const away = this._v.copy(calf.pos).sub(anchor);
@@ -1354,6 +1361,8 @@ export class Story {
       const fv = this.falcon && this.falcon.mode !== 'hidden' && this.falcon.group?.visible;
       if (herd.mode === 'protect' && fv) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.lookBiasMax = 6; opts.extraDist = 3; opts.busy = true; }
       if (fv && this.lookUpUntil && g.time < this.lookUpUntil) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.3; opts.lookBiasMax = 6; opts.busy = true; }
+      opts.surfaceY = seaHeight(g, g.cameraRig.gPos.x, g.cameraRig.gPos.z);
+      if (this.calfWater && this.calfWater.depth > 0) { opts.distance = 7; opts.busy = true; }
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
     }
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});

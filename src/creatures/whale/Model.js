@@ -28,6 +28,18 @@ import { bakeSkin, cachedSkin, BAKE } from './bake.js';
 
 export { T_ORIGIN, BAKE };
 
+// Whales waiting for their skin to be painted. The game paints them before a frame starts
+// (flushWhaleBakes from engine.beforeRender), never in the middle of a render pass: a bake inside
+// the main pass (at night, when no shadow pass runs first) would leave the body undrawn.
+const PENDING = new Set();
+
+/** Paint every whale skin still waiting (call between frames, with the renderer). */
+export function flushWhaleBakes(renderer) {
+  if (!PENDING.size) return;
+  for (const m of PENDING) m.bake(renderer);
+  PENDING.clear();
+}
+
 const GEO_CACHE = new Map();
 
 // ---- shared build queue -------------------------------------------------------------------------
@@ -230,7 +242,7 @@ export class WhaleModel {
     this.skinRes = Math.max(128, Math.min(BAKE.max, Math.round((this.g.skinRes || 1024) * BAKE.scale)));
     const have = cachedSkin(this, this.skinRes);
     if (have) this._useSkin(have);
-    else mesh.onBeforeRender = (renderer) => this.bake(renderer);
+    else PENDING.add(this);
   }
 
   /** Bake (or fetch) this whale's skin textures. Safe to call any time with the renderer. */
@@ -242,7 +254,7 @@ export class WhaleModel {
       console.warn('[whale] skin bake failed', e);
       this.u.uBaked.value = 0;
     }
-    this.body.onBeforeRender = () => {};
+    PENDING.delete(this);
   }
 
   _useSkin(entry) {

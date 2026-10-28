@@ -12,6 +12,7 @@ import { Clouds } from '../world/Clouds.js';
 import { Wind } from '../world/Wind.js';
 import { Particles } from '../render/Particles.js';
 import { Whale } from '../creatures/Whale.js';
+import { flushWhaleBakes } from '../creatures/WhaleModel.js';
 
 // Dev scenes are only bundled in development builds.
 const DEV_TESTS = import.meta.env.DEV ? import.meta.glob('../dev/*.js') : {};
@@ -50,6 +51,8 @@ export class Game {
     this.mist = new Particles(this, { max: 2500, additive: false, name: 'mist', order: 20 });
     this.glow = new Particles(this, { max: 3000, additive: true, name: 'glow', order: 30 });
     this.cameraRig = new CameraRig(this);
+    // whale skins are painted between frames, before any render pass
+    this.engine.beforeRender.unshift(() => flushWhaleBakes(this.engine.renderer));
     this.applyQuality();
 
     this.systems = [];

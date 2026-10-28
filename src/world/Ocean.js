@@ -368,7 +368,9 @@ vec3 whirlFoam(vec2 p, float dist) {
     float r = length(d);
     float q = r / A.z;
     if (q >= 1.05) continue;
-    res.y += B.x * whirlProfile(q);
+    float fq = whirlProfile(q);
+    // the deep glow lives in the walls of the funnel; the eye itself stays a dark glassy mirror
+    res.y += B.x * fq * smoothstep(0.05, 0.16, q);
     float lq = log(max(q, 0.02));
     float th = atan(d.y, d.x) - B.z;
     float spinS = sign(B.y);
@@ -391,8 +393,8 @@ vec3 whirlFoam(vec2 p, float dist) {
     }
     float env = smoothstep(0.07, 0.22, q) * (1.0 - smoothstep(0.6, 1.02, q));
     // the lip of the calm eye: a ring of churned lace
-    float lip = exp(-pow((q - 0.085 - wob * 0.02) / 0.03, 2.0));
-    res.x += B.x * (streaks * env * (0.75 + 0.5 * wob2) + lip * 0.8);
+    float lip = exp(-pow((q - 0.1 - wob * 0.025) / 0.022, 2.0)) * smoothstep(0.3, 0.6, textureLod(uNoise, vec2(across * 4.0, flow * 0.5), lod).g);
+    res.x += B.x * (streaks * env * (0.75 + 0.5 * wob2) + lip * 0.45);
     res.z += B.x * lip;
   }
   return res;

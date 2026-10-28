@@ -20,6 +20,7 @@ import { Conductor } from './Conductor.js';
 import { WhaleVoice } from './WhaleVoice.js';
 import { Sfx } from './Sfx.js';
 import { Ambience } from './Ambience.js';
+import { Soundtrack } from './Soundtrack.js';
 import { loadBank, preloadBank, IR_SPLIT } from './SampleBank.js';
 import { MOODS, MOOD_NAMES } from './moods.js';
 import { parseChord, SCALES, bassNote, chordTones } from './theory.js';
@@ -337,6 +338,12 @@ export class AudioSystem {
     this.conductor.setIntensity(this._intensity, true);
     this._built = true;
     if (this._mood) this.conductor.setMood(this._mood.name, this._mood.fade);
+    // the game jam's recorded soundtrack takes over the music when its file is present
+    if (!this.offline) {
+      this.soundtrack = new Soundtrack(this);
+      if (this._mood) this.soundtrack.setMood(this._mood.name, 0);
+      this.soundtrack.load().then((ok) => { if (ok) this.soundtrack.play(); }).catch((e) => this._warn(e));
+    }
     if (!this.offline && typeof setInterval !== 'undefined') {
       // keeps the score going through long frames or a paused game loop
       this._pump = setInterval(() => {
@@ -506,6 +513,7 @@ export class AudioSystem {
       const fade = clamp(finite(+(opts && opts.fade), 6), 0, 60);
       this._mood = { name, fade };
       if (this._built) this.conductor.setMood(name, fade);
+      this.soundtrack?.setMood(name, fade);
     } catch (e) {
       this._warn(e);
     }

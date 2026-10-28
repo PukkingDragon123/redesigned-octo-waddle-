@@ -494,7 +494,7 @@ void main() {
   } else {
     col = c * 0.35 * (1.0 - vP.y * 0.7);
   }
-  col *= (0.55 + 1.3 * uNight) * (1.0 + flare * 2.5) * (0.8 + 0.5 * pulse);
+  col *= (1.1 + 1.2 * uNight) * (1.0 + flare * 2.5) * (0.8 + 0.5 * pulse);
   // through the water: glow fades with the path, and the surface dims it seen from above
   float dist = length(vWorldPos - uCamPos);
   vec3 T = exp(-uWaterAbsorb * dist * mix(0.0, 1.0, uUnderwater) * 0.8);

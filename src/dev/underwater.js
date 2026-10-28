@@ -16,8 +16,6 @@ function floorAt(x, z) {
   let h = -3.5 - Math.max(0, r - 30) * 0.09;
   h = Math.max(h, -24);
   h += Math.sin(x * 0.07 + 1.3) * Math.cos(z * 0.06) * 1.6 + Math.sin(x * 0.31 + z * 0.23) * 0.25;
-  // the rock's foot
-  h = Math.max(h, 6 - r * 0.5);
   return h;
 }
 
@@ -63,7 +61,7 @@ function rock() {
   geo.setAttribute('color', new Float32BufferAttribute(col, 3));
   geo.computeVertexNormals();
   const m = new Mesh(geo, toonMaterial({ color: 0xffffff, vertexColors: true, rim: 0.2, paint: 1 }));
-  m.position.set(IX, -20, IZ);
+  m.position.set(IX, -22, IZ);
   return m;
 }
 

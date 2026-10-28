@@ -17,7 +17,7 @@ for (const ch of list) {
   const st = await page.evaluate(() => {
     const g = window.__skysong; if (!g || !g.story) return { err: window.__skysongError };
     const s = g.story; const h = s.herd;
-    return { state: s.state, chapter: s.chapterIndex, herdS: Math.round(h.s), calfS: Math.round(h.calfS || 0), mode: h.mode, calfY: Math.round(h.calf.pos.y), distMom: Math.round(h.calf.pos.distanceTo(h.mother.pos)), tasks: s.script.tasks.map((t) => t.name), err: window.__skysongError };
+    return { state: s.state, chapter: s.chapterIndex, herdS: Math.round(h.s), calfS: Math.round(h.calfS || 0), mode: h.mode, calfY: Math.round(h.calf.pos.y), distMom: Math.round(h.calf.pos.distanceTo(h.mother.pos)), momY: Math.round(h.mother.pos.y), eaten: Math.round(s.eaten || 0), tasks: s.script.tasks.map((t) => t.name), err: window.__skysongError };
   });
   if (shots) {
     const durl = await page.evaluate(() => document.getElementById('c').toDataURL('image/png'));

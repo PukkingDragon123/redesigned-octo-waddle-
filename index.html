@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0f1e" />
     <title>SKYSONG</title>
-    <meta name="description" content="A cinematic 3D fantasy adventure: fly as a baby flying whale following your mother and the great herd across the painted seas and spiral islands of Vur Sok to the legendary Oasis." />
+    <meta name="description" content="A cinematic 3D fantasy adventure: live the whole life of a flying whale on Vur Sok, from your first migration as a calf to the Oasis, to courtship, a newborn of your own, and your rest as the elder of the herd." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
@@ -65,9 +65,11 @@
         letter-spacing: .62em; text-indent: .62em; color: #e3c98f; opacity: .92;
       }
       #cine .card .kicker::before, #cine .card .kicker::after {
-        content: ""; display: inline-block; width: clamp(24px, 5vw, 70px); height: 1px; vertical-align: middle;
-        margin: 0 1.1em; background: linear-gradient(90deg, transparent, rgba(227, 201, 143, .8), transparent);
+        /* a hand-drawn brush stroke, not a ruled line (docs/VUR_SOK.md 0.6) */
+        content: ""; display: inline-block; width: clamp(28px, 5.5vw, 80px); height: 7px; vertical-align: middle;
+        margin: 0 1.1em; opacity: .85; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M0.5 5.4 C 9 4.6, 20 5.9, 33 5.0 S 57 3.9, 72 4.8 S 99 5.9, 110 4.6 C 114 4.1, 117 3.9, 119.5 4.3 C 116 5.0, 112 5.8, 104 6.0 C 90 6.4, 80 5.6, 66 5.9 S 38 6.6, 24 6.1 S 6 5.9, 0.5 5.4 Z' fill='%23e3c98f'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
       }
+      #cine .card .kicker::after { transform: scaleX(-1) translateY(1px) rotate(1.5deg); }
       #cine .card .kicker:empty { display: none; }
       #cine .card .title {
         font: 400 clamp(30px, 6.4vw, 92px) "Cinzel", "Trajan Pro", Georgia, serif;
@@ -86,7 +88,7 @@
         font: 400 clamp(10px, 1vw, 13px) "Cinzel", Georgia, serif; letter-spacing: .4em; color: #d8cfbe;
       }
       #cine .skip.on { opacity: .75; }
-      #cine .skip i { display: block; height: 1px; margin-top: 6px; background: #e3c98f; transform-origin: left; transform: scaleX(0); }
+      #cine .skip i { display: block; height: 6px; margin-top: 4px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M0.5 5.4 C 9 4.6, 20 5.9, 33 5.0 S 57 3.9, 72 4.8 S 99 5.9, 110 4.6 C 114 4.1, 117 3.9, 119.5 4.3 C 116 5.0, 112 5.8, 104 6.0 C 90 6.4, 80 5.6, 66 5.9 S 38 6.6, 24 6.1 S 6 5.9, 0.5 5.4 Z' fill='%23e3c98f'/%3E%3C/svg%3E") center / 100% 100% no-repeat; transform-origin: left; transform: scaleX(0); }
     </style>
   </head>
   <body>

@@ -93,8 +93,10 @@ vec3 paintFinish(vec3 col, vec3 N, vec3 Ng, vec3 V, float shadow, float st, floa
   // hand-drawn ink: thin at the silhouette (about two pixels, wavering with the stroke), and the
   // creases the caller marks; tinted dark indigo, never black
   float nv = abs(dot(Ng, V));
-  float w = fwidth(nv) * 1.8 + 0.035;
-  float line = 1.0 - smoothstep(w * 0.5, w * 1.5, nv + (st - 0.5) * 0.05);
+  // the line swells and thins with the brush value along the stroke and wavers a little, so the
+  // contour reads as a pen line drawn by hand (never a uniform ruled outline)
+  float w = (fwidth(nv) * 1.8 + 0.035) * (0.5 + 1.0 * st);
+  float line = 1.0 - smoothstep(w * 0.5, w * 1.5, nv + (st - 0.5) * 0.08);
   float inkA = clamp(line * lineK * 0.8 + ink, 0.0, 1.0) * k;
   col = mix(col, col * vec3(0.26, 0.24, 0.34), inkA * 0.75);
   return col;
@@ -278,6 +280,7 @@ void main() {
       // stretched, each groove opens wider and shows the tissue in its floor
       float sb = vLoft.y < 0.5 ? vLoft.y : 1.0 - vLoft.y;
       float px = sb / mix(0.13, 0.235, smoothstep(uPleat.x + 0.02, uPleat.x + 0.26, vLoft.x)) * uPleat.z * 0.5;
+      px += pleatWob(sb, vLoft.x);
       px += sin(vLoft.x * 140.0 + floor(px) * 2.3) * 0.08;
       float fx = fract(px);
       float wv = 0.6 + 0.8 * hash12(vec2(floor(px), 3.1));
@@ -381,13 +384,15 @@ void main() {
     // big cracks
     float w = worley2(q * 9.0 + seed * 2.1);
     vec2 wc = q * 9.0 + seed * 2.1;
-    float crack = smoothstep(0.035, 0.0, abs(w - 0.45 - 0.08 * vnoise(wc * 3.0)) - 0.01) * step(0.45, vnoise(wc * 0.7 + seed));
+    float cw = 0.012 + 0.04 * vnoise(wc * 2.1 + 4.0);   // the crack swells and thins along its length
+    float crack = smoothstep(cw, 0.0, abs(w - 0.45 - 0.08 * vnoise(wc * 3.0) - 0.03 * vnoise(wc * 11.0)) - 0.01) * smoothstep(0.38, 0.52, vnoise(wc * 0.7 + seed));
     float edge = smoothstep(0.82, 1.0, vP.z);
     float hgt = terr * 0.6 + vnoise(q * 220.0) * 0.08 - crack * 0.8;
     N = bumpN(N, vWorldPos, hgt * uLen * 0.0018, 1.0);
     vec3 slate = uPlateCol * (0.8 + 0.3 * terr + 0.08 * fbm2(q * 90.0 + seed));
     // laminations on the bevelled edge, pale streaks and lichen-like crust on top
-    float lam = 0.5 + 0.5 * sin(dot(vWorldPos, vec3(0.0, 1.0, 0.0)) / (uLen * 0.0016));
+    // (stacked down the bevel in the plate's own frame, wavering like hand-drawn layers)
+    float lam = 0.5 + 0.5 * sin(kind * 19.0 + (fbm2(q * 60.0 + seed) - 0.5) * 3.2 + (vnoise(q * 320.0 + seed) - 0.5) * 0.9);
     slate = mix(slate, slate * (0.75 + 0.4 * lam), kind > 0.5 ? 0.8 : 0.0);
     float streak = smoothstep(0.035, 0.0, abs(vnoise(q * vec2(30.0, 90.0) + seed) - 0.5)) * 0.5;
     slate = mix(slate, slate * 1.45 + 0.03, streak * 0.5 + stepEdge * 0.25);

@@ -23,6 +23,6 @@ const st = await page.evaluate(() => {
     mirrors: L.mirrors, calls: L.calls, tasks: s.script.tasks.map((t) => t.name), err: window.__skysongError,
   };
 });
-if (shot) await page.screenshot({ path: shot });
 console.log(`${q} warp ${warp} (${Math.round((Date.now() - t0) / 1000)}s):`, JSON.stringify(st), errs.length ? '\n  ERRORS: ' + errs.slice(0, 6).join('\n  ') : '');
+if (shot) await page.screenshot({ path: shot, timeout: 600000 }).catch((e) => console.log('screenshot failed', e.message.slice(0, 80)));
 await browser.close();

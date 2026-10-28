@@ -321,7 +321,7 @@ void main() {
   vec3 albedo = uTintA;
   vec3 emis = vec3(0.0);
   float trans = 0.2, spec = 0.15, gloss = 0.5, rim = 0.5, wrap = 0.22, ao = 1.0, alpha = 1.0;
-  float glowK = 0.3 + 1.5 * uNight;
+  float glowK = 0.5 + 1.4 * uNight;
   float hs = fract(seed * 7.13);
 
 #if KIND == 0
@@ -332,19 +332,19 @@ void main() {
   } else if (part < 1.5) {
     float u = vP.z, w = abs(vP.w);
     // blades: olive-gold near the stalk to amber and teal, a dark midrib, glowing edges
-    vec3 a = mix(vec3(0.3, 0.27, 0.06), vec3(0.12, 0.3, 0.2), hs);
-    vec3 b = mix(vec3(0.62, 0.42, 0.1), vec3(0.2, 0.52, 0.42), hs);
-    albedo = mix(a, b, u) * (0.85 + 0.15 * sin(u * 40.0 + vLoc.y * 9.0));
+    vec3 a = mix(vec3(0.32, 0.2, 0.03), vec3(0.1, 0.22, 0.08), hs);
+    vec3 b = mix(vec3(0.75, 0.42, 0.06), vec3(0.42, 0.55, 0.12), hs);
+    albedo = mix(a, b, u) * (0.85 + 0.15 * sin(u * 40.0 + vLoc.y * 9.0 + vnoise(vec2(u * 12.0, vP.w * 3.0 + seed * 7.0)) * 2.4));
     albedo *= mix(0.7, 1.0, smoothstep(0.05, 0.3, w));
-    trans = 1.1;
-    rim = 0.7;
+    trans = 0.75;
+    rim = 0.55;
     ao = mix(0.6, 1.0, u);
     emis = mix(vec3(0.1, 0.8, 0.9), vec3(0.6, 0.3, 1.0), hs) * smoothstep(0.75, 1.0, w) * 0.25 * u;
   } else {
     // gas bladders: pearly, glowing from within
-    albedo = vec3(0.5, 0.55, 0.35);
-    spec = 0.8; gloss = 0.85; trans = 0.8;
-    emis = mix(vec3(0.15, 0.85, 1.0), vec3(0.75, 0.4, 1.0), hs) * (0.45 + 0.25 * sin(uTime * 1.7 + seed * 20.0 + t * 9.0));
+    albedo = vec3(0.5, 0.36, 0.08);
+    spec = 0.7; gloss = 0.8; trans = 0.6;
+    emis = mix(vec3(0.15, 0.85, 1.0), vec3(0.75, 0.4, 1.0), hs) * (0.22 + 0.14 * sin(uTime * 1.7 + seed * 20.0 + t * 9.0));
   }
   // kelp near a passing whale glows brighter (stirred)
   emis *= 1.0 + vI.z * 2.0;
@@ -352,7 +352,7 @@ void main() {
   float t = vI.w;
   vec3 c = hue(0.83 + hs * 0.35 + vP.z * 0.03);
   albedo = mix(vec3(0.35, 0.22, 0.3), c * 0.6, 0.5) * mix(0.5, 1.0, t);
-  albedo *= 0.85 + 0.15 * sin(t * 30.0);
+  albedo *= 0.85 + 0.15 * sin(t * 30.0 + vnoise(vLoc.xz * 25.0 + vP.z) * 2.0);
   rim = 0.8; trans = 0.5;
   float lip = smoothstep(0.82, 0.98, t) * step(vP.w, 1.5);
   emis = c * lip * (0.6 + 0.4 * sin(uTime * 2.0 + vP.z * 1.3 + seed * 11.0)) * (1.0 + vI.z * 2.5);
@@ -370,7 +370,9 @@ void main() {
 #elif KIND == 3
   float t = vI.w;
   // spiral bands across the whorl, nacre at the mouth
-  float band = 0.5 + 0.5 * sin(t * 70.0 + atan(vLoc.z, vLoc.x) * 2.0);
+  float wob = vnoise(vLoc.xz * 18.0 + t * 6.0) * 1.6 + vnoise(vLoc.xy * 31.0) * 0.6;
+  float band = 0.5 + 0.5 * sin(t * 70.0 + atan(vLoc.z, vLoc.x) * 2.0 + wob);
+  band = smoothstep(0.2, 0.8, band) * (0.75 + 0.25 * vnoise(vLoc.xz * 40.0));
   vec3 a = mix(vec3(0.72, 0.55, 0.42), vec3(0.6, 0.5, 0.65), hs);
   albedo = mix(a * 0.55, a, band) * mix(0.8, 1.0, t);
   spec = 0.5; gloss = 0.7;
@@ -380,9 +382,11 @@ void main() {
   vec2 uv = vec2(vP.z, vP.y);
   float a = (uv.x - 0.5) * 2.2;
   float r = uv.y;
-  float rays = abs(sin(a * 14.0 + sin(r * 6.0 + hs * 6.0) * 0.8));
-  float rings = abs(sin(r * 26.0 + sin(a * 5.0) * 1.2));
-  float vein = max(smoothstep(0.82, 0.97, 1.0 - rays), smoothstep(0.8, 0.95, 1.0 - rings));
+  vec2 fw = vec2(vnoise(uv * 9.0 + hs * 7.0), vnoise(uv * 8.0 + 4.0)) - 0.5;
+  float rays = abs(sin(a * 14.0 + sin(r * 6.0 + hs * 6.0) * 0.8 + fw.x * 2.2));
+  float rings = abs(sin(r * 26.0 + sin(a * 5.0) * 1.2 + fw.y * 3.0));
+  float vein = max(smoothstep(0.62, 0.86, 1.0 - rays), smoothstep(0.66, 0.9, 1.0 - rings) * step(0.15, r));
+  vein = max(vein, smoothstep(0.75, 0.25, abs(uv.x - 0.5) * 2.0) * smoothstep(0.35, 0.0, r));
   float edge = smoothstep(0.92, 1.0, r);
   if (max(vein, edge) < 0.5) discard;
   vec3 c = mix(vec3(0.9, 0.35, 0.25), vec3(0.85, 0.65, 0.2), hs);
@@ -407,7 +411,11 @@ void main() {
     if (part > 12.5 && part < 13.5 && vP.y > 0.9) emis = vec3(1.0, 0.6, 0.9);
   } else {
     // armoured plate crab: dark slate plates, glowing joints
-    float plates = smoothstep(0.0, 0.1, abs(sin(vLoc.z * 22.0 + vLoc.x * 6.0)));
+    // plate seams as pen strokes: domain-warped, varying in width, broken here and there
+    vec2 wq = vLoc.xz * 9.0 + vec2(vnoise(vLoc.xz * 14.0 + seed * 9.0), vnoise(vLoc.zx * 13.0 + 3.0)) * 0.9;
+    float seamW = 0.06 + 0.08 * vnoise(vLoc.xz * 21.0 + 5.0);
+    float plates = smoothstep(0.0, seamW, abs(sin(wq.y * 2.4 + wq.x * 0.6 + sin(wq.x * 1.7) * 0.5)));
+    plates = max(plates, step(0.78, vnoise(vLoc.xz * 17.0 + 11.0)));
     albedo = mix(vec3(0.05, 0.06, 0.08), vec3(0.16, 0.18, 0.22), plates);
     spec = 0.5; gloss = 0.7;
     vec3 jc = vec3(1.0, 0.45, 0.1);
@@ -459,7 +467,7 @@ void main() {
 #elif KIND == 9
   float t = vI.w;
   vec3 c = mix(vec3(0.15, 0.25, 0.9), vec3(0.85, 0.75, 0.15), hs);
-  float stripe = smoothstep(0.3, 0.6, sin(t * 60.0) * 0.5 + 0.5);
+  float stripe = smoothstep(0.3, 0.6, sin(t * 60.0 + vnoise(vec2(t * 20.0, vLoc.y * 30.0 + seed * 9.0)) * 2.5) * 0.5 + 0.5);
   albedo = mix(c * 0.35, c, stripe);
   if (part > 50.5) { albedo = mix(vec3(0.9, 0.85, 0.3), c, 0.4); trans = 1.0; emis = c * 0.25 * vP.z; }
   spec = 0.6; gloss = 0.8; rim = 0.8;
@@ -498,9 +506,13 @@ void main() {
   sf.ao = ao; sf.rim = rim; sf.trans = trans; sf.spec = spec; sf.gloss = gloss; sf.wrap = wrap;
   sf.emissive = emis * glowK;
   vec3 col = stylizedLight(sf);
+  vec3 lit = col;
   col = applyFog(col, vWorldPos);
   // bioluminescence carries through the dark water further than reflected light
   float dist = length(vWorldPos - uCamPos);
+  // painterly vividness: close to the eye under water the reef keeps some of its own colour
+  // (the absorption would otherwise wash every creature to the same teal)
+  col = mix(col, lit * vec3(0.95, 0.9, 0.85), 0.4 * exp(-dist / 14.0) * uUnderwater);
   col += emis * glowK * exp(-dist * 0.035) * 0.5 * smoothstep(0.0, 0.5, uUnderwater + uNight);
   gl_FragColor = vec4(col, alpha);
 #endif

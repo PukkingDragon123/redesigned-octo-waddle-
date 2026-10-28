@@ -132,12 +132,12 @@ export class ReefLife {
     this.density = opts.density ?? 1;
     this.inst = {
       kelp: new Inst(this, 'kelp', buildKelp(), 380),
-      tubes: new Inst(this, 'tubes', buildTubes(), 200),
-      anemone: new Inst(this, 'anemone', buildAnemone(), 200),
-      shell: new Inst(this, 'shell', buildShell(), 120),
-      fan: new Inst(this, 'fan', buildFan(), 150),
-      crab: new Inst(this, 'crab', buildCrab(), 90),
-      jelly: new Inst(this, 'jelly', buildJelly(), 70, true),
+      tubes: new Inst(this, 'tubes', buildTubes(), 130),
+      anemone: new Inst(this, 'anemone', buildAnemone(), 140),
+      shell: new Inst(this, 'shell', buildShell(), 80),
+      fan: new Inst(this, 'fan', buildFan(), 110),
+      crab: new Inst(this, 'crab', buildCrab(), 70),
+      jelly: new Inst(this, 'jelly', buildJelly(), 60, true),
       ray: new Inst(this, 'ray', buildRay(), 8),
       puffer: new Inst(this, 'puffer', buildPuffer(), 40),
       eel: new Inst(this, 'eel', buildEel(), 18),
@@ -203,7 +203,7 @@ export class ReefLife {
     {
       const T = this.inst.tubes, A = this.inst.anemone, S = this.inst.shell, F = this.inst.fan;
       let nt = 0, na = 0, ns = 0, nf = 0;
-      const CELL = 4.2, R = this.radius * 0.8;
+      const CELL = 4.2, R = this.radius * 0.66;
       const x0 = Math.floor((fx - R) / CELL), x1 = Math.floor((fx + R) / CELL);
       const z0 = Math.floor((fz - R) / CELL), z1 = Math.floor((fz + R) / CELL);
       for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
@@ -387,8 +387,9 @@ export class ReefLife {
     this.focus.copy(cam);
     const R = this.radius;
     for (const I of this.instList) {
-      const big = I.kind === 'kelp';
-      I.fade.set(cam.x, cam.z, (big ? R + 6 : R) * 0.82, big ? R + 6 : R);
+      const k = I.kind;
+      const r = k === 'kelp' ? R + 6 : k === 'tubes' || k === 'anemone' || k === 'shell' || k === 'fan' ? R * 0.66 : R;
+      I.fade.set(cam.x, cam.z, r * 0.8, r);
     }
     // the garden follows the camera
     const sx = this._scatterAt.x - cam.x, sz = this._scatterAt.z - cam.z;

@@ -47,16 +47,53 @@ function leaf(ctx, x, y, len, wid, rot, fill) {
   ctx.fill();
 }
 
-/** Tapered stroke along a polyline (pts: [[x, y], ...]), width w0 -> w1. */
-function stroke(ctx, pts, w0, w1, fill) {
+/**
+ * Hand-drawn polyline: the control points are joined by a smooth curve (Catmull-Rom), resampled
+ * densely, and every sample is nudged sideways by a slow wobble plus a little tremor, like a hand
+ * drawing the line (deterministic from the points: no random draws are consumed).
+ */
+function handLine(pts) {
   const n = pts.length;
+  let len = 0;
+  for (let i = 1; i < n; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  const m = Math.max(4, Math.min(48, Math.ceil(len / 5)));
+  const ph = (pts[0][0] * 12.9898 + pts[0][1] * 78.233) % TAU;
+  const amp = Math.min(2.2, 0.35 + len * 0.012);
+  const out = [];
+  for (let k = 0; k <= m; k++) {
+    const u = (k / m) * (n - 1);
+    const i = Math.min(n - 2, Math.floor(u)), f = u - i;
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+    const cr = (a, b, c, d) => 0.5 * (2 * b + (c - a) * f + (2 * a - 5 * b + 4 * c - d) * f * f + (3 * b - a - 3 * c + d) * f * f * f);
+    out.push([cr(p0[0], p1[0], p2[0], p3[0]), cr(p0[1], p1[1], p2[1], p3[1])]);
+  }
+  for (let k = 0; k <= m; k++) {
+    const a = out[Math.max(0, k - 1)], b = out[Math.min(m, k + 1)];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    const l = Math.hypot(dx, dy) || 1;
+    dx /= l; dy /= l;
+    const t = k / m;
+    const wob = amp * (Math.sin(t * 5.3 + ph) * 0.6 + Math.sin(t * 13.7 + ph * 1.7) * 0.28 + Math.sin(t * 31.0 + ph * 2.3) * 0.12);
+    out[k][0] -= dy * wob;
+    out[k][1] += dx * wob;
+  }
+  return out;
+}
+
+/** Tapered stroke along a polyline (pts: [[x, y], ...]), width w0 -> w1, drawn by hand. */
+function stroke(ctx, pts0, w0, w1, fill) {
+  const pts = handLine(pts0);
+  const n = pts.length;
+  const ph = (pts0[0][0] * 3.7 + pts0[0][1] * 5.1) % TAU;
   const L = [], R = [];
   for (let i = 0; i < n; i++) {
     const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
     let dx = b[0] - a[0], dy = b[1] - a[1];
     const l = Math.hypot(dx, dy) || 1;
     dx /= l; dy /= l;
-    const w = lerp(w0, w1, i / (n - 1)) * 0.5;
+    // the pen lands lightly, swells and thins along the line
+    const t = i / (n - 1);
+    const w = lerp(w0, w1, t) * 0.5 * (1 + 0.16 * Math.sin(t * 9.0 + ph)) * Math.min(1, 0.55 + t * 6);
     L.push([pts[i][0] - dy * w, pts[i][1] + dx * w]);
     R.push([pts[i][0] + dy * w, pts[i][1] - dx * w]);
   }

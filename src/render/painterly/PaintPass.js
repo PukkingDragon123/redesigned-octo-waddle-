@@ -266,7 +266,7 @@ void main() {
       float A = tr > 1e-9 ? (l1 - l2) / (l1 + l2) * smoothstep(1.0e-5, 1.5e-4, l1) : 0.0;
       float zr = smoothstep(uKuwDepth.x, uKuwDepth.y, z);
       float r = uKuw.x * mix(uKuwDepth.z, 1.0, zr) * mix(1.0, uKuwDepth.w, smoothstep(600.0, 4000.0, z));
-      r *= 1.0 + 0.25 * seaPx;
+      r *= 1.0 + 0.15 * seaPx;
       float keep = 0.0;
       // nearly flat areas (open sky, fog, calm far water) would come out of the filter unchanged
       // (a few LSB at most): skip the 33 taps there, which is often a third of the frame
@@ -285,12 +285,15 @@ void main() {
         // (clamped: isolated dark speckle, e.g. aliasing in fine relief, stays painted over)
         k += clamp(src - k, vec3(-0.06), vec3(0.09)) * uStroke.x * (1.0 - 0.5 * A) * (1.0 - 0.6 * seaPx);
         // bristles: fine grain fixed to the canvas, smeared along the stroke direction (a short line
-        // integral), so every stroke carries a brush texture that follows the form
+        // integral), so every stroke carries a brush texture that follows the form; the path bows
+        // a little, each patch of strokes its own way, so bristle marks are hand-swept arcs, not
+        // ruled dashes
         if (uStroke.y > 0.0) {
           vec2 fp = gl_FragCoord.xy / uGrain.z;
           vec2 st = t * (uStroke.z * 0.25);
+          vec2 bow = vec2(-t.y, t.x) * (uStroke.z * 0.05) * (pNoise(fp * 0.045 + 3.1) - 0.5) * 2.0;
           float bn = 0.0;
-          for (int i = -2; i <= 2; i++) bn += pNoise((fp + st * float(i)) * 0.6);
+          for (int i = -2; i <= 2; i++) bn += pNoise((fp + st * float(i) + bow * float(i * i)) * 0.6);
           bn = bn * 0.2 - 0.5;
           k *= 1.0 + bn * uStroke.y * (0.4 + 0.6 * A) * min(r / uKuw.x, 1.0);
         }
@@ -350,21 +353,21 @@ function rt(w, h, type, filter = LinearFilter, format = RGBAFormat) {
 }
 
 export const PAINT_DEFAULTS = {
-  radius: 3.8, // Kuwahara radius in px at 1080p (scaled with the frame height)
+  radius: 3.1, // Kuwahara radius in px at 1080p (scaled with the frame height; kept small: crisp, never smeared)
   refHeight: 1080, // the frame height every size here is given for (tests: crops at 1:1 scale)
   alpha: 0.75, // anisotropy (smaller: longer strokes along edges)
   mix: 1.0,
   // sector variance hardness (higher: crisper but flatter, posterised cells on textured surfaces
   // such as waves and fur; lower: softer strokes that keep the form's texture)
-  hardness: 70,
-  texture: 0.25, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
+  hardness: 80,
+  texture: 0.34, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
   bristle: 0.2, // brush-bristle streaks along the strokes
   bristleLen: 9, // their length (px at 1080p)
   detail: 0.85, // how much small bright detail (eye glints, sparkle) the filter must keep
   nearStart: 3, // metres: from here the filter eases in...
   nearFull: 45, // ...to full strength
   nearScale: 0.3, // filter radius right at the lens
-  farScale: 1.6, // radius far away (distant land reads as broader, looser strokes)
+  farScale: 1.15, // radius far away (distant land a touch looser, but no extra far blur)
   split: 0.45, // split-tone strength
   vibrance: 0.22,
   calm: 0.12, // pull back the loudest saturations
@@ -389,11 +392,11 @@ export const PAINT_DEFAULTS = {
 export const DOF_PRESETS = {
   off: { amount: 0 },
   // gameplay: everything stays crisp; only the haziest distance softens a touch
-  gameplay: { amount: 1, autoFocus: true, sharp: 0.9, farRamp: 0.3, far: 0.9, near: 0, nearRamp: 1, tilt: 0 },
+  gameplay: { amount: 1, autoFocus: true, sharp: 0.9, farRamp: 0.3, far: 0.5, near: 0, nearRamp: 1, tilt: 0 },
   // title menu: a light miniature hint, the herd sharp, the far islands just softened
-  title: { amount: 1, autoFocus: true, sharp: 0.45, farRamp: 0.5, far: 2.0, near: 1.0, nearRamp: 0.8, tilt: 0.5, tiltCenter: 0.5, tiltBand: 0.24 },
+  title: { amount: 1, autoFocus: true, sharp: 0.45, farRamp: 0.5, far: 1.6, near: 0.8, nearRamp: 0.8, tilt: 0.4, tiltCenter: 0.5, tiltBand: 0.24 },
   // cinematic close moments: gentle separation, the background still readable
-  cinematic: { amount: 1, autoFocus: true, sharp: 0.4, farRamp: 0.5, far: 1.7, near: 1.2, nearRamp: 0.6, tilt: 0 },
+  cinematic: { amount: 1, autoFocus: true, sharp: 0.4, farRamp: 0.5, far: 1.4, near: 1.0, nearRamp: 0.6, tilt: 0 },
 };
 
 export class PaintPass {

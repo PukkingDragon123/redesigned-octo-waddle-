@@ -128,18 +128,18 @@ export function buildKelp() {
       m.quad(base + i * sides + s, base + i * sides + s1, base + (i + 1) * sides + s1, base + (i + 1) * sides + s);
     }
   }
-  const NB = 12;
+  const NB = 14;
   for (let k = 0; k < NB; k++) {
     const t = k === NB - 1 ? 1 : 0.1 + (k / (NB - 1)) * 0.86;
     const th = k * 2.4;
     const dx = Math.cos(th), dz = Math.sin(th);
     const crown = k >= NB - 2;
     // bladder at the base of the blade
-    const br = crown ? 0.07 : 0.1;
-    ellipsoid(m, [dx * 0.12, 0.02, dz * 0.12], [br, br * 1.35, br], 5, 3, (p) => [[2, t, 0, 0], [0, 0, 0, k]]);
+    const br = crown ? 0.045 : 0.06;
+    ellipsoid(m, [dx * 0.1, 0.02, dz * 0.1], [br, br * 1.6, br], 5, 3, (p) => [[2, t, 0, 0], [0, 0, 0, k]]);
     // blade: out and up, then streaming
-    const L = crown ? 2.2 : 1.25 + (k % 3) * 0.2;
-    const W = crown ? 0.16 : 0.2;
+    const L = crown ? 2.6 : 1.6 + (k % 3) * 0.3;
+    const W = crown ? 0.13 : 0.15;
     const NA = 7;
     const base = m.count;
     for (let i = 0; i <= NA; i++) {
@@ -173,7 +173,7 @@ export function buildTubes() {
       pts.push([Math.cos(a) * rr, t * h, Math.sin(a) * rr]);
       rad.push(0.07 + 0.02 * Math.sin(t * 3) + (t > 0.85 ? 0.05 * (t - 0.85) / 0.15 : 0));
     }
-    tube(m, pts, rad, 7, (i, t) => [[3, t, k, t > 0.9 ? 1 : 0], [pts[0][0], 0, pts[0][2], h]], false);
+    tube(m, pts, rad, 6, (i, t) => [[3, t, k, t > 0.9 ? 1 : 0], [pts[0][0], 0, pts[0][2], h]], false);
     // the dark inner throat: a disc just inside the lip
     const top = pts[NS - 1], c = m.v([top[0], top[1] - 0.02, top[2]], [0, 1, 0], [3, 1, k, 2], [pts[0][0], 0, pts[0][2], h]);
     const ring = [];
@@ -190,7 +190,7 @@ export function buildTubes() {
 export function buildAnemone() {
   const m = new Mk();
   ellipsoid(m, [0, 0.12, 0], [0.22, 0.16, 0.22], 9, 4, (p) => [[4, 0, 0, 0], [0, 0, 0, 0]], 0.25, 1);
-  const N = 22;
+  const N = 16;
   for (let k = 0; k < N; k++) {
     const a = (k / N) * TAU, ring = k % 2 ? 0.2 : 0.13;
     const L = (k % 2 ? 0.55 : 0.42) + ((k * 13) % 5) * 0.03;
@@ -201,7 +201,7 @@ export function buildAnemone() {
       pts.push([Math.cos(a) * out, up, Math.sin(a) * out]);
       rad.push(0.028 * (1 - t * 0.7));
     }
-    tube(m, pts, rad, 4, (i, t) => [[5, t, a, L], [Math.cos(a) * ring, 0.25, Math.sin(a) * ring, k]], true);
+    tube(m, pts, rad, 3, (i, t) => [[5, t, a, L], [Math.cos(a) * ring, 0.25, Math.sin(a) * ring, k]], true);
   }
   return m.build();
 }
@@ -210,7 +210,7 @@ export function buildAnemone() {
 export function buildShell() {
   const m = new Mk();
   const pts = [], rad = [];
-  const N = 26;
+  const N = 20;
   for (let i = 0; i < N; i++) {
     const t = i / (N - 1);
     const th = t * 3.4 * TAU;
@@ -292,7 +292,7 @@ export function buildCrab() {
  */
 export function buildJelly() {
   const m = new Mk();
-  ellipsoid(m, [0, 0, 0], [0.5, 0.42, 0.5], 14, 6, (p, n, u, v) => [[20, 1 - (v - 0.5) * 2, u, 0], [0, 0, 0, 0]], 0.5, 1);
+  ellipsoid(m, [0, 0, 0], [0.5, 0.42, 0.5], 12, 5, (p, n, u, v) => [[20, 1 - (v - 0.5) * 2, u, 0], [0, 0, 0, 0]], 0.5, 1);
   ellipsoid(m, [0, 0.12, 0], [0.18, 0.14, 0.18], 8, 4, (p, n, u, v) => [[21, 0.5, u, v], [0, 0, 0, 0]]);
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + 0.4;

@@ -278,8 +278,8 @@ void main() {
     float ny = vnoise(uv * 38.0 + vec2(0.0, uTime * 5.3) + 7.0) - 0.5;
     offs += vec2(nx, ny) * fall * uHaze.w * 0.012;
   }
-  // under water the whole view wavers: a slow swell of refraction plus a fine shimmer, stronger
-  // toward the edges of the view (the water between the eye and the world is never still)
+  // under water the whole view wavers gently: a slow swell of refraction plus a faint shimmer,
+  // a little stronger toward the edges (subtle: shapes must stay crisp and readable)
   vec2 vdUW = (vUv - 0.5) * vec2(uAspect, 1.0);
   float edgeUW = dot(vdUW, vdUW);
   if (uUnderwater > 0.0) {
@@ -287,14 +287,14 @@ void main() {
     float wy = vnoise(uv * 9.0 + vec2(3.1, uTime * 0.55)) - 0.5;
     float sx = sin(uv.y * 11.0 + uTime * 1.3) + sin(uv.x * 7.0 - uTime * 0.9 + uv.y * 3.0) * 0.6;
     float sy = cos(uv.x * 10.0 + uTime * 1.1) + cos(uv.y * 6.0 + uTime * 0.7 - uv.x * 2.0) * 0.6;
-    offs += (vec2(wx, wy) * 0.004 + vec2(sx, sy) * 0.0009) * (1.0 + edgeUW * 2.5) * uUnderwater;
+    offs += (vec2(wx, wy) * 0.0024 + vec2(sx, sy) * 0.0005) * (1.0 + edgeUW * 1.2) * uUnderwater;
   }
   float lensRim = 0.0;
   if (uLens.x > 0.001) offs += lensDrops(uv, uLens.y, lensRim) * uLens.x;
   vec2 suv = uv + offs;
   vec3 col;
   // a soft chromatic fringe toward the edges under water (the water acts as a weak prism)
-  float uwCA = uUnderwater * edgeUW * 0.006;
+  float uwCA = uUnderwater * edgeUW * 0.0035;
   if (chroma > 0.01 || uwCA > 0.0002) {
     float ca = min(chroma, 1.0) * 0.004;
     vec2 rad = vdUW / max(length(vdUW), 1e-3) * vec2(1.0 / uAspect, 1.0) * uwCA;

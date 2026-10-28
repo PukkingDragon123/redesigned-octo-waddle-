@@ -164,6 +164,11 @@ void main() {
   // horizontal coordinate along a cliff face, and the face's horizontal tangent
   float uF = ax.x * P.z + ax.y * P.x;
   vec3 tU = normalize(cross(vec3(0.0, 1.0, 0.0), N0) + vec3(1e-4, 0.0, 0.0));
+  // hand-drawn lines (no ruler-straight crack, joint or bed anywhere): every line below is drawn
+  // through coordinates warped by a slow wobble (nm, nu) plus a fine pen tremor (nj, ~1 m, faded
+  // with the pixel footprint so it never shimmers), and its width swells and thins along it
+  vec4 nj = texture2D(uNoise, mix(P.xz, vec2(uF, P.y), steep) / 1.15 + 0.29);
+  vec4 pen = (nu - 0.5) + (nj - 0.5) * 0.45 * fineF;
 
   // coverage first: rock work is skipped where meadow or sand hide it entirely
   float sandW = smoothstep(0.25, 0.65, sandIn + (nm.g - 0.5) * 0.35);
@@ -184,7 +189,8 @@ void main() {
     rock = mix(rock, rock * vec3(0.9, 0.96, 1.05), smoothstep(0.5, 0.8, nM.g) * 0.5);
 
     // ---- bedding (sedimentary): beds of uneven hardness winding with the spiral ----
-    float st = vExt.y + (nm.r - 0.5) * 1.6 + (nM.a - 0.5) * 3.0;
+    // (the pen wobble also hides the kinks of the per-vertex strata coordinate at triangle edges)
+    float st = vExt.y + (nm.r - 0.5) * 1.6 + (nM.a - 0.5) * 3.0 + (nm.b - 0.5) * 0.9 + pen.r * 0.42 * mesoF;
     float bedT = 1.35;
     float bandId = floor(st / bedT);
     float bf = fract(st / bedT);
@@ -196,9 +202,12 @@ void main() {
     // the bedding plane is an eroded notch; hard beds stand proud with a lit lip
     // some bedding planes are deep notches, most only faint partings (massive beds, thin beds)
     // (each plane's depth hashes on the bed above it, so both sides of a plane agree)
-    float notchLo = mix(0.22, 1.0, step(0.58, hash11(bandId * 2.31 + 0.4)));
-    float notchHi = mix(0.22, 1.0, step(0.58, hash11((bandId + 1.0) * 2.31 + 0.4)));
-    float notch = smoothstep(0.16, 0.0, bf) * notchLo + smoothstep(0.9, 1.0, bf) * 0.5 * notchHi;
+    // a deep notch fades in and out along its length like a re-inked stroke, and swells and thins
+    float notchFade = smoothstep(0.28, 0.55, nm.a + pen.g * 0.5);
+    float notchLo = mix(0.22, 1.0, step(0.58, hash11(bandId * 2.31 + 0.4)) * notchFade);
+    float notchHi = mix(0.22, 1.0, step(0.58, hash11((bandId + 1.0) * 2.31 + 0.4)) * notchFade);
+    float nW = 0.6 + 0.8 * clamp(nu.a + (nj.a - 0.5) * 0.5 * fineF, 0.0, 1.0);
+    float notch = smoothstep(0.16 * nW, 0.0, bf) * notchLo + smoothstep(1.0 - 0.1 * nW, 1.0, bf) * 0.5 * notchHi;
     float bedRelief = (hard - 0.5) * 0.35 - notch * 0.45;
     // thin laminae inside the softer beds
     float lam = sin(st * 18.0 + nm.b * 3.0) * (1.0 - hard) * 0.5 + 0.5;
@@ -209,32 +218,49 @@ void main() {
 
     // ---- joints: vertical fractures through each bed (offset bed to bed), master joints running
     // the full height; basalt: polygonal column joints and cross fractures ----
-    float jWarp = (nm.g - 0.5) * 1.2;
+    // bed joints bow and waver down through their bed (the pen wobble varies with height)
+    float jWarp = (nm.g - 0.5) * 1.2 + pen.b * 0.55;
     float sp = mix(2.2, 6.5, hash11(bandId * 3.31 + 0.7));
     float jx = (uF + jWarp + hash11(bandId * 5.9) * sp) / sp;
     float blockSed = bandId * 31.0 + floor(jx);
+    float jh = hash11(blockSed * 0.53 + 2.1);
+    jx += (bf - 0.5) * (bf - 0.5) * (jh - 0.5) * 1.6 / sp;                  // each one curves its own way
     float dJ = min(fract(jx), 1.0 - fract(jx)) * sp;                         // m to the bed joint
     float jOn = step(0.8, hash11(blockSed * 0.37));                         // few bed joints open
+    // a bed joint is a stroke: it tapers to a point before (or just past) the bed's edges
+    float jTap = smoothstep(-0.06 + 0.2 * jh, 0.3, bf) * smoothstep(1.06 - 0.2 * hash11(blockSed * 0.71), 0.7, bf);
+    dJ += (1.0 - jTap) * 0.12;
     float mSp = mix(5.0, 9.0, hash11(floor(st / 9.0) * 2.7));
-    float mx = (uF + (nM.r - 0.5) * 6.0 + (nm.b - 0.5) * 1.8 + (nm.g - 0.5) * 0.8) / mSp;
+    float mWarp = (nM.r - 0.5) * 6.0 + (nm.b - 0.5) * 1.8 + (nm.g - 0.5) * 0.8;
+    float mx = (uF + mWarp + pen.r * 0.8) / mSp;
     float dM = min(fract(mx), 1.0 - fract(mx)) * mSp;                        // m to a master joint
     float blockM = floor(mx);
-    // basalt columns (only where there is basalt)
-    vec3 col = kind > 0.01 ? cells(P.xz * 0.62 + nm.rg * 0.35) : vec3(9.0, 0.5, 1.0);
+    // master joints are drawn in overlapping strokes: one fades out (tapering) as a second,
+    // slightly offset one takes over, so long fractures never run ruler-straight
+    float mSel = nm.a + pen.g * 0.35;
+    float mx2 = (uF + mWarp + 0.3 + pen.b * 0.7 + (nm.r - 0.5) * 0.6) / mSp;
+    float dM2 = min(fract(mx2), 1.0 - fract(mx2)) * mSp;
+    dM = min(dM + smoothstep(0.42, 0.62, mSel) * 0.35, dM2 + smoothstep(0.58, 0.36, mSel) * 0.35);
+    // basalt columns (only where there is basalt): warped cells, so the column edges are drawn
+    // curves that waver up the face instead of polygons ruled straight down it
+    vec3 col = kind > 0.01 ? cells(P.xz * 0.62 + nm.rg * 0.35 + pen.rg * 0.28) : vec3(9.0, 0.5, 1.0);
     float dC = col.x / 0.62;
-    float crossF = fract((P.y + col.y * 7.3) / mix(0.8, 1.9, col.y));
-    float dX = min(crossF, 1.0 - crossF) * mix(0.8, 1.9, col.y);
+    float colP = mix(0.8, 1.9, col.y);
+    float yX = P.y + col.y * 7.3 + pen.b * 0.3 + (nm.g - 0.5) * 0.4;
+    float crossF = fract(yX / colP);
+    float dX = min(crossF, 1.0 - crossF) * colP;
     // distance to the nearest open joint (m) and the block id, per rock kind
     float dSed = min(mix(9.0, dJ, jOn), dM + 0.02);
-    float dBas = min(dC, mix(9.0, dX, step(0.4, hash11(col.y * 13.7 + floor((P.y + col.y * 7.3) / mix(0.8, 1.9, col.y))))) * steep + 9.0 * (1.0 - steep));
+    float dBas = min(dC, mix(9.0, dX, step(0.4, hash11(col.y * 13.7 + floor(yX / colP)))) * steep + 9.0 * (1.0 - steep));
     float dJoint = mix(dSed, dBas, kind);
     float blockId = mix(fract(blockSed * 0.123 + blockM * 0.371), col.y, kind);
-    // flats of sedimentary rock: polygonal desiccation-like jointing on the bed tops
-    vec3 flatJ = steep < 0.99 ? cells(P.xz * 0.45 + 5.3) : vec3(9.0, 0.5, 1.0);
+    // flats of sedimentary rock: desiccation-like jointing on the bed tops, in rounded warped cells
+    vec3 flatJ = steep < 0.99 ? cells(P.xz * 0.45 + 5.3 + (nm.rg - 0.5) * 0.45 + pen.ba * 0.22) : vec3(9.0, 0.5, 1.0);
     dJoint = mix(dJoint, mix(flatJ.x / 0.45, dC, kind), 1.0 - steep);
     blockId = mix(blockId, mix(flatJ.y, col.y, kind), step(steep, 0.5));
-    // joints are anti-aliased against their own screen-space width
-    float jwid = mix(0.05, 0.035, kind) + 0.04 * hash11(blockId * 9.7);
+    // joints are anti-aliased against their own screen-space width; the width swells and thins
+    // along each joint like a pen line
+    float jwid = (mix(0.05, 0.035, kind) + 0.04 * hash11(blockId * 9.7)) * (0.55 + 0.9 * clamp(nu.g + (nj.r - 0.5) * 0.6 * fineF, 0.0, 1.0));
     // the pixel footprint (dJoint is a distance in metres; its own fwidth spikes at the seams)
     float jfw = max(px * 1.2, 1e-4);
     float jointK = mesoF * smoothstep(0.35, 0.05, jfw);
@@ -285,9 +311,11 @@ void main() {
     rock *= 1.0 - pits * 0.3 * microF;
     heightB -= pits * 0.03 * microF;
     // hairline cracks: short branches off the joints into the blocks (only where they resolve)
-    vec3 hc = microF * steep > 0.01 ? cells(vec2(uF, P.y * 0.6) * 1.7 + nm.rg) : vec3(9.0, 0.0, 1.0);
-    float hcw = 0.012 / max(px * 1.7, 1e-4);
-    float crack = (1.0 - smoothstep(0.0, 0.03 + px * 1.7, hc.x / 1.7)) * min(1.0, hcw) * smoothstep(0.55, 0.8, nu.r) * step(0.45, hc.y) * steep * microF;
+    // (warped cells: the cracks wander; their width swells and thins and they fade out in strokes)
+    vec3 hc = microF * steep > 0.01 ? cells(vec2(uF, P.y * 0.6) * 1.7 + nm.rg + pen.gr * 0.9 + (nj.ba - 0.5) * 0.35) : vec3(9.0, 0.0, 1.0);
+    float hcW = 0.012 * (0.4 + 1.2 * nj.g);
+    float hcw = hcW / max(px * 1.7, 1e-4);
+    float crack = (1.0 - smoothstep(0.0, hcW * 2.5 + px * 1.7, hc.x / 1.7)) * min(1.0, hcw) * smoothstep(0.5, 0.75, nu.r + (nj.r - 0.5) * 0.3) * step(0.45, hc.y) * steep * microF;
     rock *= 1.0 - crack * 0.4;
     heightB -= crack * 0.05;
 
@@ -361,7 +389,8 @@ void main() {
     sc *= 0.9 + 0.16 * nM.r + 0.06 * micro;
     // ripples on shallow and beach sand
     vec2 rd = vec2(0.8, 0.6);
-    float rip = sin(dot(P.xz, rd) * 2.4 + nm.r * 6.0 + nM.g * 10.0);
+    // (crests meander and fork like a hand-drawn ripple, never ruled parallel lines)
+    float rip = sin(dot(P.xz, rd) * 2.4 + nm.r * 6.0 + nM.g * 10.0 + (nu.g - 0.5) * 2.4);
     float ripW = smoothstep(2.0, -0.5, P.y) * (0.5 + 0.5 * nm.b) * detail;
     sc *= 1.0 + rip * 0.07 * ripW;
     float sh = rip * 0.25 * ripW + micro * 0.2;
@@ -482,9 +511,9 @@ void main() {
   if (heat > 0.01) {
     // fissures between cooling crust plates: lines widened to at least a pixel and dimmed in
     // proportion, so far away they read as a soft glow instead of sparkling dots
-    vec3 lc2 = cells(P.xz / 4.2 + nm.rg * 1.5 + vec2(P.y * 0.15));
+    vec3 lc2 = cells(P.xz / 4.2 + nm.rg * 1.5 + vec2(P.y * 0.15) + pen.rg * 0.22);
     float fw = max(fwidth(lc2.x), 1e-4);
-    float lw = max(0.07, fw * 1.2);
+    float lw = max(0.07 * (0.5 + nu.b), fw * 1.2);
     float fis = (1.0 - smoothstep(0.0, lw, lc2.x)) * (0.07 / lw) * heat;
     float pulse = 0.75 + 0.25 * sin(uTime * 0.7 + lc2.y * 6.28);
     float foot = smoothstep(14.0, 0.5, P.y);

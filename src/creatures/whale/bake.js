@@ -134,6 +134,8 @@ void main() {
   {
     vec2 sp = vec2(s * perim, t * L) / (L * 0.016);
     sp += vec2(fbm2(sp * 0.35 + 1.7), fbm2(sp * 0.35 + 9.2)) * 1.6;
+    // hand-drawn: a finer pen tremor on top of the slow warp, so no cell edge runs straight
+    sp += (vec2(vnoise(sp * 2.3 + 3.7), vnoise(sp * 2.3 + 8.1)) - 0.5) * 0.32;
     vec2 i = floor(sp), f = fract(sp);
     float f1 = 8.0, f2 = 8.0;
     for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -144,7 +146,9 @@ void main() {
       if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
     }
     float edge = sqrt(f2) - sqrt(f1);
-    float line = smoothstep(0.045, 0.0, edge) * smoothstep(0.45, 0.72, fbm3(q * 7.0 + 7.0));
+    // the width swells and thins along each streak, and the strokes fade out at their ends
+    float lw = 0.045 * (0.35 + 1.3 * vnoise(sp * 1.4 + 5.3));
+    float line = smoothstep(lw, lw * 0.15, edge) * smoothstep(0.45, 0.72, fbm3(q * 7.0 + 7.0)) * smoothstep(0.25, 0.5, vnoise(sp * 0.9 + 2.2));
     col = mix(col, mix(col, uMark2, 0.45), line * cs * uAmt.y * 0.7);
     h += line * cs * uAmt.y * L * 0.00008;
   }
@@ -174,7 +178,7 @@ void main() {
     float ang = atan(de.y, de.x);
     float wrin = sin(d1 * 5.2 + (fbm2(vec2(ang * 3.0, d1)) - 0.5) * 2.5) * exp(-d1 * 0.32) * smoothstep(1.1, 1.6, d1);
     wrin += 0.6 * sin(d2 * 5.6) * exp(-d2 * 0.4) * smoothstep(1.1, 1.6, d2);
-    float feet = smoothstep(0.65, 1.0, abs(sin(ang * 7.0 + d1 * 0.4))) * smoothstep(1.5, 2.5, d1) * (1.0 - smoothstep(4.0, 7.0, d1)) * step(de.y, 0.0);
+    float feet = smoothstep(0.65, 1.0, abs(sin(ang * 7.0 + d1 * 0.4 + (fbm2(vec2(ang * 2.0, d1 * 0.7) + 4.0) - 0.5) * 2.2))) * smoothstep(1.5, 2.5, d1) * (1.0 - smoothstep(4.0, 7.0, d1)) * step(de.y, 0.0);
     h += (wrin * 0.5 + feet * 0.4) * r * 0.06;
     rough += smoothstep(5.0, 1.5, d1) * 0.04;
   }
@@ -191,16 +195,18 @@ void main() {
 
   // ---- the gape: dark wet lip line, paler lower lip, folds at the corner ----
   {
-    float sl = abs(sm - uHead.y);
+    float lipW = (fbm2(vec2(t * 90.0, uSeed)) - 0.5) * 0.0035 + (vnoise(vec2(t * 420.0, 3.0)) - 0.5) * 0.0009;
+    float sl = abs(sm - uHead.y + lipW);
     float on = smoothstep(uHead.x - 0.012, uHead.x + 0.004, t) * (1.0 - smoothstep(0.985, 0.998, t));
-    float lip = smoothstep(0.004, 0.0012, sl) * on;
+    float lipT = 0.65 + 0.7 * vnoise(vec2(t * 160.0, 7.0));
+    float lip = smoothstep(0.004 * lipT, 0.0012 * lipT, sl) * on;
     col = mix(col, vec3(0.05, 0.04, 0.05), lip * 0.9);
     float lower = smoothstep(0.0, 0.004, uHead.y - sm) * smoothstep(0.012, 0.004, uHead.y - sm) * on;
     col = mix(col, mix(col, uBelly, 0.3), lower * 0.35);
     // corner folds radiating from the gape
     vec2 dc = lm(stm, vec2(uHead.y, uHead.x));
     float dcl = length(dc) / (L * 0.012);
-    float fold = sin(atan(dc.y, dc.x) * 9.0) * exp(-dcl * 1.2) * smoothstep(0.3, 0.8, dcl);
+    float fold = sin(atan(dc.y, dc.x) * 9.0 + (vnoise(dc / (L * 0.01) + 2.0) - 0.5) * 2.4) * exp(-dcl * 1.2) * smoothstep(0.3, 0.8, dcl);
     h += fold * L * 0.0006;
   }
 
@@ -263,8 +269,12 @@ void main() {
         float hk = h21(vec2(float(i), float(k)) + uSeed);
         float y0 = (float(k) - (b.x - 1.0) * 0.5) * b.y + sin(r.x / max(a.w, 0.01) * 3.0 + hk * 6.0) * b.y * 0.25;
         float hl = a.w * (0.35 + 0.15 * hk);
-        float wv = b.z * (0.7 + 0.6 * vnoise(vec2(r.x / (b.z * 6.0), hk * 10.0)));
-        float line = smoothstep(wv, wv * 0.3, abs(r.y - y0)) * smoothstep(hl, hl * 0.7, abs(r.x - (hk - 0.5) * a.w * 0.2));
+        y0 += (vnoise(vec2(r.x / (b.z * 3.0), hk * 17.0)) - 0.5) * b.z * 0.9;
+        float ex = (r.x - (hk - 0.5) * a.w * 0.2) / hl;
+        ex = ex > 0.0 ? ex / (1.0 + 0.25 * hk) : ex / (1.25 - 0.25 * hk);
+        float tap = sqrt(max(0.0, 1.0 - ex * ex));
+        float wv = b.z * (0.7 + 0.6 * vnoise(vec2(r.x / (b.z * 6.0), hk * 10.0))) * (0.25 + 0.75 * tap);
+        float line = smoothstep(wv, wv * 0.3, abs(r.y - y0)) * smoothstep(0.0, 0.15, tap);
         m = max(m, line);
       }
     } else {
@@ -349,7 +359,7 @@ void main() {
       h += w * L * 0.0005;
     }
     float knuckle = smoothstep(0.3, 0.05, t) * smoothstep(0.75, 0.95, dorsal);
-    h += knuckle * sin(t * L / (L * 0.012)) * L * 0.0004;
+    h += knuckle * sin(t / 0.012 + (fbm2(vec2(s * 9.0, t * 30.0)) - 0.5) * 3.0) * L * 0.0004;
   }
 
   // ---- skin texture: soft undulations, fine crackle, pores ----

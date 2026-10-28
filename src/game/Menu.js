@@ -166,7 +166,7 @@ export class Menu {
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
     this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 400, spacing: 0.26, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
-    this.subtitle = new TextItem('field notes from Vur Sok, thirty-one years', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
+    this.subtitle = new TextItem(' ', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
   }
@@ -241,7 +241,7 @@ export class Menu {
     if (cont >= 0) this.sel = cont;
     const showTitle = page === 'main' || page === 'pause';
     this.title.targetOpacity = showTitle ? 1 : 0;
-    this.subtitle.targetOpacity = page === 'main' ? 0.85 : 0;
+    this.subtitle.targetOpacity = 0; // no subtitle line (docs/VUR_SOK.md 0.8): only the logo and its items
     this.title.mesh.position.set(0, 8.2, 0);
     this.subtitle.mesh.position.set(0, 4.9, 0);
     // left-align items under the title

@@ -1,5 +1,7 @@
-// Cinematic third-person camera: follows gently, tilts into turns, pulls back in dives,
-// widens to show scale, and blends seamlessly with scripted cinematic shots.
+// Cinematic third-person camera: a steady, film-like follow on the calf (a slightly long lens, a
+// gentle lag, the calf on the lower third with lead room into turns), pushed smoothly around the big
+// adults so they never fill the frame, and blended seamlessly with scripted cinematic shots: a jump
+// between two shots is never a hard cut, the lens glides from the old framing to the new one.
 import { Vector3, Quaternion, Matrix4, MathUtils } from 'three';
 import { damp, dampVec3, clamp, lerp, smoothstep, dirFromYawPitch, easeInOut } from '../core/math.js';
 
@@ -35,7 +37,27 @@ export class CameraRig {
     this.cineRate = 0.5;
     this.lookOffset = new Vector3();
     this.collide = null; // function(from, to) -> shortened distance or null
+    this.avoid = null; // function(pos, out) -> out: a push keeping pos clear of the big whales
+    this._avoid = new Vector3();
+    this._push = new Vector3();
+    this.lead = 0; // lateral lead room into turns
     this.initialized = false;
+    // shot-to-shot glide: the offset of the old framing from the new one, decaying to zero
+    this._cPrev = new Vector3();
+    this._cPrevLook = new Vector3();
+    this._cPrevFov = 50;
+    this._cHas = false;
+    this._cutPos = new Vector3();
+    this._cutLook = new Vector3();
+    this._cutFov = 0;
+    this._cutT = 1;
+    this._cutDur = 1.6;
+  }
+
+  /** Forget the previous cinematic framing (the next shot starts exactly where it says). */
+  cutNow() {
+    this._cHas = false;
+    this._cutT = 1;
   }
 
   setCinematic(shot, rate = 0.6) {
@@ -59,21 +81,31 @@ export class CameraRig {
     this.wide = damp(this.wide, smoothstep(5, 9, this.calmT), 0.5, dt);
     // framing scales with the whale: the calf (4 m) as before, a grown whale (15-32 m) further out
     const sc = Math.max(1, Math.pow(whale.L / 4.2, 0.8));
-    const base = (opts.distance ?? 8.5) * sc;
-    const distT = base + speed * 0.2 + (diving * 4 + this.wide * 6) * sc + (opts.extraDist || 0);
-    this.distExtra = damp(this.distExtra, distT, 2.2, dt);
+    const base = (opts.distance ?? 11) * sc;
+    const distT = base + speed * 0.22 + (diving * 4 + this.wide * 5) * sc + (opts.extraDist || 0);
+    this.distExtra = damp(this.distExtra, distT, 1.6, dt);
     let dist = this.distExtra;
-    const height = (1.7 + this.wide * 2.2 - aimPitch * 1.2) * sc + (opts.extraHeight || 0);
+    const height = (2.4 + this.wide * 2.2 - aimPitch * 1.2) * sc + (opts.extraHeight || 0);
     const desired = _r.copy(whale.pos).addScaledVector(aim, -dist).addScaledVector(UP, height);
+    // the big adults never crowd the lens: the camera eases out and around their bodies
+    if (this.avoid) {
+      this.avoid(desired, this._avoid);
+      dampVec3(this._push, this._avoid, 1.8, dt);
+      desired.add(this._push);
+    }
     // keep the camera out of rock
     if (this.collide) {
       const d = this.collide(whale.pos, desired);
       if (d !== null && d < dist) {
         dist = Math.max(2.5 * sc, d - 1);
-        desired.copy(whale.pos).addScaledVector(aim, -dist).addScaledVector(UP, height * (dist / this.distExtra));
+        desired.copy(whale.pos).addScaledVector(aim, -dist).addScaledVector(UP, height * (dist / this.distExtra)).addScaledVector(this._push, dist / this.distExtra);
       }
     }
-    const lookT = _u.copy(whale.pos).addScaledVector(aim, 3.5 * sc + speed * 0.12).addScaledVector(UP, (0.8 + this.wide * 0.5) * sc);
+    // the calf sits on the lower third, with a little lead room into its turns
+    this.lead = damp(this.lead, clamp(whale.yawRate || 0, -1, 1), 1.2, dt);
+    _t.crossVectors(aim, UP);
+    const lookT = _u.copy(whale.pos).addScaledVector(aim, 4 * sc + speed * 0.12).addScaledVector(UP, (1.25 + this.wide * 0.5) * sc);
+    if (_t.lengthSq() > 1e-6) lookT.addScaledVector(_t.normalize(), this.lead * 1.6 * sc);
     if (opts.lookBias) {
       // lookBiasMax caps the shift in metres, so a far target (a falcon 500 m away) turns the view
       // toward it without losing the calf
@@ -89,8 +121,8 @@ export class CameraRig {
       this.initialized = true;
     }
     // responsive but soft
-    dampVec3(this.gPos, desired, 4.2, dt);
-    dampVec3(this.gLook, lookT, 7, dt);
+    dampVec3(this.gPos, desired, 3.0, dt);
+    dampVec3(this.gLook, lookT, 4.8, dt);
     // never fall behind too far at speed
     const maxLag = dist * 1.6;
     if (this.gPos.distanceTo(whale.pos) > maxLag) this.gPos.sub(whale.pos).setLength(maxLag).add(whale.pos);
@@ -101,20 +133,51 @@ export class CameraRig {
       if (below && this.gPos.y > s - 0.7) this.gPos.y = s - 0.7;
       else if (!below && this.gPos.y < s + 0.9) this.gPos.y = s + 0.9;
     }
-    this.gFov = damp(this.gFov, clamp(51 + speed * 0.55 + diving * 6 + this.wide * 4, 50, 72), 2, dt);
-    this.gRoll = damp(this.gRoll, -whale.roll * 0.28 + (whale.rollSpin > 0 ? 0 : 0), 3, dt);
+    // a slightly longer lens than before: calmer, less fish-eye at speed
+    this.gFov = damp(this.gFov, clamp(44 + speed * 0.38 + diving * 5 + this.wide * 3, 43, 62), 1.4, dt);
+    this.gRoll = damp(this.gRoll, -whale.roll * 0.2, 2.2, dt);
   }
 
   update(dt) {
     this.cineW = damp(this.cineW, this.cineTarget, this.cineRate * 3, dt);
     if (Math.abs(this.cineW - this.cineTarget) < 0.002) this.cineW = this.cineTarget;
     const w = easeInOut(clamp(this.cineW, 0, 1));
-    if (this.cine && w > 0) {
-      this.pos.copy(this.gPos).lerp(this.cine.pos, w);
-      this.look.copy(this.gLook).lerp(this.cine.look, w);
-      this.fov = lerp(this.gFov, this.cine.fov ?? 50, w);
-      this.roll = lerp(this.gRoll, this.cine.roll ?? 0, w);
+    const c = this.cine;
+    if (c && w > 0) {
+      // a jump between two shots glides instead of cutting: the old framing's offset from the new
+      // one decays smoothly to zero over _cutDur seconds (the new shot keeps its own motion)
+      if (this._cHas && dt > 0) {
+        const jump = c.pos.distanceTo(this._cPrev), lookJump = c.look.distanceTo(this._cPrevLook);
+        const covered = this.game.engine.post?.grade?.uFade?.value > 0.6;
+        if (!covered && (jump > 5 + 60 * dt || lookJump > 14 + 80 * dt || Math.abs((c.fov ?? 50) - this._cPrevFov) > 6)) {
+          // carry what is left of an earlier glide into the new one
+          const k = this._cutT < 1 ? 1 - easeInOut(this._cutT) : 0;
+          this._cutPos.multiplyScalar(k).add(this._cPrev).sub(c.pos);
+          this._cutLook.multiplyScalar(k).add(this._cPrevLook).sub(c.look);
+          this._cutFov = this._cutFov * k + this._cPrevFov - (c.fov ?? 50);
+          this._cutT = 0;
+          this._cutDur = clamp(1.2 + jump / 160, 1.4, 2.6);
+        }
+      }
+      this._cPrev.copy(c.pos);
+      this._cPrevLook.copy(c.look);
+      this._cPrevFov = c.fov ?? 50;
+      this._cHas = true;
+      let ox = 0;
+      if (this._cutT < 1) {
+        this._cutT = Math.min(1, this._cutT + dt / this._cutDur);
+        ox = 1 - easeInOut(this._cutT);
+      }
+      this.pos.copy(c.pos).addScaledVector(this._cutPos, ox);
+      this.look.copy(c.look).addScaledVector(this._cutLook, ox);
+      const cf = (c.fov ?? 50) + this._cutFov * ox;
+      this.pos.lerp(this.gPos, 1 - w);
+      this.look.lerp(this.gLook, 1 - w);
+      this.fov = lerp(this.gFov, cf, w);
+      this.roll = lerp(this.gRoll, c.roll ?? 0, w);
     } else {
+      this._cHas = false;
+      this._cutT = 1;
       this.pos.copy(this.gPos);
       this.look.copy(this.gLook);
       this.fov = this.gFov;

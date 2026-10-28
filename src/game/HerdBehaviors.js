@@ -773,7 +773,7 @@ export class HerdBehaviors {
       return true;
     }
     if (want === 'followDive') {
-      _v.copy(calf.pos).addScaledVector(calf.right, C.side * (rm + rc + 3)).addScaledVector(calf.fwd, -4);
+      _v.copy(calf.pos).addScaledVector(calf.right, C.side * (rm + rc + 7)).addScaledVector(calf.fwd, 2);
       _v.y -= 1.5;
       this._steer(m, _v, cs + 2, dt, 6, 0, 1.3, 0.8, 0.6, calf);
       if (this._depth(m) > 0.3) this.ballast(m, _v.y, dt, 0.9);
@@ -795,8 +795,9 @@ export class HerdBehaviors {
       return true;
     }
     // escort: the calf skims the sea, she flies just above and beside it
-    _v.copy(calf.pos).addScaledVector(calf.right, C.side * (rm + rc + 6)).addScaledVector(calf.vel, 0.6);
-    _v.y = Math.max(calf.pos.y + 3, this.floor(m, _v.x, _v.z) - rm * 0.5);
+    // (a comfortable gap: close enough to read as hers, far enough never to fill the frame)
+    _v.copy(calf.pos).addScaledVector(calf.right, C.side * (rm * 1.6 + rc + 14)).addScaledVector(calf.fwd, 6).addScaledVector(calf.vel, 0.6);
+    _v.y = Math.max(calf.pos.y + 5, this.floor(m, _v.x, _v.z) - rm * 0.5);
     this._steer(m, _v, cs + 1, dt, 10, 0, 0.8, 0.6, 0.6);
     return true;
   }

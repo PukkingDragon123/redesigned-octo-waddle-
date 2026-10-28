@@ -1,8 +1,8 @@
 # SKYSONG
 
 *A cinematic 3D fantasy adventure about the whole life of a flying whale on Vur Sok, an ocean
-planet of spiral islands: from a calf on its first migration to an elder at rest. About half an
-hour from first breath to the last song.*
+planet of spiral islands: from hatching in a whirlpool to an elder at rest. About fifteen
+minutes, with no text on screen.*
 
 You wake at sunrise in a lagoon beside your mother, in a herd of enormous horned, fluffy
 flying whales. The great migration to the legendary **Oasis** is about to begin. Fly low over
@@ -85,9 +85,9 @@ menu is the only place text ever appears.
 
 ## The journey
 
-The game is one life, filmed like a wildlife film journal: datelines, species labels and a
-cameraman's notes appear only in cinematic moments. Hold any key, button or touch for a moment
-to skip a cinematic.
+The game is one life, told without a single word on screen: short, seamless camera moments
+that glide out of play and back, and soft dissolves where the years pass. About fifteen
+minutes from hatching to rest. Hold any key, button or touch for a moment to skip a cinematic.
 
 **The hatching**: each season the herd returns to the Spiral Maelstrom, a slow sea vortex.
 The female lays a single glowing egg in its calm eye and leaves to feed while the males circle
@@ -149,7 +149,7 @@ Progress is saved at each chapter and act. **Continue** in the title menu resume
 - **Herd and story** (`src/game`): bouncy whale-to-whale physics (`WhalePhysics.js`), social
   behaviours and the spiral bubble-net hunt (`HerdBehaviors.js`), swimming, buoyancy, breath
   and splashes (`Swim.js`), the mother's care AI, the coroutine-scripted story director and
-  the life-cycle acts (`life/`), a cinematic camera with title cards (`Cinematics.js`), tricks
+  the life-cycle acts (`life/`), a seamless cinematic camera (`Cinematics.js`), tricks
   and flying bugs (`Moves.js`, `Activities.js`, `creatures/bugs`), the singing game, weather,
   sonic booms and the floating menu.
 - **Wildlife and falcon** (`src/creatures/Ecosystem.js`, `eco/`, `Falcon.js`): glintfin bait
@@ -190,8 +190,6 @@ All of these drive headless Chromium against the dev server (`npm run dev`):
 | `node tools/touch-check.mjs` | Phone viewport: taps New Game on the floating menu with a touch event |
 | `node tools/story-acts.mjs 2 60 [shot]` | Plays an act headless (2, 3 or 4) and reports its state |
 | `node tools/story-pace.mjs` | Measures how long each chapter and act takes with the autopilot |
-| `node tools/story-shot.mjs` | A page screenshot, so the title-card overlay shows |
 | `node tools/doc-check.mjs` | Runs the hatching or an act and logs its beats (`CANVAS=1` saves the frame) |
-| `node tools/doc-overlay.mjs` | Renders the film-journal overlay (cards, lower-thirds, subtitles) without WebGL |
 
 `EXTRA="&worldslice=4000"` makes the world build much faster in headless checks.

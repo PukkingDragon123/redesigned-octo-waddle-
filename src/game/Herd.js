@@ -41,7 +41,7 @@ export class Herd {
     this.mother = this.add(new Whale(MOTHER), 'mother');
     this.elder = this.add(new Whale(ELDER), 'elder');
     // formation slots in the path frame: lateral, vertical, along (ahead +)
-    this.mother.slot = new Vector3(-10, 4, 6);
+    this.mother.slot = new Vector3(-24, 6, 16);
     this.elder.slot = new Vector3(14, 18, 70);
     const slots = [
       [-58, 10, 38], [54, -4, 30], [-36, 26, 82], [40, 30, 96], [-80, -6, -10], [78, 14, -24],
@@ -476,12 +476,13 @@ export class Herd {
       if (care.callT <= 0) { this.voiceHooks?.(m, 'answer'); care.callT = 7; }
       m.drive.lookAt = calf.pos;
     } else {
-      // lead: ahead of the calf, beside the route, matching its pace
-      const ahead = clamp(this.calfS + 18, this.s - 40, this.s + 30);
-      target = this.path.pointAt(ahead, _ring).addScaledVector(f.right, -10);
-      target.y += 4;
-      // drift toward the calf's line so she stays visible
-      target.lerp(_v.copy(calf.pos).addScaledVector(calf.fwd, 22), 0.35);
+      // lead: ahead of the calf and well off to one side, matching its pace; in view on the calf's
+      // flank, never parked on the camera's line (docs/VUR_SOK.md 0.8)
+      const ahead = clamp(this.calfS + 30, this.s - 40, this.s + 40);
+      target = this.path.pointAt(ahead, _ring).addScaledVector(f.right, -(22 + m.radius * 1.5));
+      target.y += 6;
+      // drift toward the calf's flank so she stays visible
+      target.lerp(_v.copy(calf.pos).addScaledVector(calf.fwd, 30).addScaledVector(calf.right, -(18 + m.radius * 2)), 0.25);
       this._lift(m, target);
       const pace = Math.max(this.speed, Math.min(calfSpeed, 14)) + 1;
       this.steer(m, target, pace, dt, this._opts(25, this.speed * 0.5));

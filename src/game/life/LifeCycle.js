@@ -12,10 +12,8 @@ import { waterStep, seaHeight } from '../Swim.js';
 import { until } from '../Script.js';
 import { G } from '../../render/Globals.js';
 import { clamp, lerp, smoothstep, easeInOut, TAU } from '../../core/math.js';
-import { ACTS, SKIPS, MOMENTS } from './text.js';
 import { Nursery } from './Nursery.js';
 import { maelstromCenter, maelstromS } from './Hatching.js';
-import { SPECIES, PLACES, NARRATION as N } from './doc.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -306,6 +304,7 @@ export class LifeCycle {
     g.cameraRig.cineW = 0;
     g.cameraRig.initialized = false;
     g.engine.setLook?.('gameplay', { focusOn: herd.calf.pos, ease: 0 });
+    this.unveil();
     this.calls = 0;
     this.rolls = 0;
     this.free = false;
@@ -322,19 +321,32 @@ export class LifeCycle {
     return !!this.story.autoplay;
   }
 
-  /** "Seasons turn...": a fade to black and a few lines between acts. */
-  *seasonsTurn(lines) {
-    const S = this.story, g = this.game, C = S.cine;
+  /**
+   * The seasons turn: one warm golden dissolve (no text, never black). It leaves the frame covered;
+   * the next act's setup() brings the picture back (unveil).
+   */
+  *seasonsTurn() {
+    const S = this.story, g = this.game, grade = g.engine.post.grade;
     this.mark('skip');
-    C.begin({ letterbox: true, hold: true });
-    g.fadeRate = 0.5;
+    S.script.cancel('fadeColor');
+    grade.uFadeColor?.value.setRGB(1.0, 0.9, 0.72);
+    S.player.enabled = false;
+    g.fadeRate = 0.45;
     let t = 0;
-    while (t < 2.6 && !C.skipped) t += yield 0;
-    for (const l of lines) {
-      if (C.skipped) break;
-      yield* C.showCard({ title: l.title, line: l.line }, 3.4);
-    }
-    C.end({ release: false });
+    while (!g.debug && grade.uFade.value < 0.99 && t < 4) t += yield 0;
+    yield 0.5;
+  }
+
+  /** Lift a seasons-turn dissolve, then return the fade colour to black for the menu's fades. */
+  unveil(rate = -0.55) {
+    const S = this.story, g = this.game, grade = g.engine.post.grade;
+    if (g.debug || grade.uFade.value < 0.01) return;
+    g.fadeRate = rate;
+    S.script.run((function* () {
+      let u = 0;
+      while (grade.uFade.value > 0.001 && u < 8) u += yield 0;
+      if (g.fadeRate <= 0) grade.uFadeColor?.value.setRGB(0, 0, 0);
+    })(), 'fadeColor');
   }
 
   /** Emit soft light motes around a point (birth, the bond, the whale-fall garden). */
@@ -369,25 +381,19 @@ export class LifeCycle {
     this.autoGoal = () => mate.pos;
     this.mark('act2');
     // ---- the meeting, as a cinematic
-    C.begin({ focus: me, rate: 0.5, snap: true });
-    C.card(ACTS[2]);
-    yield* C.play(C.orbit({ center, radius: [420, 260], height: [140, 60], angle: [2.4, 2.9], fov: 48, look: me }), 7);
-    C.hideCard();
+    C.begin({ focus: mate, rate: 0.5, snap: true });
     C.setFocus(mate);
-    yield* C.play(C.rel({ subject: me, side: [-6, -3], up: [3, 2], back: [-2, -6], ahead: 60, fov: 34, lookSide: -10 }), 4);
+    yield* C.play(C.rel({ subject: me, side: [-8, -4], up: [4, 2], back: [6, -2], ahead: 60, fov: [40, 34], lookSide: -10 }), 4);
     mate.lc.target.copy(me.pos).addScaledVector(me.right, 14).addScaledVector(me.fwd, 4);
-    C.lower(SPECIES.mate, 5);
-    C.say(N.court2, 4.5);
-    yield* C.play(C.flyby({ subject: mate, side: -10, up: 1.5, to: 18, fov: 36 }), 4.5);
     S.voiceCall(mate, 'answer');
-    yield* C.play(C.eye({ whale: mate, side: 1, dist: [0.38, 0.3], fov: [32, 28] }), 3.5);
-    C.end();
+    yield* C.play(C.flyby({ subject: mate, side: -12, up: 1.5, to: 18, fov: 38 }), 4);
+    C.end({ rate: 0.4 });
     this.mark('circle');
     // ---- she circles, and calls; the player comes to her
     mate.lc.mode = 'steer';
     let a = 0;
     let t = 0, lastCall = -9;
-    while (t < 30) {
+    while (t < 18) {
       a += 0.18 * (yield 0);
       t = g.time - (this._t0 ??= g.time);
       mate.lc.target.copy(me.pos).add(_v.set(Math.cos(a) * 34, 3, Math.sin(a) * 34));
@@ -416,16 +422,16 @@ export class LifeCycle {
     C0.y = Math.max(C0.y, seaHeight(g, C0.x, C0.z) + 30);
     const spiralC = C0.clone();
     let ang = Math.atan2(mate.pos.z - spiralC.z, mate.pos.x - spiralC.x);
-    let rise = 0, harmony = 0, mirrors = 0, nextRoll = 7, rollAt = -99, rollDir = 1, sparkT = 0;
+    let rise = 0, harmony = 0, mirrors = 0, nextRoll = 4, rollAt = -99, rollDir = 1, sparkT = 0;
     this.rolls = 0;
     this.free = true;
     t = 0;
     S.voiceCall(mate, 'play');
-    while (t < 80) {
+    while (t < 40) {
       const dt = yield 0;
       t += dt;
-      ang += 0.26 * dt;
-      rise = Math.min(rise + 1.1 * dt, 140);
+      ang += 0.3 * dt;
+      rise = Math.min(rise + 1.6 * dt, 140);
       mate.lc.mode = 'steer';
       mate.lc.target.set(spiralC.x + Math.cos(ang + 0.5) * 30, spiralC.y + rise + 4, spiralC.z + Math.sin(ang + 0.5) * 30);
       mate.lc.speed = 9.5;
@@ -435,7 +441,7 @@ export class LifeCycle {
       if (close) harmony += dt;
       // her roll: an invitation to mirror
       if (t > nextRoll) {
-        nextRoll = t + 7.5;
+        nextRoll = t + 6;
         rollDir = -rollDir;
         if (mate.barrelRoll(rollDir)) { rollAt = g.time; S.voiceCall(mate, 'play'); this.rolls = 0; }
       }
@@ -456,8 +462,8 @@ export class LifeCycle {
         sparkT = 0;
         this.motes(_v2.copy(me.pos).lerp(mate.pos, Math.random()), 1, 4, [1.0, 0.85, 0.6], { rise: 0.2, life: 2.2 });
       }
-      if (mirrors >= 3 && harmony > 16) break;
-      if (t > 50 && harmony > 25) break;
+      if (mirrors >= 2 && harmony > 10) break;
+      if (t > 26 && harmony > 12) break;
     }
     this.autoGoal = null;
     this.mark('helix');
@@ -465,7 +471,6 @@ export class LifeCycle {
     // ---- the rise: an intertwined spiral up through the clouds under the twin moons
     yield* this.helixRise(me, mate);
     this.free = false;
-    yield* this.seasonsTurn(SKIPS.toAct3);
   }
 
   *helixRise(me, mate) {
@@ -480,7 +485,7 @@ export class LifeCycle {
     const c = this.helixC.copy(base);
     const a0 = Math.atan2(me.pos.z - base.z, me.pos.x - base.x);
     let t = 0, a = a0;
-    const T = 22;
+    const T = 14;
     const pA = new Vector3(), pB = new Vector3(), dA = new Vector3(), dB = new Vector3();
     const fromA = me.pos.clone(), fromB = mate.pos.clone();
     const shot = C.orbit({ center: c, radius: [70, 120], height: [-25, -60], angle: [a0 + 2, a0 + 3.6], fov: [44, 56], lookUp: [0, 60] });
@@ -507,12 +512,9 @@ export class LifeCycle {
       if (Math.random() < 0.5) this.motes(_v2.copy(pA).lerp(pB, Math.random()), 1, 3, [0.85, 0.85, 1.0], { rise: -0.5, life: 3 });
       shot(clamp(k, 0, 1), t, C.shot);
       if (k > 0.72) C.shot.look.lerp(_v2.copy(c).add(_p.set(0, 400, 0)), (k - 0.72) / 0.28 * 0.8);
-      if (k > 0.55 && !this._bondCard) { this._bondCard = true; C.say(MOMENTS.bond.line, 6); }
     }
-    this._bondCard = false;
-    // fade to stars
-    g.fadeRate = 0.35;
-    yield* C.wait(3);
+    // up into the stars, and the seasons turn while the camera still looks up
+    yield* this.seasonsTurn();
     G.uSongAmp.value = 0;
     this.kin.delete(me);
     this.kin.delete(mate);
@@ -545,21 +547,14 @@ export class LifeCycle {
     this.mark('act3');
     // ---- the return, the laying, her leaving (skippable) ----
     C.begin({ focus: mate, rate: 0.5, snap: true, lead: mate });
-    C.card(ACTS[3]);
-    yield* C.play(C.drone({ center: c, radius: [460, 340], height: [240, 150], angle: [yaw + 1.2, yaw + 1.6], fov: 46 }), 6);
-    C.hideCard();
-    C.lower(PLACES.maelstrom3, 5.5);
-    C.say(N.return, 5);
-    yield* C.play(C.longLens({ subject: me, dist: 240, angle: [yaw - 2.2, yaw - 2.1], height: 4, fov: [14, 12] }), 5);
     let egg = null, t = 0;
     C.setFocus(mate);
     C.slowmo(0.6);
-    C.say(N.lay3, 4.5);
     const lay = C.orbit({ center: mate, radius: [mate.L * 1.7, mate.L * 1.3], height: [mate.L * 0.35, mate.L * 0.1], angle: [yaw + 0.4, yaw + 1.1], fov: [40, 36] });
-    while (t < 6 && !C.skipped) {
+    while (t < 5 && !C.skipped) {
       const dt = yield 0;
       t += dt;
-      lay(easeInOut(t / 6), t, C.shot);
+      lay(easeInOut(t / 5), t, C.shot);
       this.pose(mate, _v2.set(c.x, nur.eyeY() - mate.radius * 0.3 + Math.sin(t * 0.8) * 0.2, c.z), dt, f.fwd);
       if (!egg && t > 2.2) { egg = nur.layEgg(eggP, { yaw }); S.audio.stinger?.('harmony'); this.motes(eggP, 26, 4, [1.0, 0.85, 0.7], { rise: 0.5, life: 3 }); }
       if (egg) egg.setGlow?.(clamp((t - 2.2) / 3, 0.2, 1));
@@ -576,15 +571,13 @@ export class LifeCycle {
     mate.lc.target.copy(c).addScaledVector(f.fwd, 900).setY(eye + 50);
     mate.lc.speed = 12;
     S.voiceCall(mate, 'answer');
-    C.say(N.feed3, 4.8);
     C.setFocus(mate);
-    yield* C.play(C.longLens({ subject: mate, dist: 200, angle: [yaw + 2.6, yaw + 2.5], height: 3, fov: [18, 22], lag: 1.2 }), 4.8);
-    C.end();
+    yield* C.play(C.longLens({ subject: mate, dist: 200, angle: [yaw + 2.6, yaw + 2.5], height: 3, fov: [22, 26], lag: 1.2 }), 3.5);
+    C.end({ rate: 0.4 });
     // ---- he guards the egg: three waves of predators ----
     this.mark('guard');
     S.audio.setMood?.('chase', { fade: 4 });
     S.audio.setIntensity?.(0.4);
-    C.say(N.guard3, 5);
     const ring = new Vector3();
     let ringA = Math.atan2(me.pos.z - c.z, me.pos.x - c.x);
     this.autoGoal = () => {
@@ -595,21 +588,18 @@ export class LifeCycle {
     };
     this.free = true;
     // three waves, about a minute and a half in all: one hunter, a pair, then from both sides at once
+    // two waves (about a minute): a hunter from the deep, then one from above and one below
     const waves = [
-      [['lanternjack', 0.4, 110]],
-      [['lanternjack', 2.6, 110], ['lanternjack', 3.4, 120]],
-      [['skimmer', 1.6, 140], ['lanternjack', 5.0, 110]],
+      [['lanternjack', 0.4, 100]],
+      [['skimmer', 1.6, 130], ['lanternjack', 5.0, 100]],
     ];
-    const strikes0 = nur.strikes;
-    yield 4;
+    yield 2;
     for (let wv = 0; wv < waves.length; wv++) {
       const ths = waves[wv].map(([k, a, d]) => nur.spawnThreat(k, a + yaw, d, k === 'skimmer' ? 9 : 5.2));
       const kinds = waves[wv].map((x) => x[0]);
-      if (kinds.includes('lanternjack') && C.lower(SPECIES.lanternjack, 5, 'lanternjack3')) C.say(N.threat3, 4.5);
-      else if (kinds.includes('skimmer') && C.lower(SPECIES.skimmer, 5, 'skimmer3')) C.say(N.above3, 4.5);
       S.voiceCall(me, 'warn');
       t = 0;
-      while (t < 28 && ths.some((h) => h.state !== 'flee')) {
+      while (t < 22 && ths.some((h) => h.state !== 'flee')) {
         const dt = yield 0;
         t += dt;
         for (const h of ths) {
@@ -622,30 +612,28 @@ export class LifeCycle {
       }
       for (const h of ths) if (h.state !== 'flee') nur.repel(h, eggP);
       S.audio.setIntensity?.(0.45 + wv * 0.15);
-      yield 3;
+      yield 1.5;
     }
     this.autoGoal = null;
     this.free = false;
     egg.setGlow?.(1);
-    C.say(nur.strikes === strikes0 ? N.held3 : 'It took a knock or two. It is still glowing.', 4.5);
     S.audio.setMood?.('birth', { fade: 5 });
     S.audio.stinger?.('resolve');
-    yield 4;
+    yield 2;
     // ---- weeks pass; the shell gives (a time-lapse, then a macro) ----
     this.mark('hatch3');
-    C.begin({ focus: eggP, rate: 0.6 });
+    C.begin({ focus: eggP, rate: 0.4 });
     C.timelapse(4);
     egg.setPulse?.(2);
-    g.atmosphere.transition('night', 5);
-    yield* C.play(C.drone({ center: c, radius: [220, 260], height: [100, 140], angle: [yaw + 3, yaw + 4], fov: 50 }), 16, {
-      sway: 0, onFrame: (k) => { if (k > 0.55 && !this._lapse) { this._lapse = true; g.atmosphere.transition('dawn', 6); } },
+    g.atmosphere.transition('night', 3);
+    yield* C.play(C.drone({ center: c, radius: [220, 250], height: [100, 130], angle: [yaw + 3, yaw + 3.6], fov: 50 }), 8, {
+      sway: 0, onFrame: (k) => { if (k > 0.5 && !this._lapse) { this._lapse = true; g.atmosphere.transition('dawn', 3.5); } },
     });
     this._lapse = false;
     C.timelapse(1);
     if (C.skipped) g.atmosphere.set('dawn');
-    C.say(N.hatch3, 4);
     let kicks = 0;
-    yield* C.play(C.macro({ subject: eggP, dist: [9, 7.5], angle: [yaw + 1, yaw + 1.4], height: [0.8, 0.3], fov: [30, 26], under: true }), 5, {
+    yield* C.play(C.macro({ subject: eggP, dist: [9, 7.5], angle: [yaw + 1, yaw + 1.4], height: [0.8, 0.3], fov: [30, 26], under: true }), 4, {
       onFrame: (k) => { if (kicks < 3 && k > 0.2 + kicks * 0.25) { kicks++; egg.embryo?.kick?.(); egg.crack?.(kicks * 0.3); } },
     });
     egg.hatch?.();
@@ -656,13 +644,12 @@ export class LifeCycle {
     this.kin.add(newborn);
     S.voiceCall(newborn, 'coo');
     this.motes(eggP, 30, 5, [1.0, 0.92, 0.8], { rise: 0.6, life: 3.5 });
-    yield* C.play(C.macro({ subject: newborn, dist: [5, 6], angle: [yaw + 1.4, yaw + 1.6], height: [0.2, 0.5], fov: 30, under: true }), 3);
-    C.end();
+    yield* C.play(C.macro({ subject: newborn, dist: [5, 6], angle: [yaw + 1.4, yaw + 1.6], height: [0.2, 0.5], fov: 30, under: true }), 2.5);
+    C.end({ rate: 0.45 });
     this.mark('lift');
     // ---- lift the newborn to the surface for its first breath ----
     newborn.lc.mode = 'hold';
     this.autoGoal = () => _v2.copy(newborn.pos).add(_p.set(0, -(me.radius + newborn.radius + 0.6), 0));
-    C.say(N.lift3, 5);
     t = 0;
     let lastCall = 0;
     for (;;) {
@@ -682,12 +669,12 @@ export class LifeCycle {
         _v2.z += hz * Math.min(1, dt * 1.5);
       }
       // nobody is left stranded: after a while it finds the strength itself
-      if (t > 45) _v2.y += 1.4 * dt;
+      if (t > 20) _v2.y += 2 * dt;
       newborn.drive.effort = 0.6;
       this.pose(newborn, _v2, dt, f.fwd);
       if (t - lastCall > 9) { lastCall = t; S.voiceCall(newborn, 'coo'); }
       if (newborn.pos.y > sy - newborn.radius * 0.6) break;
-      if (t > 90) break;
+      if (t > 40) break;
     }
     this.mark('breath');
     // ---- the first breath ----
@@ -706,26 +693,20 @@ export class LifeCycle {
     mate.lc.mode = 'steer';
     mate.lc.target.copy(me.pos).addScaledVector(me.right, -14);
     mate.lc.speed = 10;
-    C.begin({ focus: newborn, rate: 0.6 });
-    C.say(N.breath3, 4);
-    C.lower(SPECIES.newborn, 5);
-    yield* C.play(C.low({ subject: newborn, side: [9, 7], back: [-10, -6], height: [0.8, 1.4], fov: 40, lookUp: 0.6 }), 4.5);
-    C.setFocus(mate);
-    C.say(N.mate3, 4.5);
+    C.begin({ focus: newborn, rate: 0.45 });
+    yield* C.play(C.low({ subject: newborn, side: [9, 7], back: [-10, -6], height: [0.8, 1.4], fov: 40, lookUp: 0.6 }), 4);
     S.voiceCall(mate, 'answer');
-    yield* C.play(C.longLens({ subject: mate, dist: 150, angle: [yaw + 0.8, yaw + 0.9], height: 2, fov: [20, 26], lag: 1 }), 4.5);
-    C.end();
+    C.end({ rate: 0.4 });
     mate.lc.mode = 'follow';
     mate.lc.side = -1;
     nur.settle(3, 0.12);
     this.mark('teach');
     // ---- teach it to follow: it answers when he calls ----
-    C.say(N.teach3, 4.5);
     this.calls = 0;
     this.autoGoal = () => _v2.copy(herd.mother.pos).add(_p.set(20, 14, 0));
     t = 0;
     let autoHum = 0;
-    while (t < 30 && this.calls < 3) {
+    while (t < 16 && this.calls < 2) {
       const dt = yield 0;
       t += dt;
       if (this.auto && (autoHum += dt) > 4) { autoHum = 0; this.onHum(); }
@@ -739,11 +720,11 @@ export class LifeCycle {
     S.eco?.addFishSchool?.(shoal.clone(), 'glintfin', 260);
     this.autoGoal = () => _v2.copy(shoal).add(_p.set(0, 7, 0));
     S.voiceCall(mate, 'answer');
-    yield* until(() => me.pos.distanceTo(shoal) < 60, 50);
+    yield* until(() => me.pos.distanceTo(shoal) < 60, 30);
     newborn.lc.mode = 'steer';
     let ate = 0;
     t = 0;
-    while (t < 20 && ate < 4) {
+    while (t < 12 && ate < 4) {
       const dt = yield 0;
       t += dt;
       const n = S.eco?.nearestSwarm?.(newborn.pos);
@@ -761,12 +742,11 @@ export class LifeCycle {
     this.autoGoal = null;
     this.mark('family');
     // ---- three of them, flying ----
-    C.begin({ focus: me, rate: 0.5 });
-    C.say(MOMENTS.answer.line, 5);
-    yield* C.play(C.track({ subject: me, side: [-34, -26], up: [6, 10], ahead: 12, fov: 42 }), 6);
-    yield* C.play(C.orbit({ center: me, radius: [60, 120], height: [14, 50], angle: [me.yaw + 2, me.yaw + 2.7], fov: 46 }), 6);
+    C.begin({ focus: me, rate: 0.4 });
+    yield* C.play(C.orbit({ center: me, radius: [50, 110], height: [10, 44], angle: [me.yaw + 2, me.yaw + 2.6], fov: 46 }), 4);
+    // the seasons turn while the camera still drifts out
+    yield* this.seasonsTurn();
     C.end({ release: false });
-    yield* this.seasonsTurn(SKIPS.toAct4);
   }
 
   /** The newborn appears beside its mother, under her, in a cloud of light and bubbles. */
@@ -807,23 +787,19 @@ export class LifeCycle {
     herd.mode = 'travel';
     herd.targetSpeed = 5;
     C.begin({ focus: me, rate: 0.5, snap: true });
-    C.card(ACTS[4]);
-    C.say(N.elder, 5);
-    yield* C.play(C.track({ subject: me, side: [70, 50], up: [20, 8], ahead: [-40, 10], fov: 44 }), 7);
-    C.hideCard();
-    yield* C.play(C.low({ subject: me, side: [26, 22], back: [-50, -30], height: [1.5, 2.5], fov: 46, lookUp: 4 }), 5);
-    C.end();
+    yield* C.play(C.track({ subject: me, side: [60, 46], up: [14, 8], ahead: [-30, 10], fov: 44 }), 5);
+    C.end({ rate: 0.4 });
     this.mark('leadHerd');
     // ---- leading the migration: the herd keeps pace with its elder
     const sStart = herd.s;
     let t = 0, projT = 0, myS = herd.s + 60;
     this.autoGoal = () => S.path.offsetAt(herd.s + 120, 0, 8, 0, _v2);
-    while (herd.s < sStart + 420 && t < 80) {
+    while (herd.s < sStart + 300 && t < 45) {
       const dt = yield 0;
       t += dt;
       if ((projT += dt) > 0.25) { projT = 0; myS = S.path.project(me.pos, myS, 300).s; }
       herd.mode = 'travel';
-      herd.targetSpeed = clamp((myS - herd.s - 30) * 0.18, t > 60 ? 6 : 2.5, 13);
+      herd.targetSpeed = clamp((myS - herd.s - 30) * 0.18, t > 30 ? 7 : 3, 15);
     }
     this.mark('lastSong');
     // ---- the last song, under the spiral galaxy
@@ -835,9 +811,8 @@ export class LifeCycle {
     S.audio.setMood?.('song', { fade: 4 });
     this.autoGoal = () => _v2.copy(center).add(_p.set(0, -6, 30));
     const hums0 = this.calls;
-    yield* until(() => this.calls > hums0 || this.auto, 14);
+    yield* until(() => this.calls > hums0 || this.auto, 10);
     C.begin({ focus: me, rate: 0.3 });
-    C.say(N.lastSong, 5);
     const beat = S.song.key().beat;
     herd.whales.concat([mate]).forEach((w, i) => {
       if (!w.group.visible) return;
@@ -849,8 +824,7 @@ export class LifeCycle {
     G.uSongAmp.value = 2;
     S.audio.setIntensity?.(1);
     S.audio.stinger?.('harmony');
-    yield* C.play(C.orbit({ center: me, radius: [40, 170], height: [6, 150], angle: [me.yaw + 1.2, me.yaw + 2.3], fov: [44, 58], lookUp: [0, 160] }), 13);
-    C.hideCard();
+    yield* C.play(C.orbit({ center: me, radius: [40, 150], height: [6, 120], angle: [me.yaw + 1.2, me.yaw + 2.1], fov: [44, 54], lookUp: [0, 140] }), 10);
     for (const w of herd.whales) w.drive.sing = 0;
     mate.drive.sing = 0;
     G.uSongAmp.value = 0;
@@ -868,8 +842,6 @@ export class LifeCycle {
     const bedHere = S.world.seabedAt ? S.world.seabedAt(surf.x + fwd.x * 40, surf.z + fwd.z * 40) : -80;
     const deep = surf.clone().addScaledVector(fwd, 40);
     deep.y = Math.max(bedHere + me.radius * 1.2, -16);
-    C.say(N.rest, 5);
-    C.lower(SPECIES.elder, 5);
     const descend = C.rel({ subject: me, side: [36, 30], up: [10, 2], back: [30, 22], ahead: 4, fov: [46, 40], worldUp: true });
     t = 0;
     const T1 = 9, T2 = 16;
@@ -896,15 +868,14 @@ export class LifeCycle {
     this.mark('garden');
     // ---- the whale fall becomes a garden: a time-lapse
     for (let i = 0; i < 3; i++) S.eco?.addFishSchool?.(_v2.copy(deep).add(_v.set((i - 1) * 18, 4 + i * 2, (i % 2) * 14 - 7)).clone(), i === 1 ? 'spiralback' : 'glintfin', 160);
-    C.say(N.garden, 6);
     C.slowmo(2.5);
     g.atmosphere.transition('dawn', 9);
     const garden = C.orbit({ center: deep, radius: [me.L * 1.1, me.L * 1.7], height: [me.L * 0.1, me.L * 0.3], angle: [me.yaw + 1.6, me.yaw + 3.4], fov: [42, 48] });
     t = 0;
-    while (t < 22 && !C.skipped) {
+    while (t < 14 && !C.skipped) {
       const dt = yield 0;
       t += dt;
-      garden(easeInOut(t / 22), t, C.shot);
+      garden(easeInOut(t / 14), t, C.shot);
       // stay under the water, beside the resting body
       C.shot.pos.y = Math.min(C.shot.pos.y, seaHeight(g, C.shot.pos.x, C.shot.pos.z) - 2.5);
       const n = Math.min(5, 2 + Math.floor(t / 4));
@@ -915,8 +886,8 @@ export class LifeCycle {
       }
     }
     C.slowmo(1);
-    g.fadeRate = 0.4;
-    yield* C.wait(3);
+    // a year passes: one soft dissolve, pale as the morning
+    yield* this.seasonsTurn();
     C.end({ release: false });
     yield* this.dawnAgain();
   }
@@ -945,23 +916,22 @@ export class LifeCycle {
     // a few of the herd circle it, as they always have
     nur.guard(herd.adults.filter((w) => w !== herd.mother).slice(0, 4), 52);
     C.begin({ focus: eggP, rate: 1, snap: true, hold: false });
-    g.fadeRate = -0.4;
-    C.say(N.cycle, 6);
+    this.unveil(-0.4);
     const shot = C.macro({ subject: eggP, dist: [10, 8], angle: [0.6, 1.2], height: [1.6, 0.6], fov: [32, 28], under: true });
     let t = 0, kicked = false;
-    while (t < 13) {
+    while (t < 10) {
       const dt = yield 0;
       t += dt;
-      shot(clamp(t / 13, 0, 1), t, C.shot);
+      shot(clamp(t / 10, 0, 1), t, C.shot);
       C.handheld(C.shot, 1);
-      if (t > 5 && !kicked) { kicked = true; egg.embryo?.kick?.(); }
-      if (t > 7.5 && !this._cycle) { this._cycle = true; C.card(MOMENTS.cycle); }
+      if (t > 4 && !kicked) { kicked = true; egg.embryo?.kick?.(); }
     }
-    this._cycle = false;
     S.completed = true;
     S.save(0, 1, true);
-    yield 5;
-    C.hideCard();
+    yield 1;
+    // the last dissolve: the egg's own light, then the title
+    S.script.cancel('fadeColor');
+    g.engine.post.grade.uFadeColor?.value.setRGB(1.0, 0.93, 0.8);
     g.fadeRate = 0.3;
     yield* until(() => g.engine.post.grade.uFade.value >= 0.99 || g.debug, 6);
     C.end({ release: false });

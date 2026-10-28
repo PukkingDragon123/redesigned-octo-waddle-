@@ -1,22 +1,17 @@
-// Cinematic moments: scripted camera shots (establishing aerials, crane-ups, slow orbits, flybys,
-// low angles over the water, tracking shots beside the herd, close-ups on an eye), letterbox bars,
-// title cards, slow motion and depth of field, all skippable by holding any key, button or touch.
+// Cinematic moments (docs/VUR_SOK.md 0.8): rare, short in-engine camera moves that blend from the
+// play camera and back (CameraRig eases position, aim and lens; a jump between two shots glides
+// instead of cutting), with slow motion and time-lapse. No text, no letterbox, no black dips.
+// Holding any key, button or touch for a moment skips one; nothing is shown while you hold.
 //
 // Inside a story coroutine:
 //   const C = story.cine;
-//   C.begin({ focus: mom.pos });                       // takes the camera, bars slide in, the player is carried
+//   C.begin({ focus: mom.pos });                       // takes the camera, the player is carried
 //   yield* C.play(C.orbit({ center, radius: [80, 140], height: [10, 60], angle: [0, 1.2] }), 7);
-//   yield* C.showCard({ kicker: 'ACT I · THE CALF', title: 'The Dawn Lagoon', line: '...' }, 4);
 //   C.end();                                           // the camera glides back to the player
 // Every shot is a function (k, t, shot) that writes shot.pos / look / fov / roll; k is the eased
 // progress 0..1, t the seconds into the shot. Subjects may be a Vector3 or anything with .pos.
 // A skip ends the remaining shots and waits of the current cinematic at once (C.skipped stays
 // true until end()), so a sequence never traps the player.
-//
-// Documentary language (docs/VUR_SOK.md 0.7): long-lens observational shots (longLens, narrow FOV,
-// an operator's slow follow), drone aerials (drone), macro close-ups (macro), time-lapse and slow
-// motion (timelapse / slowmo), a faint hand-held sway on every shot, lower-third captions
-// (C.lower({ place, name, sci })) and sparse narrator subtitles (C.say(line), yield* C.narrate(...)).
 import { Vector3 } from 'three';
 import { clamp, lerp, easeInOut, easeInOutSine } from '../core/math.js';
 
@@ -42,24 +37,9 @@ export class Cinematics {
     this.holding = false;
     this.slow = 1;
     this.depth = 0;
-    const doc = typeof document !== 'undefined' ? document : null;
-    this.el = doc?.getElementById('cine') || null;
-    this.cardEl = this.el?.querySelector('.card') || null;
-    this.kickerEl = this.el?.querySelector('.kicker') || null;
-    this.titleEl = this.el?.querySelector('.title') || null;
-    this.lineEl = this.el?.querySelector('.line') || null;
-    this.skipEl = this.el?.querySelector('.skip') || null;
-    this.skipBar = this.skipEl?.querySelector('i') || null;
-    this.lowerEl = this.el?.querySelector('.lower') || null;
-    this.lowerPlace = this.lowerEl?.querySelector('.place') || null;
-    this.lowerName = this.lowerEl?.querySelector('.name') || null;
-    this.lowerSci = this.lowerEl?.querySelector('.sci') || null;
-    this.subEl = this.el?.querySelector('.sub') || null;
-    this.cardText = null; // the card on screen (for headless checks)
-    this.lowerText = null; // the lower-third on screen
-    this.subText = null; // the narrator line on screen
-    this.lowerT = 0;
-    this.subT = 0;
+    this.cardText = null;
+    this.lowerText = null;
+    this.subText = null;
     this.seen = new Set(); // documentary captions already shown (species reveals happen once)
     this.sway = 1; // the hand-held drift of the camera operator (0 for locked-off shots)
     this.swayT = 0;
@@ -92,9 +72,11 @@ export class Cinematics {
     this.armed = false;
     this.skipT = 0;
     this.lead = opts.lead || null;
-    this.letterbox(opts.letterbox ?? true);
-    g.cameraRig.setCinematic(this.shot, opts.rate ?? 0.6);
-    if (opts.snap) g.cameraRig.cineW = 1;
+    // one constant, subtle ratio only for the hatching and the ending (opts.letterbox), never popping
+    this.letterbox(!!opts.letterbox);
+    g.cameraRig.setCinematic(this.shot, opts.rate ?? 0.45);
+    // no hard cuts: a snap only when the screen is already covered (a dissolve, the first frames)
+    if (opts.snap && (g.debug || g.engine.post.grade.uFade.value > 0.6)) { g.cameraRig.cineW = 1; g.cameraRig.cutNow?.(); }
     this.setFocus(opts.focus ?? null);
     if ((opts.hold ?? true) && S.player && !this.held) {
       this.held = { auto: S.player.autopilot, enabled: S.player.enabled };
@@ -115,11 +97,9 @@ export class Cinematics {
     this.active = false;
     this.skipped = false;
     this.letterbox(false);
-    this.hideCard(true);
-    if (!opts.keepText) this.clearText();
     this.sway = 1;
     this.slowmo(1);
-    g.cameraRig.cineRate = opts.rate ?? 0.5;
+    g.cameraRig.cineRate = Math.min(opts.rate ?? 0.4, 0.6);
     g.cameraRig.cineTarget = 0;
     if (this.held) {
       if (S.player.autopilot === this.carry) S.player.autopilot = this.held.auto;
@@ -130,7 +110,6 @@ export class Cinematics {
     }
     this.lead = null;
     if (S.state === 'play') g.engine.setLook?.('gameplay', { focusOn: S.herd.calf.pos, ease: 1.5 });
-    this.skipEl?.classList.remove('on');
   }
 
   setFocus(subject) {
@@ -140,8 +119,8 @@ export class Cinematics {
   }
 
   letterbox(on) {
+    // no bars on screen: the film's frame never changes shape (kept for older call sites)
     this._lb = !!on;
-    this.el?.classList.toggle('lb', !!on);
   }
 
   slowmo(scale = 1) {
@@ -149,112 +128,19 @@ export class Cinematics {
     if (this.story.state !== 'paused') this.game.timeScaleTarget = scale;
   }
 
-  // ---- title cards ------------------------------------------------------------------------
-  /** Show a title card: { kicker, title, line, logo, low }. */
-  card(c) {
-    if (!this.cardEl) { this.cardText = c; return; }
-    this.kickerEl.textContent = c.kicker || '';
-    this.titleEl.textContent = c.title || '';
-    this.titleEl.classList.toggle('logo', !!c.logo);
-    this.lineEl.textContent = c.line || '';
-    this.cardEl.classList.toggle('low', !!c.low);
-    // restart the slow letter-spacing drift
-    this.cardEl.classList.remove('on');
-    void this.cardEl.offsetWidth;
-    this.cardEl.classList.add('on');
-    this.cardText = c;
-  }
-
-  hideCard(now = false) {
-    this.cardEl?.classList.remove('on');
-    if (now && this.cardEl) {
-      this.cardEl.style.transition = 'opacity .35s ease';
-      setTimeout(() => { if (this.cardEl) this.cardEl.style.transition = ''; }, 400);
-    }
-    this.cardText = null;
-  }
-
-  /** Coroutine: a card that holds, then fades (skippable when inside a cinematic). */
-  *showCard(c, hold = 4.5) {
-    this.card(c);
-    yield* this.wait(hold);
-    this.hideCard(this.skipped);
-    yield* this.wait(1.2);
-  }
-
-  /** A card over gameplay that clears itself (no letterbox, no camera change). */
-  flashCard(c, hold = 4.5) {
-    const S = this.story;
-    S.script.cancel('card');
-    const self = this;
-    S.script.run((function* () {
-      self.card(c);
-      yield hold;
-      self.hideCard();
-    })(), 'card');
-  }
-
-  // ---- documentary text ---------------------------------------------------------------------
-  /**
-   * A lower-third caption: { place, name, sci } (place: a small kicker like "VUR SOK", name in
-   * Almendra SC, sci the invented scientific name in italics). Clears itself after hold seconds.
-   * once: a key so the caption is only ever shown the first time (species reveals).
-   */
-  lower(c, hold = 6, once = null) {
-    if (!c) return false;
-    if (once) {
-      if (this.seen.has(once)) return false;
-      this.seen.add(once);
-    }
-    this.lowerText = c;
-    this.lowerT = hold;
-    if (!this.lowerEl) return true;
-    this.lowerPlace.textContent = c.place || '';
-    this.lowerName.textContent = c.name || '';
-    this.lowerSci.textContent = c.sci || '';
-    this.lowerEl.classList.remove('on');
-    void this.lowerEl.offsetWidth;
-    this.lowerEl.classList.add('on');
-    return true;
-  }
-
-  hideLower() {
-    this.lowerEl?.classList.remove('on');
-    this.lowerText = null;
-    this.lowerT = 0;
-  }
-
-  /** A narrator subtitle at the bottom of the frame (Cormorant italic); clears after hold seconds. */
-  say(line, hold = 4.6) {
-    if (!line) return;
-    this.subText = line;
-    this.subT = hold;
-    if (!this.subEl) return;
-    this.subEl.textContent = line;
-    this.subEl.classList.remove('on');
-    void this.subEl.offsetWidth;
-    this.subEl.classList.add('on');
-  }
-
-  hideSay() {
-    this.subEl?.classList.remove('on');
-    this.subText = null;
-    this.subT = 0;
-  }
-
-  clearText() {
-    this.hideLower();
-    this.hideSay();
-  }
-
-  /** Coroutine: narrator lines one after another (each holds, then a short breath between). */
-  *narrate(lines, hold = 4.2, gap = 0.7) {
-    for (const l of [].concat(lines)) {
-      if (this.skipped) break;
-      this.say(l, hold);
-      yield* this.wait(hold + gap);
-    }
-  }
+  // ---- text (docs/VUR_SOK.md 0.8: no text in the game at all) --------------------------------
+  // The old title cards, lower-thirds and narrator lines are gone. These stay as silent no-ops so
+  // any older call site keeps working; nothing is ever drawn.
+  card() {}
+  hideCard() {}
+  *showCard() {}
+  flashCard() {}
+  lower() { return false; }
+  hideLower() {}
+  say() {}
+  hideSay() {}
+  clearText() {}
+  *narrate() {}
 
   /** Time-lapse (scale > 1) or slow motion (scale < 1); 1 restores real time. */
   timelapse(scale = 3) {
@@ -388,7 +274,7 @@ export class Cinematics {
     const T = this.swayT;
     const d = s.pos.distanceTo(s.look);
     // narrower lenses magnify the hand: keep the on-screen drift about constant
-    const a = amount * d * 0.0026 * clamp((s.fov || 45) / 45, 0.25, 1.2);
+    const a = amount * d * 0.0012 * clamp((s.fov || 45) / 45, 0.25, 1.2);
     s.look.x += (Math.sin(T * 0.53) + 0.5 * Math.sin(T * 1.31 + 2.1)) * a;
     s.look.y += (Math.sin(T * 0.71 + 1.3) + 0.4 * Math.sin(T * 1.73)) * a * 0.6;
     s.look.z += (Math.sin(T * 0.47 + 4.2) + 0.5 * Math.sin(T * 1.19 + 0.7)) * a;
@@ -477,13 +363,9 @@ export class Cinematics {
   update(dtReal) {
     const inp = this.game.input;
     this.swayT += dtReal;
-    if (this.story.state !== 'paused') {
-      if (this.lowerT > 0 && (this.lowerT -= dtReal) <= 0) this.hideLower();
-      if (this.subT > 0 && (this.subT -= dtReal) <= 0) this.hideSay();
-    }
     if (!this.active || !this.skippable || this.story.state === 'paused' || this.story.state === 'menu') {
       this.skipT = 0;
-      if (this.holding) { this.holding = false; this.skipEl?.classList.remove('on'); }
+      this.holding = false;
       return;
     }
     const held = inp.keys.size > 0 || inp.mouseButtons > 0 || (inp.touches && inp.touches.size > 0) ||
@@ -492,19 +374,12 @@ export class Cinematics {
     if (!held) this.armed = true;
     if (held && this.armed && !this.skipped) {
       this.skipT += dtReal;
-      if (this.skipT > 0.2 && !this.holding) { this.holding = true; this.skipEl?.classList.add('on'); }
-      if (this.skipBar) this.skipBar.style.transform = `scaleX(${clamp(this.skipT / SKIP_HOLD, 0, 1).toFixed(3)})`;
-      if (this.skipT >= SKIP_HOLD) {
-        this.skipped = true;
-        this.hideCard(true);
-        this.clearText();
-        this.skipEl?.classList.remove('on');
-        this.holding = false;
-      }
+      this.holding = this.skipT > 0.2;
+      // no hint on screen: holding any input simply ends the moment, and the camera glides home
+      if (this.skipT >= SKIP_HOLD) { this.skipped = true; this.holding = false; }
     } else {
       this.skipT = Math.max(0, this.skipT - dtReal * 3);
-      if (this.holding && this.skipT <= 0) { this.holding = false; this.skipEl?.classList.remove('on'); }
-      if (this.skipBar) this.skipBar.style.transform = `scaleX(${clamp(this.skipT / SKIP_HOLD, 0, 1).toFixed(3)})`;
+      this.holding = false;
     }
   }
 }

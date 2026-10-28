@@ -195,6 +195,32 @@ Maelstrom API, which doc builds against with defensive fallbacks:
   - `.embryo`, the curled calf inside, which can twitch with `.kick()`;
   - `.dispose()`.
 
+### 0.8 Film quality, no text, shorter, seamless (newest; overrides 0.7's text and pacing)
+User: *"remove all the text and polish the game and graphics; it feels weird and too long and feels AI; make
+it more smooth, human-made, film quality, seamless"*.
+- **No text in the game at all.** No title cards, datelines, lower-thirds, narration, subtitles or skip hints.
+  The only text left is the floating title menu: the SKYSONG logo and New Game / Continue / Settings, plus the
+  settings pages. Its subtitle line goes too.
+- **Shorter: about 15 minutes in total.** Cinematics are rare, short and seamless: in-engine camera moves that
+  blend from and back to the play camera, with no hard cuts, no letterbox popping in and out, and no black
+  dips. Time skips are soft dissolves. Everything stays skippable by holding any input, with no text shown.
+- **Film quality, human-made, not "AI":**
+  - Post: much less oil-paint smear (the Kuwahara filter reads as a cheap filter); a natural filmic tone map
+    and grade without magenta casts; gentle halation, grain and vignette; crisp detail.
+  - Readable night and storm.
+  - Clouds that are soft masses, not balls.
+  - Whales: the calf reads as a soft baby whale, not a blue pom-pom; adult wings read as living membranes, not
+    flat white boards.
+  - Camera: steady, smooth framing on the calf, with adults never filling the frame or blocking it.
+
+Builders:
+
+| Role | Owns |
+|---|---|
+| seamless (story, camera, herd spacing) | src/game/Story.js, Cinematics.js, src/game/life/, Menu.js, CameraRig.js, Herd.js, HerdBehaviors.js, index.html |
+| film (grade, light, sky, clouds) | src/render/ (PostFX, painterly/, shaders/common.js, Globals, Engine look settings), src/world/Atmosphere.js, Sky.js, Clouds.js, Ocean.js shading |
+| whale look | src/creatures/whale/, Whale.js, WhaleAnimator.js, src/creatures/WhaleTypes.js, src/dev/whale.js, src/dev/fly.js |
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

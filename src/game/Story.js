@@ -451,6 +451,7 @@ export class Story {
     this.player.enabled = false;
     this.game.input.setGameplayMode(false);
     document.body.classList.remove('playing');
+    this.cine?.hideCard(true);
     this.menu.returnPage = 'pause';
     this.menu.dissolving = false;
     for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;

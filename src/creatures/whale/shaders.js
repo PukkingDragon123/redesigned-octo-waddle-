@@ -52,6 +52,55 @@ vec3 bumpN(vec3 N, vec3 P, float h, float k) {
 }
 `;
 
+// ---- painterly finish ---------------------------------------------------------------------
+// Layered over the world's light (stylizedLight, so fog, night and the sea still apply): the
+// terminator breaks into brush strokes that follow the body's flow, the light is blocked into
+// a few broad soft values, shade turns cool (sky hue) instead of grey, the lit side warm, the
+// turning edge gets a little extra chroma, and a thin hand-drawn ink line darkens the
+// silhouette and the creases. q: stroke-space coordinates, x along the flow.
+export const PAINT = /* glsl */ `
+float pLum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float brush(vec2 q) {
+  vec2 w = vec2(q.x * 0.16, q.y);
+  w.y += (vnoise(w * vec2(0.6, 0.25)) - 0.5) * 1.6;   // strokes wander along their length
+  float a = vnoise(w + vec2(0.0, 0.5 * vnoise(w * 0.3)));
+  float b = vnoise(w * vec2(1.7, 2.2) + 5.2);
+  return a * 0.62 + b * 0.38;
+}
+// col: lit colour (stylizedLight + specular); Ng: geometric normal (the ink follows the form, not
+// the bump); st: brush value 0..1; ink: crease ink 0..1; k: strength; lineK: silhouette ink.
+vec3 paintFinish(vec3 col, vec3 N, vec3 Ng, vec3 V, float shadow, float st, float ink, float k, float lineK) {
+  float day = 1.0 - uNight * 0.7;
+  float NdL = dot(N, uSunDir);
+  float l = smoothstep(-0.18, 0.5, NdL + (st - 0.5) * 0.5) * mix(0.25, 1.0, shadow);
+  // soft value blocking: three broad bands with soft edges
+  float f = l * 2.0;
+  float q = (floor(f) + smoothstep(0.3, 0.7, fract(f))) * 0.5;
+  col *= mix(1.0, (0.45 + 0.55 * q) / (0.45 + 0.55 * l), 0.75 * k);
+  // shade turns toward the sky's hue, light toward the sun's
+  vec3 sky = clamp(uSkyAmbient / max(pLum(uSkyAmbient), 1e-3), 0.0, 2.0);
+  vec3 cool = mix(vec3(1.0), sky * vec3(0.94, 0.95, 1.08), 0.4);
+  col *= mix(vec3(1.0), cool, (1.0 - l) * 0.5 * k * day);
+  col *= mix(vec3(1.0), vec3(1.08, 1.0, 0.88), l * 0.5 * k * day * smoothstep(-0.05, 0.3, uSunDir.y));
+  // painters push chroma where the form turns
+  float term = l * (1.0 - l) * 4.0;
+  float lum = pLum(col);
+  col = max(vec3(0.0), mix(vec3(lum), col, 1.0 + (0.2 * term - 0.06) * k));
+  col *= 1.0 + vec3(0.05, 0.0, -0.04) * term * k * day;
+  // broken colour: each stroke a touch lighter or darker, warmer or cooler
+  col *= 1.0 + (st - 0.5) * 0.32 * k;
+  col *= 1.0 + vec3(0.035, 0.0, -0.035) * (fract(st * 7.13) - 0.5) * 2.0 * k;
+  // hand-drawn ink: thin at the silhouette (about two pixels, wavering with the stroke), and the
+  // creases the caller marks; tinted dark indigo, never black
+  float nv = abs(dot(Ng, V));
+  float w = fwidth(nv) * 1.8 + 0.035;
+  float line = 1.0 - smoothstep(w * 0.5, w * 1.5, nv + (st - 0.5) * 0.05);
+  float inkA = clamp(line * lineK * 0.8 + ink, 0.0, 1.0) * k;
+  col = mix(col, col * vec3(0.26, 0.24, 0.34), inkA * 0.75);
+  return col;
+}
+`;
+
 // ---------------------------------------------------------------------------------------------
 // Body: skin, mouth, baleen, horns, plates, crest, dome bands, spikes
 export const BODY_VERT = /* glsl */ `
@@ -145,6 +194,7 @@ ${SHADOW}
 ${LIGHTING}
 ${SEA}
 ${WET}
+${PAINT}
 ${PLEATS}
 uniform vec4 uPleat;
 uniform sampler2D uSkinA;
@@ -185,8 +235,11 @@ void main() {
   #endif
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;
+  vec3 Ng = N;
   vec3 V = normalize(uCamPos - vWorldPos);
   float part = vPart;
+  float creaseInk = 0.0;
+  float paintK = 1.0;
   vec3 albedo = uBack;
   float rough = 0.42;
   float ao = 1.0;
@@ -257,6 +310,7 @@ void main() {
     }
     albedo = mix(albedo, vec3(0.03, 0.015, 0.02), holes);
     ao *= 1.0 - holes * 0.6;
+    creaseInk += holes * 0.5;
     // gape: the lip seam is a dark wet line
     rim = 0.45;
   } else if (part < 1.5 || part > 7.5) {
@@ -299,6 +353,7 @@ void main() {
     // fine dark cracks running along the fibres
     float crack = smoothstep(0.03, 0.0, abs(vnoise(vec2(around * 14.0, s * 3.0) + 7.0) - 0.5)) * smoothstep(0.1, 0.4, s);
     albedo *= 1.0 - crack * 0.5;
+    creaseInk += crack * 0.35 + ring * 0.12 * (1.0 - wear);
     float sdf = vP.z * uLen;
     float open = smoothstep(uLen * 0.0004, -uLen * 0.0008, sdf - uLen * 0.0016 * uVent);
     float lipRim = exp(-pow(sdf / (uLen * 0.0012), 2.0));
@@ -339,6 +394,7 @@ void main() {
     slate = mix(slate, slate * 1.3 + 0.05, edge * 0.5 * (0.5 + 0.5 * vnoise(q * 200.0)));
     slate *= 1.0 - crack * 0.65;
     albedo = slate;
+    creaseInk += crack * 0.45 + stepEdge * 0.12 + step(1.5, kind) * 0.3;
     ao *= (1.0 - crack * 0.5) * mix(1.0, 0.55, step(1.5, kind)) * mix(1.0, 0.8, step(0.5, kind));
     rough = 0.62 - stepEdge * 0.1;
     rim = 0.35;
@@ -400,13 +456,20 @@ void main() {
   Surface s = makeSurface(albedo, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
   s.ao = ao * mix(0.72, 1.0, smoothstep(-1.0, 0.3, N.y));
-  s.rim = rim * 0.5;
   s.spec = 0.0;
   s.trans = trans;
   s.wrap = wrap;
+  s.rim = rim * 0.9;
   vec3 col = stylizedLight(s);
-  col += wetSpecular(N, V, vWorldPos, rough, s.shadow, ao, f0) * mix(0.7, 1.0, wet);
+  // a soft painted sheen rather than a plastic coat: broad, gentle, brighter when wet
+  vec3 spec = wetSpecular(N, V, vWorldPos, max(rough, 0.3), s.shadow, ao, f0);
+  col += min(spec, vec3(1.5)) * mix(0.35, 0.8, wet);
   col += emis;
+  // brush strokes run along the body (t) and wrap around it, mirrored at the midlines
+  float sb = vLoft.y < 0.5 ? vLoft.y : 1.0 - vLoft.y;
+  float st = brush(vec2(vLoft.x * uLen, sb * uLen * 1.1) / (uLen * 0.017) + uSeed * 7.0);
+  creaseInk += smoothstep(0.78, 0.3, ao) * 0.45;
+  col = paintFinish(col, N, Ng, V, s.shadow, st, creaseInk, paintK, 1.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, 1.0);
 }
@@ -467,6 +530,7 @@ ${SHADOW}
 ${LIGHTING}
 ${SEA}
 ${WET}
+${PAINT}
 uniform vec3 uBack;
 uniform vec3 uBelly;
 uniform vec3 uMembrane;
@@ -514,6 +578,7 @@ void main() {
   #endif
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;
+  vec3 Ng = N;
   vec3 V = normalize(uCamPos - vWorldPos);
   float top = vFin.w;
   float arm = 1.0 - smoothstep(0.05, 0.3, mem);
@@ -547,21 +612,36 @@ void main() {
   float vein = smoothstep(0.06, 0.0, abs(veinN - 0.5)) * mem;
   memCol *= 1.0 - vein * 0.25;
   hgt += vein * 0.25;
+  // painted membrane: between the finger rays the skin thins, warmer and lighter toward the
+  // trailing edge, with soft streaks fanning out along the rays
+  float between = mem * (1.0 - ray);
+  float stM = brush(vec2(m.x, m.y * 2.0) / (uLen * 0.012) + uSeed * 5.0 + id * 11.0);
+  memCol = mix(memCol, memCol * vec3(1.18, 1.06, 1.02) + vec3(0.03, 0.016, 0.02), between * smoothstep(0.25, 1.0, uv.y) * (0.45 + 0.4 * stM));
+  memCol *= 0.9 + 0.2 * stM;
   vec3 albedo = mix(memCol, skin, max(arm, ray * 0.85));
+  float finInk = smoothstep(0.35, 0.9, ray) * mem * 0.3 + tub * 0.18 * (1.0 - tub) * 4.0 * 0.3;
+  // the trailing edge darkens into a soft drawn hem
+  finInk += smoothstep(0.9, 1.0, uv.y) * mem * 0.4;
   // healed scar tissue around the tears
   if (tear > -0.6) albedo = mix(albedo, uBack * 0.55 + vec3(0.1, 0.07, 0.07), smoothstep(-0.6, 0.0, tear) * 0.85);
   N = bumpN(N, vWorldPos, hgt * uLen * 0.0006, 1.0);
   float wet = clamp(uWet + uWetSelf + uUnderwater, 0.0, 1.0);
   Surface s = makeSurface(albedo, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
-  s.rim = 0.4;
+  s.rim = 0.6;
   s.spec = 0.0;
   // thin membrane glows warm when backlit; the arm and rays stay dark against the sun
-  s.trans = mix(0.42, 0.05, max(arm, ray * 0.75));
-  s.wrap = 0.26;
+  s.trans = mix(0.85, 0.06, max(arm, ray * 0.75));
+  s.wrap = 0.3;
   s.ao = mix(1.0, 0.85, arm);
   vec3 col = stylizedLight(s);
-  col += wetSpecular(N, V, vWorldPos, mix(mix(0.4, 0.5, mem), 0.25, wet), s.shadow, 1.0, 0.028);
+  // light through the membrane from the sky side (soft, even when not straight backlit)
+  float through = max(dot(-N, uSunDir), 0.0) * between;
+  col += albedo * uSunColor * vec3(1.0, 0.7, 0.62) * through * 0.35 * s.shadow;
+  vec3 spec = wetSpecular(N, V, vWorldPos, max(mix(mix(0.4, 0.5, mem), 0.25, wet), 0.32), s.shadow, 1.0, 0.028);
+  col += min(spec, vec3(1.5)) * mix(0.35, 0.8, wet);
+  float stF = brush(vec2(m.x, m.y * 1.5) / (uLen * 0.016) + uSeed * 3.0 + id * 7.0);
+  col = paintFinish(col, N, Ng, V, s.shadow, mix(stF, stM, 0.4), finInk, 1.0, 1.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, 1.0);
 }
@@ -742,10 +822,10 @@ vec3 hairLight(vec3 albedo, vec3 T, vec3 N, vec3 V, vec3 P, float shadow, float 
   vec3 T1 = normalize(T + N * 0.12);
   vec3 T2 = normalize(T - N * 0.18);
   float th1 = dot(T1, H), th2 = dot(T2, H);
-  float s1 = pow(sqrt(max(0.0, 1.0 - th1 * th1)), 90.0);
-  float s2 = pow(sqrt(max(0.0, 1.0 - th2 * th2)), 22.0);
+  float s1 = pow(sqrt(max(0.0, 1.0 - th1 * th1)), 40.0);
+  float s2 = pow(sqrt(max(0.0, 1.0 - th2 * th2)), 14.0);
   float nl = smoothstep(-0.1, 0.4, dot(N, L));
-  col += uSunColor * (s1 * 0.12 + s2 * 0.1 * albedo * 3.0) * nl * shadow * mix(0.6, 1.0, h);
+  col += uSunColor * (s1 * 0.05 + s2 * 0.12 * albedo * 3.0) * nl * shadow * mix(0.6, 1.0, h);
   return col;
 }
 `;
@@ -779,6 +859,7 @@ varying float vH;
 varying float vLen;
 varying vec3 vAlb;
 varying float vShadow;
+varying float vReg;
 void main() {
   float h = uShellH[gl_InstanceID];
   #include <skinbase_vertex>
@@ -806,7 +887,10 @@ void main() {
   vLen = aFur.x;
   vec3 alb = mix(uBelly, uBack, 0.5);
   if (uBaked > 0.5) { vec3 c = textureLod(uSkinA, aTex, 4.0).rgb; alb = c * c; }
+  // fin tufts take the fin's own upper colour (the baked skin is the body's)
+  if (aFur.y > 0.5) alb = uBack * 1.2 + 0.01;
   vAlb = alb;
+  vReg = aFur.y;
   vShadow = sampleShadow(wp.xyz, N);
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -817,6 +901,7 @@ ${UNIFORMS}
 ${NOISE}
 ${LIGHTING}
 ${HAIR}
+${PAINT}
 uniform float uFurDensity;
 uniform float uFurTip;
 uniform float uFurShade;
@@ -830,46 +915,65 @@ varying float vH;
 varying float vLen;
 varying vec3 vAlb;
 varying float vShadow;
+varying float vReg;
 void main() {
   if (vLen < 0.03) discard;
   float h = vH;
   vec2 fuv = vUv * uFurDensity;
-  // clumping: strands lean toward their tuft's centre as they grow
-  vec2 cuv = fuv * 0.22;
-  vec2 ci = floor(cuv);
-  vec2 cc = (ci + hash22(ci + 3.7) * 0.6 + 0.2) / 0.22;
-  fuv = mix(fuv, cc, h * h * 0.62);
-  // curl: the strand tips wander in small circles
-  float cph = hash12(floor(fuv) + 1.3) * 6.28;
-  fuv += vec2(cos(h * 9.0 + cph), sin(h * 9.0 + cph)) * uCurl * h * 0.35;
-  vec2 cell = floor(fuv);
-  vec2 f = fract(fuv);
-  float rnd = hash12(cell + uSeed);
-  vec2 c = hash22(cell + 7.0) * 0.6 + 0.2;
-  float d = length(f - c);
-  float clumpLen = 0.75 + 0.35 * vnoise(cuv * 1.7 + uSeed);
-  float strandLen = mix(0.5, 1.0, rnd) * clumpLen * smoothstep(0.02, 0.35, vLen);
-  if (h > strandLen) discard;
-  float hr = h / strandLen;
-  float radius = mix(0.62, 0.16, pow(hr, 1.25));
-  float cov = smoothstep(radius, radius * 0.4, d + (vnoise(f * 6.0 + cell) - 0.5) * 0.12);
+  // locks: each strand belongs to the nearest of a loose lattice of clumps; with height the
+  // strands gather toward their lock's axis, so every lock is a soft cone drawn to a point
+  vec2 cuv = fuv * 0.2;
+  vec2 base = floor(cuv - 0.5);
+  float bd = 9.0, crnd = 0.0;
+  vec2 cc = vec2(0.0);
+  for (int k = 0; k < 4; k++) {
+    vec2 ck = base + vec2(mod(float(k), 2.0), floor(float(k) * 0.5));
+    vec2 cp = ck + 0.15 + 0.7 * hash22(ck + 3.7);
+    float dd = length(cuv - cp);
+    if (dd < bd) { bd = dd; cc = cp; crnd = hash12(ck + 11.0 + uSeed); }
+  }
+  float lockLen = mix(0.62, 1.0, crnd) * smoothstep(0.02, 0.35, vLen);
+  if (h > lockLen) discard;
+  float hr = h / lockLen;
+  // curl: the lock's tip wanders in a small circle
+  float cph = crnd * 6.28;
+  vec2 tipOff = vec2(cos(hr * 5.0 + cph), sin(hr * 5.0 + cph)) * uCurl * hr * hr * 0.18;
+  // locks stream back with the comb (toward the tail on the body, the trailing edge on fins)
+  // and are drawn out along it into soft teardrops
+  float lean = vReg > 0.5 ? 1.0 : -1.0;
+  vec2 off = cuv - cc - tipOff - vec2(0.0, lean) * pow(hr, 1.4) * 0.55;
+  off.y *= 0.62;
+  float r0 = length(off);
+  // the lock's radius (clump units): full at the root, drawing to a point at the tip
+  float lockR = 0.72 * pow(max(0.0, 1.0 - hr), 0.7) + 0.04;
+  // fine strands break the lock's edge
+  vec2 sc = floor(fuv * 1.3);
+  float sr = hash12(sc + uSeed);
+  float edgeN = (sr - 0.5) * 0.22 + (vnoise(fuv * 2.1 + cph) - 0.5) * 0.12;
+  float cov = smoothstep(lockR, lockR * 0.72, r0 + edgeN * (0.4 + hr));
   // dense undercoat close to the skin hides it
-  cov = max(cov, smoothstep(0.32, 0.0, h) * smoothstep(0.03, 0.25, vLen));
-  if (cov < 0.3) discard;
+  cov = max(cov, smoothstep(0.3, 0.0, h) * smoothstep(0.03, 0.25, vLen));
+  if (cov < 0.18) discard;
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
     return;
   #endif
-  vec3 albedo = vAlb * mix(uFurShade, 1.0, smoothstep(0.0, 0.7, h));
-  // lighter, slightly warmer tips
-  albedo = mix(albedo, albedo * uFurTip + vec3(0.025, 0.02, 0.012), smoothstep(0.55, 1.0, hr));
-  albedo *= 0.88 + 0.24 * rnd;
   vec3 N = normalize(vNormal);
   vec3 V = normalize(uCamPos - vWorldPos);
   vec3 T = normalize(vComb);
+  // each lock is shaded as a rounded volume: its surface turns away from the lock's axis
+  float dome = sqrt(max(0.0, 1.0 - min(r0 / max(lockR, 1e-3), 1.0)));
+  vec2 od = r0 > 1e-4 ? off / r0 : vec2(0.0);
+  vec3 B = normalize(cross(N, T));
+  vec3 Nl = normalize(N * (0.7 + 0.5 * dome) + (B * od.x + T * od.y * 0.5) * (1.0 - dome) * 0.4);
+  vec3 albedo = vAlb * mix(uFurShade, 1.0, smoothstep(0.0, 0.75, h));
+  // lighter, warmer tips; each lock its own value
+  albedo = mix(albedo, albedo * uFurTip * 1.08 + vec3(0.03, 0.024, 0.014), smoothstep(0.5, 1.0, hr));
+  albedo *= 0.9 + 0.2 * crnd + (sr - 0.5) * 0.06;
   // depth: light reaches the inner coat poorly (self-shadowing of the fur)
-  float depthAO = mix(0.45, 1.0, smoothstep(0.0, 0.9, h));
-  vec3 col = hairLight(albedo, T, N, V, vWorldPos, vShadow * mix(0.6, 1.0, h), depthAO, h, 0.9 * hr);
+  float depthAO = mix(0.55, 1.0, smoothstep(0.0, 0.8, h)) * mix(0.9, 1.0, dome);
+  vec3 col = hairLight(albedo, T, Nl, V, vWorldPos, vShadow * mix(0.65, 1.0, h), depthAO, h, 0.9 * hr);
+  col = paintFinish(col, Nl, N, V, vShadow, crnd * 0.6 + sr * 0.15 + 0.12, 0.0, 0.7, 0.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
 }
@@ -957,6 +1061,7 @@ ${UNIFORMS}
 ${NOISE}
 ${LIGHTING}
 ${HAIR}
+${PAINT}
 uniform float uFurTip;
 uniform float uFurShade;
 varying vec3 vWorldPos;
@@ -970,7 +1075,7 @@ void main() {
   float a = vCard.y, x = vCard.x;
   // a lock is a loose bundle of strands: they gather at the root, splay and thin toward the tip,
   // each with its own length and wave; some are missing, so light passes between them
-  float N = 7.0 + floor(vSeed * 6.0);
+  float N = 4.0 + floor(vSeed * 3.0);
   float spread = mix(0.5, 1.0, sqrt(a));
   float xs = clamp(x / spread * 0.5 + 0.5, 0.0, 1.0);
   float fi = xs * N;
@@ -982,20 +1087,25 @@ void main() {
   float wdt = mix(0.48, 0.16, clamp(a / sLen, 0.0, 1.0));
   float cov = smoothstep(wdt, wdt * 0.35, d) * smoothstep(sLen, sLen - 0.08, a);
   cov *= step(0.18, hash12(vec2(sid * 1.7, vSeed * 13.0)));
-  cov = max(cov, smoothstep(0.22, 0.0, a) * 0.85);
-  cov *= smoothstep(1.0, 0.8, abs(x) / spread);
-  if (cov < 0.3) discard;
+  // the lock's body: one soft tapering tuft; only its tip splits into strands
+  float hw = 0.95 * pow(max(0.0, 1.0 - smoothstep(0.3, 0.95, a)), 0.8);
+  cov = max(cov, smoothstep(hw, hw * 0.7, abs(x)) * (0.75 + 0.25 * smoothstep(0.0, 0.2, a)));
+  cov *= smoothstep(1.0, 0.85, abs(x) / spread);
+  if (cov < 0.18) discard;
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
     return;
   #endif
   vec3 albedo = vAlb * mix(uFurShade, 1.0, smoothstep(0.0, 0.5, a));
   albedo = mix(albedo, albedo * uFurTip + vec3(0.03, 0.024, 0.015), smoothstep(0.45, 1.0, a));
-  albedo *= 0.85 + 0.3 * hs;
+  // rounded across the lock, each strand a touch apart
+  float rnd = sqrt(max(0.0, 1.0 - x * x));
+  albedo *= (0.78 + 0.3 * rnd) * (0.94 + 0.12 * hs) * (0.9 + 0.2 * vSeed);
   vec3 Nn = normalize(vNormal);
   if (!gl_FrontFacing) Nn = -Nn;
   vec3 V = normalize(uCamPos - vWorldPos);
-  vec3 col = hairLight(albedo, normalize(vTan), Nn, V, vWorldPos, vShadow, mix(0.6, 1.0, a), a, 1.1 * a);
+  vec3 col = hairLight(albedo, normalize(vTan), Nn, V, vWorldPos, vShadow, mix(0.6, 1.0, a) * mix(0.85, 1.0, rnd), a, 1.1 * a);
+  col = paintFinish(col, Nn, Nn, V, vShadow, vSeed * 0.5 + hs * 0.3 + 0.1, 0.0, 0.7, 0.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
 }

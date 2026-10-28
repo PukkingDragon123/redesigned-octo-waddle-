@@ -15,6 +15,7 @@ import { Backdrop } from './Backdrop.js';
 import { FloraSet, SurfaceIndex, populateIsland, populateRims, populateSeabed, variants } from './Flora.js';
 import { SPECIES, populateTrees } from './Trees.js';
 import { AlienFlora } from '../flora/AlienFlora.js';
+import { buildGrass, setGrassQuality } from './Grass.js';
 import { rng, lerp, clamp, smoothstep, TAU } from '../core/math.js';
 import { topSurface, thin } from './Spirals.js';
 import { terrainMaterial } from '../render/materials.js';
@@ -551,6 +552,14 @@ export class WorldBuilder {
       await slice();
     }
     this._finishSet(id, 'painted', g, PAINTED_NEAR);
+    const gp = this._grassPts?.[id];
+    if (gp && gp.length) {
+      const gm = buildGrass(gp);
+      g.add(gm);
+      const bs = gm.geometry.boundingSphere;
+      this.chapterSets.push({ group: gm, chapter: id, x: bs.center.x, z: bs.center.z, r: bs.radius, near: 230 });
+      this._grassPts[id] = null;
+    }
     this._finishSet(id, 'trees', g, TREES_NEAR);
     tm('reef', t0);
     const imp = this._imp?.[id];
@@ -610,6 +619,8 @@ export class WorldBuilder {
         rec.flora = fl.group;
       }
     }
+    // fluffy painted grass over the meadows (one instanced draw per chapter)
+    if (needsFlora && this.grass !== false) this._grassClumps(rec, S);
     // giant fiddleheads: tree-sized croziers that coil and uncoil, the alien stand-in for groves
     const AL = ALIEN[rec.chapter] || this.chapterOpts[rec.chapter]?.alien || ALIEN.valleys;
     if (needsGiants && AL.giant) this._giants(rec, S, AL.giant);
@@ -797,6 +808,23 @@ export class WorldBuilder {
           this.perches.push({ p: p.clone().add(new Vector3(0, 3.3 * sc, 0)), n: new Vector3(0, 1, 0), chapter: rec.chapter, tree: true });
         }
       }
+    }
+  }
+
+  /**
+   * Fluffy grass clumps over an island's meadows: about one painted clump per 2 m2 of meadow,
+   * thinned where the meadow thins (the clumps overlap into a continuous soft carpet).
+   */
+  _grassClumps(rec, S) {
+    const r = rng(rec.seed * 41 + 3);
+    const meadow = (ny, y, gr) => (gr > 0.35 && ny > 0.7 && y > 2.5 ? gr * gr : 0);
+    const A = S.weights(meadow);
+    const n = Math.min(9000, Math.round(A / 2.1 * (this.floraDensity ?? 1)));
+    if (!n) return;
+    const pts = ((this._grassPts ||= {})[rec.chapter] ||= []);
+    for (const sm of S.sample(n, r)) {
+      const sc = lerp(0.75, 1.35, Math.pow(r(), 1.5));
+      pts.push(sm.p.x + rec.pos.x, sm.p.y - 0.08, sm.p.z + rec.pos.z, sc, r(), r() < 0.22 ? 1 : 0);
     }
   }
 
@@ -1031,6 +1059,7 @@ export class WorldBuilder {
     this.floraDensity = lerp(0.45, 1, this.quality);
     this.lodDist = lerp(420, 650, this.quality);
     this.flora?.setQuality(Math.max(0.4, this.quality));
+    setGrassQuality(this.quality);
   }
 
   /** Height of the sea floor (reefs, lagoons, beaches above the water; -200 in the open sea). */

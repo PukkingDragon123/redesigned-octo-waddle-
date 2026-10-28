@@ -574,8 +574,10 @@ void main() {
   sf.ao = ao;
   sf.rim = rim;
   sf.trans = trans;
-  sf.spec = spec;
-  sf.gloss = gloss;
+  // painted look: broad, soft highlights on bodies and fins (eyes keep their sharp catchlight)
+  float eyeK = step(1.5, spec);
+  sf.spec = mix(spec * 0.6, spec, eyeK);
+  sf.gloss = mix(min(gloss, 0.72), gloss, eyeK);
   sf.wrap = wrap;
   sf.emissive = emis;
   vec3 col = stylizedLight(sf);

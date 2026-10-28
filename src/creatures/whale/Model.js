@@ -202,8 +202,9 @@ export class WhaleModel {
       uInertia: { value: new Vector3() },
       uAirflow: { value: new Vector3() },
       // fur (Birds.js reads uFurLen to perch on the back)
-      uFurLen: { value: (this.calf ? 0.03 : 0.016) * L * (g.furScale ?? 1) },
-      uFurDensity: { value: (this.calf ? 52 : 34) * (g.furDensityScale ?? 1) },
+      uFurLen: { value: (this.calf ? 0.036 : 0.017) * L * (g.furScale ?? 1) },
+      // strands per metre: coarse enough that each lock reads as a soft painted tuft
+      uFurDensity: { value: (this.calf ? 46 : 10 * Math.sqrt(22 / Math.max(L, 8))) * (g.furDensityScale ?? 1) },
       uFurShade: { value: g.furShade ?? 0.72 },
       uFurTip: { value: g.furTip ?? 1.12 },
       uBlowLoc: { value: new Vector4(P.blow.t, P.blow.len * 0.5, P.blow.gap, P.blow.splay) },

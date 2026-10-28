@@ -218,8 +218,6 @@ void main() {
     float mSp = mix(5.0, 9.0, hash11(floor(st / 9.0) * 2.7));
     float mx = (uF + (nM.r - 0.5) * 6.0 + (nm.b - 0.5) * 1.8 + (nm.g - 0.5) * 0.8) / mSp;
     float dM = min(fract(mx), 1.0 - fract(mx)) * mSp;                        // m to a master joint
-    // master joints die out here and there (they do not cut every bed)
-    dM = mix(dM, 9.0, step(0.78, hash11(floor(mx) * 3.1 + bandId * 0.71)));
     float blockM = floor(mx);
     // basalt columns (only where there is basalt)
     vec3 col = kind > 0.01 ? cells(P.xz * 0.62 + nm.rg * 0.35) : vec3(9.0, 0.5, 1.0);
@@ -346,12 +344,12 @@ void main() {
     N = bendN(N, gMeso, 0.9 * mesoF * (0.5 + 0.5 * steep) * rockVis);
     if (fineF > 0.01) {
       vec3 gMicro = triGrad(P, w, 1.0 / 0.8, vec4(0.0, 0.45, 0.55, 0.0));
-      N = bendN(N, gMicro, mix(0.09, 0.13, kind) * fineF * rockVis);
+      N = bendN(N, gMicro, mix(0.09, 0.13, kind) * fineF * rockVis * (1.0 - wet * 0.7));
     }
     if (microF > 0.01) {
       // grain: sand-sized relief on sedimentary rock, vesicles and rough crystals on basalt
       vec3 gGrain = triGrad(P, w, 1.0 / 0.22, vec4(0.0, 0.5, 0.5, 0.0));
-      N = bendN(N, gGrain, 0.025 * microF * rockVis * (1.0 - wet * 0.6));
+      N = bendN(N, gGrain, 0.025 * microF * rockVis * (1.0 - wet * 0.9));
     }
   }
 
@@ -464,7 +462,7 @@ void main() {
   s.trans = grassAmt * 0.22;
   float wetAll = max(wet * (1.0 - sandW), smoothstep(0.7, 0.1, P.y) * sandW);
   s.spec = wetAll * 0.55 * smoothstep(-0.5, 0.3, P.y) + algae * 0.25 * (1.0 - sandW);
-  s.gloss = 0.75;
+  s.gloss = 0.62;
   if (pool > 0.01) {
     // the pool mirrors the sky over a dark, weedy floor
     vec3 Vp = normalize(uCamPos - P);

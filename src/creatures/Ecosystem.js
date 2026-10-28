@@ -108,6 +108,8 @@ export class Ecosystem {
     };
     this._threatPrev = new Vector3();
     this._threatT = -1;
+    this._plDone = new Set(); // chapters whose world plankton blooms were added
+    this._plSeen = -1;
   }
 
   // ---- the sea ----------------------------------------------------------------------------
@@ -210,6 +212,9 @@ export class Ecosystem {
 
   /** A bloom of bioluminescent plankton (world spawns.plankton): it glows where stirred at night. */
   addPlankton(pos, radius = 200) {
+    // the same bloom added twice (by the game and by the automatic spawn sync) is kept once
+    const dup = this.plankton.patches.find((p) => p.pos.distanceToSquared(pos) < 1);
+    if (dup) { dup.radius = Math.max(dup.radius, radius); return dup; }
     return this.plankton.addPatch(pos, radius);
   }
 
@@ -325,6 +330,8 @@ export class Ecosystem {
     this.songFocus = null;
     this.threat = null;
     this._threatT = -1;
+    this._plDone.clear();
+    this._plSeen = -1;
   }
 
   /** Remove groups whose home is farther than `radius` from `center` (long migrations). */
@@ -404,7 +411,7 @@ export class Ecosystem {
       this._threatT = g.time;
     } else this._threatT = -1;
 
-    if (this.autoHooks) this._watchBooms();
+    if (this.autoHooks) { this._watchBooms(); this._syncPlankton(); }
 
     // predators this frame: mouths and shocks, then the whales' bodies
     const P = ctx.predators;
@@ -568,6 +575,22 @@ export class Ecosystem {
       if (sc.center.distanceToSquared(pos) < rr * rr) { near = true; break; }
     }
     if (near) this.eat(pos, r, dt, f);
+  }
+
+  /**
+   * Night plankton blooms (world.spawns.plankton) follow the chapters the story has populated with
+   * fish and reptiles, so the game needs no extra call (an explicit addPlankton is deduplicated).
+   */
+  _syncPlankton() {
+    const s = this.game.story;
+    const sp = s?.world?.spawns?.plankton, done = s?.spawned;
+    if (!sp || !sp.length || !done || done.size === this._plSeen) return;
+    this._plSeen = done.size;
+    for (const id of done) {
+      if (this._plDone.has(id)) continue;
+      this._plDone.add(id);
+      for (const k of sp) if (k.chapter === id && k.pos) this.addPlankton(k.pos, k.radius ?? 200);
+    }
   }
 
   _addTransient(q) {

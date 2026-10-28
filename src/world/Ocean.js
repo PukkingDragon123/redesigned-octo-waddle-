@@ -449,7 +449,7 @@ void main() {
     foamLit += uMoonColor * uNight * 0.5;
     vec3 foamCol = foamLit * mix(0.78, 0.95, bub2);
     col = mix(col, foamCol * (1.0 - f) + C * f, foamA);
-    dbg = vec4(cover, smoothstep(1.0 - cover, 1.25 - cover * 0.6, bubbles * 0.7 + lace * 0.45), min(cover * 3.0, 1.0), 0.0);
+    dbg = vec4(bubbles * 0.7 + lace * 0.45, 1.0 - cover, 0.0, 0.0);
 
     // night: plankton flare where the water is churned
     float glow = (simGlow * 1.2 + crestFoam * 0.25 + shore * 0.5 + simFoam * 0.3) * uWaterParams.z;

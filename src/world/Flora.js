@@ -175,8 +175,8 @@ export const FLORA_PAL = {
   tubes: { stem: C('#9a5a3e'), leaf: C('#c7774e'), acc: C('#f1d9b5') },
   tubesTeal: { stem: C('#2f6a6e'), leaf: C('#3b8e8a'), acc: C('#d4f2e4') },
   bells: { stem: C('#3f5a35'), leaf: C('#9a6fb8'), acc: C('#f6e4ff') },
-  fan: { stem: C('#7a6a8a'), leaf: C('#9ab8d6'), acc: C('#ffffff') },
-  fanCoral: { stem: C('#8a5a5a'), leaf: C('#e3a29a'), acc: C('#fff2e6') },
+  fan: { stem: C('#6a5f7a'), leaf: C('#7f9cb8'), acc: C('#d8e8f4') },
+  fanCoral: { stem: C('#7a5050'), leaf: C('#c98a84'), acc: C('#f0d8c8') },
   puff: { stem: C('#6b6a4a'), leaf: C('#d9cfa8'), acc: C('#f1b36a') },
   puffBlue: { stem: C('#4a5a6a'), leaf: C('#a9c4d9'), acc: C('#f7f2c4') },
   grass: { stem: C('#3f6633'), leaf: C('#6f9a46'), acc: C('#d4c46a') },
@@ -394,6 +394,24 @@ export const BIOMES = {
 const inst = (r, open = 1) => [r() * TAU, r() < 0.25 ? r() : 0, lerp(0.85, 1.1, r()), open];
 
 /**
+ * Every plant variant (geometry x palette) a set uses is one draw call, so a set keeps a seeded few
+ * of each plant's variants; the variety comes from island to island and reef to reef.
+ * pick(name, i) maps a full-range choice i onto the kept ones (the main random stream is unchanged).
+ */
+export function variants(seed, spec) {
+  const r = rng(seed * 7 + 3);
+  const kept = {};
+  for (const name in spec) {
+    const [options, keep] = spec[name];
+    const list = options.slice();
+    for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); const t = list[i]; list[i] = list[j]; list[j] = t; }
+    list.length = Math.max(1, Math.min(keep, list.length));
+    kept[name] = list;
+  }
+  return (name, i) => kept[name][i % kept[name].length];
+}
+
+/**
  * Populate an island's surface with flora. geo: the island's LOD0 geometry (local coordinates,
  * y = world height). Returns a FloraSet whose group is positioned at the island.
  */
@@ -403,6 +421,11 @@ export function populateIsland(geo, biome, seed, opts = {}) {
   const set = new FloraSet('flora-island');
   const S = opts.index || new SurfaceIndex(geo);
   const dens = opts.density ?? 1;
+  const V = variants(seed, {
+    fern: [[0, 1, 2, 3], 2], fernPal: [B.pal, 2], puff: [[0, 1, 2], 2], puffPal: [['puff', 'puffBlue'], 1], moss: [[0, 1, 2], 2],
+    tuftPal: [B.tuft, 1], tubes: [[0, 1, 2], 2], tubesPal: [['tubes', 'tubesTeal'], 1], bells: [[0, 1, 2], 2],
+    anem: [[0, 1, 2], 2], anemPal: [['anemone', 'anemoneTeal', 'anemoneViolet'], 1], fan: [[0, 1], 1], fanPal: [['fan', 'fanCoral'], 2],
+  });
   // meadow (gentle grassy surfaces above the spray)
   const meadow = (ny, y, gr) => (gr > 0.45 && ny > 0.72 && y > 4 ? gr : 0);
   const k = S.weights(meadow) / 1000 * dens;
@@ -413,25 +436,25 @@ export function populateIsland(geo, biome, seed, opts = {}) {
     const n = 1 + Math.floor(r() * 4);
     for (let i = 0; i < n; i++) {
       const sz = lerp(1.6, 5.5, Math.pow(r(), 1.5));
-      const v = Math.floor(r() * 4);
-      const pk = B.pal[Math.floor(r() * B.pal.length)];
+      const v = V('fern', Math.floor(r() * 4));
+      const pk = V('fernPal', Math.floor(r() * B.pal.length));
       const p = sm.p.clone().add(new Vector3((r() - 0.5) * 7, -0.15, (r() - 0.5) * 7));
       set.add(`fern-${v}-${pk}`, () => SPECIES.fiddlehead(1000 + v, 4, FLORA_PAL[pk]), p, sz / 4, r() * TAU, inst(r));
     }
   }
   for (const sm of S.sample(Math.round(B.puffs * k), r)) {
-    const v = Math.floor(r() * 3), pk = r() < 0.5 ? 'puff' : 'puffBlue';
+    const v = V('puff', Math.floor(r() * 3)), pk = V('puffPal', r() < 0.5 ? 0 : 1);
     set.add(`puffs-${v}-${pk}`, () => SPECIES.puffs(2000 + v, 2, FLORA_PAL[pk]), sm.p.clone().setY(sm.p.y - 0.1), lerp(0.6, 1.6, r()), r() * TAU, inst(r));
   }
   for (const sm of S.sample(Math.round(B.moss * k), r)) {
-    const v = Math.floor(r() * 3);
+    const v = V('moss', Math.floor(r() * 3));
     set.add(`moss-${v}`, () => SPECIES.moss(3000 + v, 2.4, FLORA_PAL.moss), sm.p.clone().setY(sm.p.y - 0.3), lerp(0.7, 1.8, r()), r() * TAU, inst(r));
   }
   // tufts: grass, tendrils, flowers, reeds
   for (const sm of S.sample(Math.round(B.tufts * k), r)) {
     const pick = r();
     const slot = pick < 0.45 ? SLOT.grassA : pick < 0.7 ? SLOT.grassB : pick < 0.85 ? SLOT.tendril : SLOT.reed;
-    const tk = B.tuft[Math.floor(r() * B.tuft.length)];
+    const tk = V('tuftPal', Math.floor(r() * B.tuft.length));
     set.add(`tuft-${slot}-${tk}`, () => SPECIES.tuft(4000 + slot, 1, FLORA_PAL[tk], slot), sm.p.clone().setY(sm.p.y - 0.05), lerp(0.7, 1.6, r()), r() * TAU, inst(r));
   }
   for (const sm of S.sample(Math.round(B.flowers * k), r)) {
@@ -440,12 +463,12 @@ export function populateIsland(geo, biome, seed, opts = {}) {
   // cliff dwellers: tube and bell clusters growing out of ledges and crevices
   const cArea = S.weights((ny, y) => (ny > 0.25 && ny < 0.75 && y > 6 ? 1 : 0)) / 1000 * dens;
   for (const sm of S.sample(Math.round(B.tubes * cArea), r)) {
-    const v = Math.floor(r() * 3), pk = r() < 0.6 ? 'tubes' : 'tubesTeal';
+    const v = V('tubes', Math.floor(r() * 3)), pk = V('tubesPal', r() < 0.6 ? 0 : 1);
     set.add(`tubes-${v}-${pk}`, () => SPECIES.tubes(5000 + v, 2.5, FLORA_PAL[pk]), sm.p.clone().addScaledVector(sm.n, -0.3), lerp(0.6, 1.5, r()), r() * TAU, inst(r), sm.n, 0.6);
   }
   S.weights((ny, y, gr) => (ny > 0.25 && ny < 0.75 && y > 6 ? 1 : 0) + meadow(ny, y, gr) * 0.5);
   for (const sm of S.sample(Math.round(B.bells * (cArea + k)), r)) {
-    const v = Math.floor(r() * 3);
+    const v = V('bells', Math.floor(r() * 3));
     set.add(`bells-${v}`, () => SPECIES.bells(6000 + v, 3, FLORA_PAL.bells), sm.p.clone().addScaledVector(sm.n, -0.2), lerp(0.8, 1.8, r()), r() * TAU, inst(r), sm.n, 0.4);
   }
   // shore: anemones and glass fans in the intertidal zone and on the drowned skirt (not where the
@@ -455,10 +478,10 @@ export function populateIsland(geo, biome, seed, opts = {}) {
   for (const sm of S.sample(Math.round(B.shore * sArea * 2.5), r)) {
     if (opts.seabedAt && o && opts.seabedAt(sm.p.x + o.x, sm.p.z + o.z) > sm.p.y - 0.25) continue;
     if (r() < 0.6) {
-      const v = Math.floor(r() * 3), pk = ['anemone', 'anemoneTeal', 'anemoneViolet'][Math.floor(r() * 3)];
+      const v = V('anem', Math.floor(r() * 3)), pk = V('anemPal', Math.floor(r() * 3));
       set.add(`anem-${v}-${pk}`, () => SPECIES.anemone(7000 + v, 1.5, FLORA_PAL[pk]), sm.p.clone().addScaledVector(sm.n, -0.1), lerp(0.5, 1.6, r()), r() * TAU, inst(r), sm.n, 0.5);
     } else {
-      const v = Math.floor(r() * 2), pk = r() < 0.5 ? 'fan' : 'fanCoral';
+      const v = V('fan', Math.floor(r() * 2)), pk = V('fanPal', r() < 0.5 ? 0 : 1);
       set.add(`fan-${v}-${pk}`, () => SPECIES.fan(8000 + v, 2, FLORA_PAL[pk]), sm.p.clone().addScaledVector(sm.n, -0.1), lerp(0.6, 1.8, r()), r() * TAU, inst(r), sm.n, 0.3);
     }
   }
@@ -471,14 +494,15 @@ export function populateIsland(geo, biome, seed, opts = {}) {
 export function populateRims(set, rims, biome, seed) {
   const r = rng(seed * 17 + 3);
   const B = BIOMES[biome] || BIOMES.reach;
+  const V = variants(seed + 11, { kelp: [[0, 1, 2], 2], kelpPal: [['kelp', 'kelpRed'], 1], vines: [[0, 1, 2], 2] });
   for (const q of rims) {
     if (q.y < 8) continue;
     const pick = r();
     if (pick < 0.08 * B.kelpRim) {
-      const v = Math.floor(r() * 3), pk = r() < 0.6 ? 'kelp' : 'kelpRed';
+      const v = V('kelp', Math.floor(r() * 3)), pk = V('kelpPal', r() < 0.6 ? 0 : 1);
       set.add(`kelp-${v}-${pk}`, () => SPECIES.kelp(9000 + v, 8, FLORA_PAL[pk]), new Vector3(q.x, q.y - 0.5, q.z), lerp(0.6, 1.5, r()), r() * TAU, inst(r));
     } else if (pick < 0.08 * B.kelpRim + 0.12) {
-      const v = Math.floor(r() * 3);
+      const v = V('vines', Math.floor(r() * 3));
       const len = lerp(6, Math.min(26, q.y * 0.6), r());
       set.add(`vines-${v}`, () => SPECIES.vines(9100 + v, 10, FLORA_PAL.vine), new Vector3(q.x + (q.ox || 0) * 0.6, q.y - 0.3, q.z + (q.oz || 0) * 0.6), len / 10, Math.atan2(-(q.oz || 0), q.ox || 1) + Math.PI / 2, inst(r));
     }
@@ -489,33 +513,38 @@ export function populateRims(set, rims, biome, seed) {
 export function populateSeabed(set, seabed, feature, biome, seed, count) {
   const r = rng(seed * 13 + 5);
   const B = BIOMES[biome] || BIOMES.reach;
+  const V = variants(seed, {
+    anem: [[0, 1, 2], 2], anemPal: [['anemone', 'anemoneTeal', 'anemoneViolet'], 2], fan: [[0, 1], 1], fanPal: [['fan', 'fanCoral'], 2],
+    kelp: [[0, 1, 2], 1], kelpPal: [['kelp', 'kelpRed'], 2], puff: [[0, 1, 2], 1], puffPal: [['puff', 'puffBlue'], 2], tuftPal: [B.tuft, 1],
+  });
   for (let i = 0; i < count; i++) {
     const a = r() * TAU, d = Math.sqrt(r()) * feature.R * 0.9;
     const x = feature.x + Math.cos(a) * d, z = feature.z + Math.sin(a) * d;
     const h = seabed.heightAt(x, z);
     const p = new Vector3(x, h - 0.1, z);
     // reef life clusters on the reef crest and the coral heads, not across open lagoon sand
-    if (h > -9 && h < -0.6 && (h > -3.2 || r() < 0.25)) {
+    if (h > -9 && h < -1.6 && (h > -4 || r() < 0.25)) {
       const pick = r();
       if (pick < 0.45) {
-        const v = Math.floor(r() * 3), pk = ['anemone', 'anemoneTeal', 'anemoneViolet'][Math.floor(r() * 3)];
-        set.add(`anem-${v}-${pk}`, () => SPECIES.anemone(7000 + v, 1.5, FLORA_PAL[pk]), p, lerp(0.7, 2.2, r()), r() * TAU, inst(r));
+        const v = V('anem', Math.floor(r() * 3)), pk = V('anemPal', Math.floor(r() * 3));
+        // reef plants stay under the surface (their tops would stand out of the water like sticks)
+        set.add(`anem-${v}-${pk}`, () => SPECIES.anemone(7000 + v, 1.5, FLORA_PAL[pk]), p, Math.min(lerp(0.7, 2.2, r()), (-h - 0.4) / 1.5), r() * TAU, inst(r));
       } else if (pick < 0.75) {
-        const v = Math.floor(r() * 2), pk = r() < 0.5 ? 'fan' : 'fanCoral';
-        set.add(`fan-${v}-${pk}`, () => SPECIES.fan(8000 + v, 2, FLORA_PAL[pk]), p, lerp(0.8, 2.4, r()), r() * TAU, inst(r));
+        const v = V('fan', Math.floor(r() * 2)), pk = V('fanPal', r() < 0.5 ? 0 : 1);
+        set.add(`fan-${v}-${pk}`, () => SPECIES.fan(8000 + v, 2, FLORA_PAL[pk]), p, Math.min(lerp(0.8, 2.4, r()), (-h - 0.4) / 2), r() * TAU, inst(r));
       } else {
-        const v = Math.floor(r() * 3), pk = r() < 0.6 ? 'kelp' : 'kelpRed';
-        set.add(`kelp-${v}-${pk}`, () => SPECIES.kelp(9000 + v, 8, FLORA_PAL[pk]), p, lerp(0.4, 1.1, Math.min(1, -h / 8)) * lerp(0.7, 1.2, r()), r() * TAU, inst(r));
+        const v = V('kelp', Math.floor(r() * 3)), pk = V('kelpPal', r() < 0.6 ? 0 : 1);
+        set.add(`kelp-${v}-${pk}`, () => SPECIES.kelp(9000 + v, 8, FLORA_PAL[pk]), p, Math.min(lerp(0.4, 1.1, Math.min(1, -h / 8)) * lerp(0.7, 1.2, r()), (-h - 0.3) / 8), r() * TAU, inst(r));
       }
     } else if (h > 0.9 && h < 3) {
       // beaches and motus: puffballs, tendrils, reeds
       const pick = r();
       if (pick < 0.3) {
-        const v = Math.floor(r() * 3), pk = r() < 0.5 ? 'puff' : 'puffBlue';
+        const v = V('puff', Math.floor(r() * 3)), pk = V('puffPal', r() < 0.5 ? 0 : 1);
         set.add(`puffs-${v}-${pk}`, () => SPECIES.puffs(2000 + v, 2, FLORA_PAL[pk]), p, lerp(0.6, 1.4, r()), r() * TAU, inst(r));
       } else {
         const slot = pick < 0.65 ? SLOT.tendril : SLOT.reed;
-        const tk = B.tuft[Math.floor(r() * B.tuft.length)];
+        const tk = V('tuftPal', Math.floor(r() * B.tuft.length));
         set.add(`tuft-${slot}-${tk}`, () => SPECIES.tuft(4000 + slot, 1, FLORA_PAL[tk], slot), p, lerp(0.8, 1.6, r()), r() * TAU, inst(r));
       }
     }

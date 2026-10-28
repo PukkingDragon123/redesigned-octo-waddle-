@@ -26,7 +26,7 @@ export default async function (game) {
   const t0 = performance.now();
   const world = new WorldBuilder(game, new MigrationPath(), { layout: false });
   world.sliceMs = 1e9;
-  if (p.has('noflora')) world.builtinFlora = false;
+  if (p.has('noflora')) world.builtinFlora = world.builtinTrees = false;
   const id = world.addChapter('dev', { biome: 'reach', trees: { kind: 'coil', max: 3, per: 3000 } });
   const at = (x, z) => ({ pos: new Vector3(x, 0, z), clear: false, avoid: false, near: true });
   // the hero coil, its horn and falls

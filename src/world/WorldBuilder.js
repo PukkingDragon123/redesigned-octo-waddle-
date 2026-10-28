@@ -6,13 +6,13 @@
 // spawns (cheap, no geometry), so collisions and seabedAt() work for the whole route at once.
 // buildChapter() then builds geometry chapter by chapter, time-sliced so the title menu stays
 // smooth while the world grows behind it.
-import { Group, Vector3 } from 'three';
+import { Group, Vector3, Matrix4 } from 'three';
 import { buildIsland, buildScree, stackShape, coilShape, ammoniteShape, peakShape } from './Islands.js';
 import { Seabed, DEEP } from './Seabed.js';
 import { buildWaterfall } from './Water.js';
 import { buildSpiralArch, causeway, basaltMesh } from './Landmarks.js';
 import { Backdrop } from './Backdrop.js';
-import { FloraSet, SurfaceIndex, populateIsland, populateRims, populateSeabed } from './Flora.js';
+import { FloraSet, SurfaceIndex, populateIsland, populateRims, populateSeabed, variants } from './Flora.js';
 import { SPECIES, populateTrees } from './Trees.js';
 import { rng, lerp, clamp, smoothstep, TAU } from '../core/math.js';
 import { topSurface } from './Spirals.js';
@@ -30,7 +30,6 @@ const TREES = {
 };
 const FLORA_NEAR = 520, TREES_NEAR = 1900;
 const _v = new Vector3(), _w = new Vector3();
-import { Matrix4 } from 'three';
 const _m4 = new Matrix4();
 
 export class WorldBuilder {
@@ -396,8 +395,9 @@ export class WorldBuilder {
       const Hin = 44;
       this.island(id, 'coil', { a: 30, b: 0.19, turns: 1.6, kw: 0.24, Hin, fall: 1.7, seed: 1001, steps: 10, horn: { R: 40, H: Hin + 8, cap: 'dome', topFrac: 0.92, twist: 0.25, lobes: 2, lobeAmp: 0.08, taperPow: 2.2, capH: 4, notch: 0.12 } }, 11150, -40, { pos: mt, clear: false, avoid: false, falls: 4, central: true });
       this.motherTree = new Vector3(mt.x, Hin + 8 + 3, mt.z);
-      this.capsules.push({ a: this.motherTree.clone(), b: this.motherTree.clone().add(new Vector3(0, 200, 0)), r: 26, chapter: id });
-      this.sphereColliders.push({ p: this.motherTree.clone().add(new Vector3(0, 230, 0)), r: 60, chapter: id, soft: true });
+      // trunk and crown (the crown spans ~100 m around the trunk, ~110-235 m up)
+      this.capsules.push({ a: this.motherTree.clone(), b: this.motherTree.clone().add(new Vector3(0, 110, 0)), r: 22, chapter: id });
+      this.sphereColliders.push({ p: this.motherTree.clone().add(new Vector3(0, 118, 0)), r: 78, chapter: id, soft: true });
       // lagoon stacks and islets
       for (let k = 0; k < 9; k++) {
         const a = (k / 9) * TAU + r() * 0.4;
@@ -440,6 +440,8 @@ export class WorldBuilder {
     for (const c of arch.colliders) this.sphereColliders.push({ p: c.p, r: c.r, chapter: id });
     for (const ft of arch.feet) {
       this.islands.push({ chapter: id, kind: 'stack', shape: ft.shape, pos: new Vector3(ft.pos.x, 0, ft.pos.z), R: ft.shape.R, H: ft.shape.H, style: {}, mesh: null, far: null, landmark: true });
+      // the feet stand on their own reef shelves (registered before this chapter's seabed is built)
+      this.plan[id].features.push(this.seabed.addShelf(ft.pos.x, ft.pos.z, ft.shape.footprint, { R: ft.shape.R, seed: 77, beach: 0.5, shelf: 40, chapter: id }));
     }
     for (let i = 0; i < arch.tops.length; i += 4) this.perches.push({ p: arch.tops[i].p.clone(), n: new Vector3(0, 1, 0), chapter: id });
     if (!at) {
@@ -489,12 +491,12 @@ export class WorldBuilder {
     for (const m of meshes) g.add(m);
     tm('seabed', t0);
     t0 = performance.now();
-    // reef and beach flora, palms on the motus
-    for (const f of this.builtinFlora === false ? [] : plan.features) {
+    // reef and beach flora, palms on the motus (builtinFlora / builtinTrees = false hand them over)
+    for (const f of plan.features) {
       const set = new FloraSet('flora-reef');
       const n = Math.round(clamp((f.R * f.R) / 300, 40, f.kind === 'atoll' ? 1400 : 600) * (this.floraDensity ?? 1));
-      populateSeabed(set, this.seabed, f, BIOME[id], Math.round(f.x * 0.37 + f.z), n);
-      if (f.kind === 'atoll' || f.kind === 'shelf') this._motus(set, f, id);
+      if (this.builtinFlora !== false) populateSeabed(set, this.seabed, f, BIOME[id], Math.round(f.x * 0.37 + f.z), n);
+      if (this.builtinTrees !== false && (f.kind === 'atoll' || f.kind === 'shelf')) this._motus(set, f, id);
       if (!set.count) continue;
       set.build(this.game.engine.shadows);
       set.group.userData.center = new Vector3(f.x, 0, f.z);
@@ -532,7 +534,7 @@ export class WorldBuilder {
     prof.rock = (prof.rock || 0) + performance.now() - t0;
     t0 = performance.now();
     const needsFlora = rec.routeDist < FLORA_NEAR + 150 && this.builtinFlora !== false;
-    const needsTrees = rec.routeDist < TREES_NEAR && this.builtinFlora !== false;
+    const needsTrees = rec.routeDist < TREES_NEAR && this.builtinTrees !== false;
     const S = needsFlora || needsTrees ? new SurfaceIndex(isl.geo0) : null;
     if (needsFlora) {
       const fl = populateIsland(isl.geo0, biome, rec.seed, { index: S, density: this.floraDensity ?? 1, origin: rec.pos, seabedAt: (x, z) => this.seabed.heightAt(x, z) });
@@ -685,6 +687,8 @@ export class WorldBuilder {
   /** Palms (and in the Oasis blossom trees) on beaches and motus above the water. */
   _motus(set, f, id) {
     const r = rng(Math.round(f.x * 0.13 + f.z * 0.71));
+    // each variant is a draw call: a reef keeps two palm shapes, one cycad and two blossom trees
+    const V = variants(Math.round(f.x * 0.29 - f.z * 0.17), { palm: [[0, 1, 2, 3], 2], cycad: [[0, 1, 2], 1], blossom: [[0, 1, 2], 2] });
     const want = f.kind === 'atoll' ? 60 : 4;
     let placed = 0;
     for (let i = 0; i < want * 12 && placed < want; i++) {
@@ -694,9 +698,10 @@ export class WorldBuilder {
       if (h < 1.1 || h > 3.2) continue;
       const p = new Vector3(x, h - 0.2, z);
       const v = Math.floor(r() * 4);
-      if (id === 'oasis' && r() < 0.25) set.add(`blossom-${v % 3}`, () => SPECIES.blossomTree(9600 + (v % 3), 18), p, lerp(0.6, 1.0, r()), r() * TAU, [r() * 6, 0, 1, 1]);
-      else if (r() < 0.3) set.add(`cycad-${v % 3}`, () => SPECIES.cycad(9850 + (v % 3), 5), p, lerp(0.7, 1.3, r()), r() * TAU, [r() * 6, 0, 1, 1]);
-      else set.add(`palm-${v}`, () => SPECIES.palm(9800 + v, 14), p, lerp(0.7, 1.25, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      const bv = V('blossom', v % 3), cv = V('cycad', v % 3), pv = V('palm', v);
+      if (id === 'oasis' && r() < 0.25) set.add(`blossom-${bv}`, () => SPECIES.blossomTree(9600 + bv, 18), p, lerp(0.6, 1.0, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      else if (r() < 0.3) set.add(`cycad-${cv}`, () => SPECIES.cycad(9850 + cv, 5), p, lerp(0.7, 1.3, r()), r() * TAU, [r() * 6, 0, 1, 1]);
+      else set.add(`palm-${pv}`, () => SPECIES.palm(9800 + pv, 14), p, lerp(0.7, 1.25, r()), r() * TAU, [r() * 6, 0, 1, 1]);
       placed++;
     }
   }
@@ -714,6 +719,27 @@ export class WorldBuilder {
     set.build(this.game.engine.shadows);
     this.group('oasis').add(set.group);
     this.motherTreeMesh = set.group;
+    // coilwings roost on the crown: its highest point in each of twelve sectors
+    const tops = new Array(12).fill(null);
+    set.group.updateMatrixWorld(true);
+    set.group.traverse((o) => {
+      if (!o.isMesh) return;
+      const pos = o.geometry.attributes.position;
+      const n = o.isInstancedMesh ? o.count : 1;
+      for (let k = 0; k < n; k++) {
+        if (o.isInstancedMesh) o.getMatrixAt(k, _m4).premultiply(o.matrixWorld);
+        else _m4.copy(o.matrixWorld);
+        for (let i = 0; i < pos.count; i += 2) {
+          _v.fromBufferAttribute(pos, i).applyMatrix4(_m4);
+          const dx = _v.x - this.motherTree.x, dz = _v.z - this.motherTree.z;
+          const r = Math.hypot(dx, dz);
+          if (r < 20 || r > 95 || _v.y < this.motherTree.y + 90) continue;
+          const sec = Math.floor(((Math.atan2(dz, dx) / TAU) + 1) * 12) % 12;
+          if (!tops[sec] || _v.y > tops[sec].y) tops[sec] = _v.clone();
+        }
+      }
+    });
+    for (const p of tops) if (p) this.perches.push({ p: p.add(new Vector3(0, 0.5, 0)), n: new Vector3(0, 1, 0), chapter: 'oasis', tree: true });
   }
 
   // ---- runtime ----------------------------------------------------------------------------------
@@ -804,6 +830,7 @@ export class WorldBuilder {
    * Returns { y, normal: Vector3, island: rec | null }. Island grids are built on first use.
    */
   groundAt(x, z, out = { y: 0, normal: new Vector3(0, 1, 0), island: null }) {
+    if (out.normal === undefined) out.normal = new Vector3(0, 1, 0);
     let best = -1e9, bestRec = null;
     const smp = this._gs ||= { y: 0, nx: 0, ny: 1, nz: 0 };
     for (const rec of this.islands) {
@@ -826,11 +853,17 @@ export class WorldBuilder {
     return out;
   }
 
+  /** Builds now (instead of on first use, 1-20 ms each) the height grids groundAt() reads for a chapter. */
+  prepareGround(id) {
+    for (const rec of this.islands) if (rec.chapter === id && rec.geo && !rec.ground) rec.ground = topSurface(rec.geo, rec.R > 120 ? 1.5 : 1);
+  }
+
   /**
    * Flora patches for an external plant system (e.g. AlienFlora.addPatch): per island a meadow /
    * cliff / shore patch over its rock, and a reef patch over every shelf or atoll. Each sample(x, z)
    * returns { y, normal, slope, wet, tidal } or null. Set world.builtinFlora = false before building
-   * to leave the planting to that system.
+   * to leave the small plants (island and reef flora) to that system; the trees stay unless
+   * world.builtinTrees = false too.
    */
   floraPatches(id) {
     const out = [];
@@ -914,11 +947,11 @@ export class WorldBuilder {
 
   /** Distance along a segment to the first solid (camera collision), or null. */
   raycast(from, to) {
-    const dir = new Vector3().subVectors(to, from);
+    const dir = (this._rcDir ||= new Vector3()).subVectors(to, from);
     const len = dir.length();
     dir.normalize();
     let t = 0;
-    const p = new Vector3();
+    const p = (this._rcP ||= new Vector3());
     for (let i = 0; i < 28 && t < len; i++) {
       p.copy(from).addScaledVector(dir, t);
       const d = this.distance(p, 60);
@@ -938,7 +971,11 @@ export class WorldBuilder {
       const d = Math.hypot(dx, dz, dy);
       if (d < bd) { bd = d; best = w; }
     }
-    return best ? { wf: best, dist: bd } : null;
+    if (!best) return null;
+    const res = (this._nwf ||= { wf: null, dist: 0 });
+    res.wf = best;
+    res.dist = bd;
+    return res;
   }
 }
 
@@ -950,7 +987,7 @@ function formingHeat(rec) {
     let best = 1e9, bphi = 0;
     sh.spiral.arms(P.x, P.z, (phi, d) => { if (d < best) { best = d; bphi = phi; } });
     const t = sh.tAt(bphi);
-    return smoothstep(0.6, 0.95, t) * smoothstep(7, 0.5, P.y);
+    return smoothstep(0.45, 0.9, t) * smoothstep(14, 0.5, P.y);
   };
 }
 

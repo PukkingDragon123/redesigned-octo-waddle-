@@ -186,6 +186,12 @@ void main() {
   float alpha = 1.0;
   if (part > 0.5 && part < 2.5) {
     tex = texture2D(uAtlas, vUV);
+    // mipmapped alpha thins out with distance (thin fronds vanish, leaving bare stems): restore the
+    // coverage in proportion to the mip level being sampled
+    vec2 tuv = vUV * 2048.0;
+    vec2 tdx = dFdx(tuv), tdy = dFdy(tuv);
+    float mip = max(0.0, 0.5 * log2(max(dot(tdx, tdx), dot(tdy, tdy)) + 1e-8));
+    tex.a = min(1.0, tex.a * (1.0 + mip * 0.28));
     #ifdef DEPTH_PASS
       if (tex.a < 0.45) discard;
       gl_FragColor = vec4(1.0);

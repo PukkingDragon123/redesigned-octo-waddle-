@@ -14,7 +14,7 @@
 import { Color, Vector3 } from 'three';
 import { rng, lerp, clamp, TAU } from '../core/math.js';
 import { SLOT } from './Painted.js';
-import { FloraGeo, FloraSet, SPECIES, FLORA_PAL } from './Flora.js';
+import { FloraGeo, FloraSet, SPECIES, FLORA_PAL, variants } from './Flora.js';
 import { thin } from './Spirals.js';
 
 const C = (h) => new Color(h);
@@ -208,25 +208,35 @@ SPECIES.motherTree = (seed = 5, H = 210) => {
   const bark = C('#5d4c44').multiplyScalar(0.8), bark2 = C('#8a7766').multiplyScalar(0.8), moss = C('#58703f').multiplyScalar(0.75);
   const trunk = { base: [0, -4, 0], L: H * 0.6, az: 0.4, tilt: 0.04, curl: 0.05, kind: 0 };
   twistedTrunk(g, trunk, { strands: 7, turns: 1.6, segs: 24, sides: 9, r: (s) => H * lerp(0.13, 0.06, Math.pow(s, 0.7)), col: bark, col2: bark2, acc: moss });
-  // buttress roots spiralling out over the island
+  // buttress roots arching out of the trunk and down over the island's dome (banyan-like)
   for (let k = 0; k < 11; k++) {
     const az = (k / 11) * TAU + r() * 0.3;
-    const ch = { base: [Math.cos(az) * H * 0.05, H * 0.05, Math.sin(az) * H * 0.05], L: H * lerp(0.28, 0.45, r()), az: az + 0.5, tilt: lerp(1.55, 1.85, r()), curl: lerp(-0.35, -0.15, r()), kind: 0 };
-    g.tube(ch, { segs: 10, sides: 7, flex: 0, r: (s) => H * lerp(0.05, 0.008, Math.pow(s, 0.8)), col: bark, acc: moss });
+    const long = k % 3 === 0;
+    const ch = { base: [Math.cos(az) * H * 0.045, H * 0.035, Math.sin(az) * H * 0.045], L: H * (long ? lerp(0.27, 0.32, r()) : lerp(0.19, 0.25, r())), az: az + 0.35, tilt: lerp(1.38, 1.5, r()), curl: long ? lerp(1.0, 1.15, r()) : lerp(1.2, 1.4, r()), kind: 0 };
+    g.tube(ch, { segs: 12, sides: 7, flex: 0, r: (s) => H * lerp(0.045, 0.007, Math.pow(s, 0.7)), col: bark, acc: moss });
   }
-  // great limbs spiralling up, canopy of blossom and leaf clumps, hanging vines
+  // great limbs spiralling up; each forks into twigs that end in blossom and leaf clumps; vines
+  const mcols = [C('#e8b4c2').multiplyScalar(0.8), C('#f0c9b0').multiplyScalar(0.8), C('#5f8f4a').multiplyScalar(0.75), C('#e3a6bd').multiplyScalar(0.78)];
+  const foliage = (at, rad, n, size) => pad(g, at, rad, n, { r, size, slot: [SLOT.blossom, SLOT.blossom, SLOT.leafA, SLOT.leafC], col: mcols, acc: C('#fff3e8'), flat: 0.5, flex: 0.22 });
   const nB = 16;
   for (let k = 0; k < nB; k++) {
     const st = lerp(0.42, 1.0, k / (nB - 1));
     const [bx, by, bz] = chainPoint(trunk, st);
     const az = k * 2.39996;
-    const ch = { base: [bx, by, bz], L: H * lerp(0.32, 0.5, r()) * (1.2 - st * 0.5), az, tilt: lerp(1.0, 1.4, r()), curl: lerp(-0.8, -0.35, r()), kind: 0 };
-    g.tube(ch, { segs: 10, sides: 7, flex: 0.04, r: (s) => H * lerp(0.03, 0.006, s), col: bark, acc: moss });
-    const mcols = [C('#e8b4c2').multiplyScalar(0.8), C('#f0c9b0').multiplyScalar(0.8), C('#5f8f4a').multiplyScalar(0.75), C('#e3a6bd').multiplyScalar(0.78)];
-    for (const st2 of [0.55, 1.0]) {
-      const [ex, ey, ez] = chainPoint(ch, st2);
-      pad(g, [ex, ey + H * 0.02, ez], H * (st2 > 0.9 ? 0.13 : 0.08), st2 > 0.9 ? 12 : 6, { r, size: H * (st2 > 0.9 ? 0.1 : 0.08), slot: [SLOT.blossom, SLOT.blossom, SLOT.leafA, SLOT.leafC], col: mcols, acc: C('#fff3e8'), flat: 0.45, flex: 0.22 });
+    const ch = { base: [bx, by, bz], L: H * lerp(0.3, 0.44, r()) * (1.2 - st * 0.5), az, tilt: lerp(1.0, 1.35, r()), curl: lerp(-0.7, -0.3, r()), kind: 0 };
+    g.tube(ch, { segs: 10, sides: 7, flex: 0.04, r: (s) => H * lerp(0.03, 0.009, s), col: bark, acc: moss });
+    // two twigs fork from the outer limb, so the crown has no bare spikes
+    const [fx, fy, fz, fa] = chainPoint(ch, 0.62);
+    for (const side of [-1, 1]) {
+      const tw = { base: [fx, fy, fz], L: ch.L * lerp(0.4, 0.55, r()), az: az + side * lerp(0.5, 0.8, r()), tilt: clamp(fa + lerp(-0.35, 0.05, r()), 0.5, 1.6), curl: lerp(-0.6, -0.2, r()), kind: 0 };
+      g.tube(tw, { segs: 6, sides: 5, flex: 0.06, r: (s) => H * lerp(0.012, 0.004, s), col: bark, acc: moss });
+      const [tx, ty, tz] = chainPoint(tw, 1);
+      foliage([tx, ty + H * 0.015, tz], H * 0.09, 8, H * 0.085);
     }
+    const [ex, ey, ez] = chainPoint(ch, 1);
+    foliage([ex, ey + H * 0.02, ez], H * 0.13, 12, H * 0.1);
+    const [mx, my, mz] = chainPoint(ch, 0.5);
+    foliage([mx, my + H * 0.02, mz], H * 0.07, 5, H * 0.075);
     for (let q = 0; q < 3; q++) {
       const [vx, vy, vz] = chainPoint(ch, lerp(0.3, 0.9, r()));
       const vch = { base: [vx, vy, vz], L: H * lerp(0.08, 0.2, r()), az: az + Math.PI / 2, tilt: Math.PI - 0.05, curl: 0, kind: 8 };
@@ -309,10 +319,12 @@ export function populateTrees(S, kind, seed, opts = {}) {
   if (nG > 0) {
     const gs = thin(S.sample(nG * 4, r), 26, grid).slice(0, nG);
     const pals = [FLORA_PAL.fern, FLORA_PAL.fernTeal, FLORA_PAL.fernRose];
+    // each variant is a draw call: an island's groves share two shapes and one palette
+    const V = variants(seed + 5, { v: [[0, 1, 2], 2], pk: [[0, 1, 2], 1] });
     for (const sm of gs) {
       const n = 3 + Math.floor(r() * 4);
       for (let i = 0; i < n; i++) {
-        const v = Math.floor(r() * 3), pk = Math.floor(r() * 3);
+        const v = V('v', Math.floor(r() * 3)), pk = V('pk', Math.floor(r() * 3));
         const p = sm.p.clone().add(new Vector3((r() - 0.5) * 10, -0.3, (r() - 0.5) * 10));
         set.add(`grove-${v}-${pk}`, () => Object.assign(SPECIES.fiddlehead(1200 + v, 4, pals[pk]), { fade: [1200, 1700], shadow: true }), p, lerp(1.8, 4.2, Math.pow(r(), 1.3)), r() * TAU, inst(r));
       }

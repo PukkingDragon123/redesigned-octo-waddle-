@@ -62,10 +62,17 @@ export class Seabed {
     const W = o.shelf ?? 70;
     const seed = o.seed ?? 1;
     const beachAmt = o.beach ?? 0.5;
+    // the reef line wanders: offset curves of a polygonal footprint would run in straight lines
+    const reach = (lx, lz) => {
+      const d = footprint(lx, lz);
+      if (d <= 0) return d;
+      const n = noise.noise2(lx * 0.013 + seed * 3.1, lz * 0.013 - seed) * 0.75 + noise.noise2(lx * 0.037 - seed, lz * 0.037 + seed * 1.7) * 0.25;
+      return Math.max(0, d + n * W * 0.28 * smoothstep(0, W * 0.5, d));
+    };
     const f = {
-      x, z, R: (o.R ?? 100) + W + (o.drop ?? 70) + 20, kind: 'shelf', chapter: o.chapter, volcanic: !!o.volcanic,
+      x, z, R: (o.R ?? 100) + W * 1.35 + (o.drop ?? 70) + 20, kind: 'shelf', chapter: o.chapter, volcanic: !!o.volcanic,
       height: (lx, lz) => {
-        const d = footprint(lx, lz);
+        const d = reach(lx, lz);
         if (d < 0) return Math.min(o.beachTop ?? 1.3, 0.5 - d * 0.3); // under the rock: rises into it
         const a = Math.atan2(lz, lx);
         const bn = noise.noise2(Math.cos(a) * 1.3 + seed, Math.sin(a) * 1.3 - seed);
@@ -76,7 +83,7 @@ export class Seabed {
         return h;
       },
       paint: (lx, lz, h, out) => {
-        const d = footprint(lx, lz);
+        const d = reach(lx, lz);
         const a = Math.atan2(lz, lx);
         const bn = noise.noise2(Math.cos(a) * 1.3 + seed, Math.sin(a) * 1.3 - seed);
         const beach = smoothstep(0.55 - beachAmt, 0.85 - beachAmt * 0.6, bn * 0.5 + 0.5);
@@ -133,7 +140,8 @@ export class Seabed {
           floor = lagoon + noise.noise2(lx * 0.012 + seed, lz * 0.012) * 2.0;
           // patch reefs and coral heads rising toward the surface
           const pr = noise.noise2(lx * 0.028, lz * 0.028 + seed) * 0.7 + noise.noise2(lx * 0.07 + seed, lz * 0.07) * 0.3;
-          floor += smoothstep(0.42, 0.85, pr) * 4.5;
+          // coral heads, but the middle of the lagoon stays open sand (whales rest there)
+          floor += smoothstep(0.42, 0.85, pr) * 4.5 * smoothstep(sp.a * 0.35, sp.a * 0.6, rho);
         } else {
           floor = lerp(-4, DEEP, Math.pow(smoothstep(w * 0.4, w * 3.0, d), 0.7));
         }
@@ -155,11 +163,15 @@ export class Seabed {
   addShoal(x, z, R, depth = -9, o = {}) {
     const seed = o.seed ?? 7;
     const f = {
-      x, z, R: R * 1.6, kind: 'shoal', chapter: o.chapter,
+      x, z, R: R * 2.1, kind: 'shoal', chapter: o.chapter,
       height: (lx, lz) => {
-        const q = Math.hypot(lx, lz) / R;
         const n = noise.noise2(lx * 0.01 + seed, lz * 0.01);
-        return lerp(depth + n * 3, DEEP, smoothstep(0.5, 1.5, q + n * 0.2));
+        const q = Math.hypot(lx, lz) / R + n * 0.2;
+        // a sandy slope first (a sandbar's shore stays smooth on the 4 m mesh), then the drop
+        const top = depth + n * 3;
+        const h = lerp(top, Math.min(top, -6), smoothstep(0.45, 0.9, q));
+        const q0 = lerp(0.5, 0.88, smoothstep(-6, 0, top));
+        return lerp(h, DEEP, Math.pow(smoothstep(q0, q0 + 1, q), 0.85));
       },
       paint: (lx, lz, h, out) => paintLow(out, h, 0, 0, false, lx + x, lz + z),
     };

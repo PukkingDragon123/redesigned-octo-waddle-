@@ -319,10 +319,10 @@ void main() {
     float lw = max(0.07, fw * 1.2);
     float fis = (1.0 - smoothstep(0.0, lw, lc2.x)) * (0.07 / lw) * heat;
     float pulse = 0.75 + 0.25 * sin(uTime * 0.7 + lc2.y * 6.28);
-    float foot = smoothstep(9.0, 0.5, P.y);
+    float foot = smoothstep(14.0, 0.5, P.y);
     float hot = fis * pulse * foot;
     // a dull underglow where the young rock meets the water
-    float under = heat * foot * smoothstep(3.0, 0.0, P.y) * 0.18;
+    float under = heat * foot * smoothstep(4.0, 0.0, P.y) * 0.25;
     s.emissive += uLava * (hot + under) * (1.4 + 2.0 * uNight);
     s.albedo *= 1.0 - fis * 0.5;
   }

@@ -285,9 +285,10 @@ export default async function (game) {
       fov = 62;
     } else if (shot === 'spiral') {
       const c = column.center;
-      look = new Vector3(c.x, column.surf - column.R * 1.1, c.z);
-      pos = orbit(look, dist ?? column.R * 3.4, -1, new Vector3(0.8, 0, 0.6).normalize());
-      fov = 58;
+      // inside the visibility of the water: close, wide, looking up the twisting column
+      look = new Vector3(c.x, column.surf - 1.5 - column.R * 1.0, c.z);
+      pos = orbit(look, dist ?? Math.min(16, column.R * 1.6), -3, new Vector3(0.8, 0, 0.6).normalize());
+      fov = 70;
     } else if (shot === 'spiralUp') {
       // at the waterline beside the column, watching the leaps
       const c = column.center;

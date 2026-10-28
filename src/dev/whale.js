@@ -8,8 +8,13 @@
 //   &lod=0|1|2    force a level of detail                             &shells=N fur shells
 //   &yaw=<deg>    turn the subject       &cam=x,y,z&look=x,y,z (relative to the subject)   &fov=<deg>
 //   &orbit=<deg/s> orbit the camera      &dist=<k> scale the view distance
+//   &anim         drive the models with WhaleAnimator (hovering in place)
+//   &gesture=<name>&gt=<0..1>  hold a gesture at that phase (with &anim)   &flap=<0..1> hold a wingbeat phase
+//   &effort=<0..1> wingbeat effort   &bumpdir=x,y,z  a bump every 3 s
 import { Vector3, Euler } from 'three';
 import { WhaleModel, BAKE } from '../creatures/whale/Model.js';
+import { WhaleAnimator, GESTURES } from '../creatures/WhaleAnimator.js';
+import { Quaternion } from 'three';
 import { CALF, MOTHER, ELDER, ADULTS, CALVES } from '../creatures/WhaleTypes.js';
 import { G } from '../render/Globals.js';
 
@@ -54,18 +59,14 @@ export default async function (game) {
   let subject;
   const yaw = ((+p.get('yaw') || 0) * Math.PI) / 180;
   if (who === 'lineup') {
-    // adults in a row facing the camera's right, calves in front of them
-    const adults = ['mother', 'a1', 'a2', 'a3', 'a4', 'a5', 'alpha', 'elder'];
-    let x = 0;
-    for (const k of adults) {
-      const g = all[k];
-      x += g.length * 0.62;
-      add(g, new Vector3(0, alt + (adults.indexOf(k) % 2) * 6, -x), yaw);
-      x += g.length * 0.62;
-    }
-    ['calf', 'pip', 'moss', 'ember'].forEach((k, i) => add(all[k], new Vector3(26, alt - 6, -20 - i * 14), yaw));
-    subject = models[0];
-  } else {
+    // adults in a 4 x 2 grid, all turned three-quarters toward the camera; calves in front
+    const adults = ['alpha', 'mother', 'elder', 'a1', 'a2', 'a3', 'a4', 'a5'];
+    adults.forEach((k, i) => {
+      const col = i % 4, row = Math.floor(i / 4);
+      add(all[k], new Vector3(col * 46 - 69, alt + row * 22, -row * 70), 0.75 + yaw);
+    });
+    ['calf', 'pip', 'moss', 'ember'].forEach((k, i) => add(all[k], new Vector3(i * 9 - 13, alt - 10, 38), 0.75 + yaw));
+    subject = models[1];  } else {
     subject = add(all[who] || MOTHER, new Vector3(0, alt, 0), yaw);
   }
   window.__whales = models;
@@ -119,9 +120,11 @@ export default async function (game) {
     far: [[L * 3.5, L * 1.0, L * 2.0], [0, 0, 0]],
   };
   if (who === 'lineup') {
-    V.side = [[210, 20, -150], [0, 0, -150]];
-    V.q = [[170, 60, 30], [0, 0, -140]];
-    V.calves = [[55, 4, -10], [26, -6, -42]];
+    // relative to the mother (models[1], at grid x = -23, row 0)
+    V.q = [[80, 40, 175], [23, 8, -20]];
+    V.row0 = [[60, 12, 105], [23, 0, 0]];
+    V.row1 = [[60, 34, 40], [23, 22, -70]];
+    V.calves = [[40, -6, 62], [23, -10, 38]];
   }
   const camRel = new Vector3(), lookRel = new Vector3();
   const setView = (name, k = +(p.get('dist') || 1)) => {
@@ -147,6 +150,39 @@ export default async function (game) {
     cam.position.copy(cp);
     cam.lookAt(lk);
   };
+  // animated inspection: animators drive the static models (hovering), gestures held at a phase
+  if (p.has('anim')) {
+    const anims = models.map((m, i) => new WhaleAnimator(m, (m.g.seed || 1) + i));
+    const vel = new Vector3(0, 0, 0);
+    const wind = new Vector3(2, 0, 1);
+    const quats = models.map((m) => new Quaternion().copy(m.group.quaternion));
+    const state = (i) => ({
+      vel: vel.set(0, 0, 4).applyQuaternion(quats[i]), quat: quats[i], angVel: { yaw: 0, pitch: 0, roll: 0 },
+      effort: num('effort', 0.6), glide: 0.2, climb: 0, mouth: num('mouth'), feed: num('feed'), hum: num('hum'),
+      charge: num('charge'), sing: num('sing'), sleep: 0, fear: 0, happy: num('happy'), excite: 0, tired: 0,
+      lookAt: null, worldPos: models[i].group.position, wind,
+    });
+    let gname = p.get('gesture');
+    let gt = p.has('gt') ? +p.get('gt') : null;
+    // headless tools pose every model at a gesture phase without reloading
+    window.__pose = (name, phase) => { gname = name; gt = phase; anims.forEach((a) => { a.gest = null; }); };
+    // warm up so the springs settle into the pose
+    for (let k = 0; k < 60; k++) anims.forEach((a, i) => a.update(1 / 30, state(i), 0));
+    let bumpT = 1;
+    game.devUpdate = (dt) => {
+      anims.forEach((a, i) => {
+        if (gname && GESTURES[gname] && (!a.gest || a.gest.name !== gname)) a.gesture(gname, { side: 1 });
+        if (gt !== null && a.gest) a.gest.t = gt * a.gest.dur;
+        if (p.has('flap')) a.phase = +p.get('flap') * Math.PI * 2;
+        a.update(gt !== null || p.has('flap') ? 1 / 60 : dt, state(i), 0);
+      });
+      if (p.has('bumpdir')) {
+        bumpT -= dt;
+        if (bumpT <= 0) { bumpT = 3; anims.forEach((a) => a.bump(new Vector3(...p.get('bumpdir').split(',').map(Number)), 1.5)); }
+      }
+    };
+    window.__anims = anims;
+  }
   game.focus.copy(sub);
   game.engine.shadows.radius = Math.max(60, L * 3);
   game.devWhales = models;

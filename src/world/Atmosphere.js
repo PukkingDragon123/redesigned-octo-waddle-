@@ -28,7 +28,7 @@ function preset(o) {
     // thin crests and shallows, the default sea state, water clarity (1 clear .. 3 murky), night plankton
     sea: C('#0d4a6b'), seaScatter: C('#2bd1b5'), seaState: 0.3, clarity: 1, plankton: 0,
     // the painted light (stylizedLight): sky fill of the shade, warm bounce, shade calm, soft turning
-    fill: 1.1, warmth: 1.0, shadeCalm: 0.15, soft: 0.5,
+    fill: 0.9, warmth: 1.0, shadeCalm: 0.15, soft: 0.5,
   }, o);
 }
 
@@ -36,7 +36,7 @@ function preset(o) {
 // and a sea colour per light (sapphire offshore, jade-turquoise over sand, slate in storms).
 export const PRESETS = {
   dawn: preset({
-    fill: 0.9, warmth: 0.9,
+    fill: 0.75, warmth: 0.9,
     sunElev: 4, sunAz: 72, sun: C('#ffae72', 2.6),
     zenith: C('#2b4785'), horizon: C('#f7b88e'),
     ambient: C('#8090d4', 0.84), bounce: C('#d6aa9c', 0.55), shadowTint: C('#c6c2f2'),
@@ -51,7 +51,7 @@ export const PRESETS = {
     sea: C('#1a4a66'), seaScatter: C('#3cc6ae'), seaState: 0.06, clarity: 0.9,
   }),
   menu: preset({
-    fill: 0.95, warmth: 0.9,
+    fill: 0.8, warmth: 0.9,
     sunElev: 7, sunAz: 55, sun: C('#ffb57e', 2.55),
     zenith: C('#2f5596'), horizon: C('#ffc4a0'),
     ambient: C('#8290da', 0.85), bounce: C('#d9b09f', 0.56), shadowTint: C('#c8c4f2'),
@@ -66,7 +66,7 @@ export const PRESETS = {
     sea: C('#1b4b69'), seaScatter: C('#3cc6ae'), seaState: 0.12, clarity: 0.9,
   }),
   morning: preset({
-    fill: 1.1,
+    fill: 0.9,
     sunElev: 24, sunAz: 38, sun: C('#fff0d6', 2.5),
     zenith: C('#2462bf'), horizon: C('#bfe0f2'),
     ambient: C('#9fbfee', 0.78), bounce: C('#dce8ea', 0.62), shadowTint: C('#dfe6fb'),
@@ -77,7 +77,7 @@ export const PRESETS = {
     sea: C('#0e4a6c'), seaScatter: C('#2bd1b5'), seaState: 0.28,
   }),
   noon: preset({
-    fill: 1.15,
+    fill: 0.95,
     sunElev: 50, sunAz: 22, sun: C('#fff8ec', 2.55),
     zenith: C('#1d58b4'), horizon: C('#b6dcef'),
     ambient: C('#9fcaee', 0.8), bounce: C('#d8eef0', 0.7), shadowTint: C('#e0e9fb'),
@@ -88,7 +88,7 @@ export const PRESETS = {
     sea: C('#0b4a70'), seaScatter: C('#26d3bb'), seaState: 0.38, clarity: 1.1,
   }),
   afternoon: preset({
-    fill: 1.1,
+    fill: 0.9,
     sunElev: 30, sunAz: -32, sun: C('#ffeccc', 2.4),
     zenith: C('#285fb2'), horizon: C('#c4e0e8'),
     ambient: C('#a6c8d6', 0.8), bounce: C('#d6e6d8', 0.66), shadowTint: C('#dde8f2'),
@@ -100,7 +100,7 @@ export const PRESETS = {
     sea: C('#0f4f6a'), seaScatter: C('#33d0aa'), seaState: 0.32,
   }),
   golden: preset({
-    fill: 0.75, warmth: 1.2, shadeCalm: 0.1,
+    fill: 0.6, warmth: 1.2, shadeCalm: 0.1,
     sunElev: 4.5, sunAz: 4, sun: C('#ffa45a', 2.8),
     zenith: C('#3c509a'), horizon: C('#ffb38a'),
     ambient: C('#8c8ad0', 0.78), bounce: C('#e5ae92', 0.62), shadowTint: C('#c9c0f0'),
@@ -130,7 +130,7 @@ export const PRESETS = {
     sea: C('#173d5c'), seaScatter: C('#3a9fb0'), seaState: 0.2, plankton: 0.25,
   }),
   night: preset({
-    fill: 0.12, warmth: 0, shadeCalm: 0.05, soft: 0.4,
+    fill: 0.3, warmth: 0, shadeCalm: 0.05, soft: 0.4,
     sunElev: -22, sunAz: -40, sun: C('#000000', 0),
     zenith: C('#040818'), horizon: C('#16224c'),
     ambient: C('#2c3c72', 0.55), bounce: C('#1e2a58', 0.4), shadowTint: C('#c9d2f6'),
@@ -176,7 +176,7 @@ export const PRESETS = {
     sea: C('#1f4658'), seaScatter: C('#55b2a0'), seaState: 0.7, clarity: 1.7,
   }),
   oasis: preset({
-    fill: 1.2, warmth: 1.1,
+    fill: 1.0, warmth: 1.1,
     sunElev: 19, sunAz: -12, sun: C('#ffe8c2', 2.55),
     zenith: C('#2373cf'), horizon: C('#cfeae4'),
     ambient: C('#acd4e6', 0.85), bounce: C('#e6eedc', 0.78), shadowTint: C('#e2e4f8'),

@@ -243,7 +243,11 @@ void main() {
   vec3 src = srcA.rgb;
   vec3 col = src;
   if (uv.x >= uSplit) {
-    float z = sceneZ(uv, texelFetch(tDepth, ivec2(gl_FragCoord.xy), 0).r);
+    float dOpaque = texelFetch(tDepth, ivec2(gl_FragCoord.xy), 0).r;
+    float z = sceneZ(uv, dOpaque);
+    // the open sea (its plane in front of whatever the opaque pass drew): painted with longer,
+    // looser strokes, like water in a painting, while rocks and creatures keep their texture
+    float seaPx = (uSeaOn > 0.5 && z < (dOpaque >= 1.0 ? SKY_Z : linZ(dOpaque)) * 0.999) ? 1.0 : 0.0;
     float coc = 0.0, dofT = 0.0;
     if (uDofOn > 0.5) {
       coc = cocFromZ(uv, z, dofFocus());
@@ -262,8 +266,12 @@ void main() {
       float A = tr > 1e-9 ? (l1 - l2) / (l1 + l2) * smoothstep(1.0e-5, 1.5e-4, l1) : 0.0;
       float zr = smoothstep(uKuwDepth.x, uKuwDepth.y, z);
       float r = uKuw.x * mix(uKuwDepth.z, 1.0, zr) * mix(1.0, uKuwDepth.w, smoothstep(600.0, 4000.0, z));
+      r *= 1.0 + 0.25 * seaPx;
       float keep = 0.0;
-      if (r > 0.35) {
+      // nearly flat areas (open sky, fog, calm far water) would come out of the filter unchanged
+      // (a few LSB at most): skip the 33 taps there, which is often a third of the frame
+      float paintK = smoothstep(4.0e-6, 4.0e-5, tr);
+      if (r > 0.35 && paintK > 0.0) {
         float a = r * clamp((uKuw.y + A) / uKuw.y, 0.1, 2.0);
         float b = r * clamp(uKuw.y / (uKuw.y + A), 0.1, 2.0);
         vec2 ax = t * a * uTexel;
@@ -275,7 +283,7 @@ void main() {
         // (less along strong coherent edges, where the stroke itself draws the form), so textured
         // surfaces read as brushwork instead of flat posterised cells
         // (clamped: isolated dark speckle, e.g. aliasing in fine relief, stays painted over)
-        k += clamp(src - k, vec3(-0.06), vec3(0.09)) * uStroke.x * (1.0 - 0.5 * A);
+        k += clamp(src - k, vec3(-0.06), vec3(0.09)) * uStroke.x * (1.0 - 0.5 * A) * (1.0 - 0.6 * seaPx);
         // bristles: fine grain fixed to the canvas, smeared along the stroke direction (a short line
         // integral), so every stroke carries a brush texture that follows the form
         if (uStroke.y > 0.0) {
@@ -286,7 +294,7 @@ void main() {
           bn = bn * 0.2 - 0.5;
           k *= 1.0 + bn * uStroke.y * (0.4 + 0.6 * A) * min(r / uKuw.x, 1.0);
         }
-        col = mix(src, mix(k, src, keep), uKuw.z);
+        col = mix(src, mix(k, src, keep), uKuw.z * paintK);
       }
       if (uDebug > 0.5) col = vec3(r / max(uKuw.x, 1e-3), A, keep);
     }
@@ -356,15 +364,15 @@ export const PAINT_DEFAULTS = {
   nearStart: 3, // metres: from here the filter eases in...
   nearFull: 45, // ...to full strength
   nearScale: 0.3, // filter radius right at the lens
-  farScale: 1.25, // radius far away (distant land reads as broader strokes)
+  farScale: 1.6, // radius far away (distant land reads as broader, looser strokes)
   split: 0.45, // split-tone strength
   vibrance: 0.22,
   calm: 0.12, // pull back the loudest saturations
   curve: 0.12, // soft S-curve
-  lift: 0.45, // additive shadow lift (by shadeLift)
+  lift: 0.3, // additive shadow lift (by shadeLift; the light model already fills the shade)
   hueLean: 0.22, // how far the darks lean toward the shade hue (value preserved)
   shadeLift: new Color(0.075, 0.062, 0.078), // deep violet-grey: the shadows' shared hue and lift
-  darkCalm: 0.2, // muted (not inky) deep shadows
+  darkCalm: 0.15, // muted (not inky) deep shadows
   shadeTone: new Color(0.98, 0.98, 1.02), // cool, slightly violet shadows
   lightTone: new Color(1.05, 1.0, 0.92), // warm highlights
   black: new Color(0.014, 0.012, 0.02), // painted (never pure) black
@@ -381,11 +389,11 @@ export const PAINT_DEFAULTS = {
 export const DOF_PRESETS = {
   off: { amount: 0 },
   // gameplay: only the far distance softens a little (focus follows the subject)
-  gameplay: { amount: 1, autoFocus: true, sharp: 0.55, farRamp: 0.45, far: 2.2, near: 0, nearRamp: 1, tilt: 0 },
+  gameplay: { amount: 1, autoFocus: true, sharp: 0.5, farRamp: 0.45, far: 2.6, near: 0, nearRamp: 1, tilt: 0 },
   // title menu: miniature-like, focus on the herd, islands and sky soft, gentle tilt bands
   title: { amount: 1, autoFocus: true, sharp: 0.22, farRamp: 0.6, far: 5.5, near: 3.0, nearRamp: 0.7, tilt: 1.6, tiltCenter: 0.5, tiltBand: 0.18 },
   // cinematic close moments: shallow, strong separation
-  cinematic: { amount: 1, autoFocus: true, sharp: 0.12, farRamp: 0.4, far: 6, near: 5, nearRamp: 0.4, tilt: 0 },
+  cinematic: { amount: 1, autoFocus: true, sharp: 0.2, farRamp: 0.5, far: 4.2, near: 3.5, nearRamp: 0.5, tilt: 0 },
 };
 
 export class PaintPass {
@@ -584,7 +592,7 @@ export class PaintPass {
     U.tDof.value = this.dofB.texture;
     U.uTexel.value.set(1 / this.width, 1 / this.height);
     U.uDofHalf.value.set(this.halfW, this.halfH);
-    U.uKuw.value.set(p.radius * Math.max(res, 0.5) * s, p.alpha, p.mix, p.detail);
+    U.uKuw.value.set(p.radius * Math.max(res, 0.3) * s, p.alpha, p.mix, p.detail);
     U.uKuwDepth.value.set(p.nearStart, p.nearFull, p.nearScale, p.farScale);
     U.uHard.value = p.hardness;
     U.uStroke.value.set(p.texture, p.bristle * s, p.bristleLen, 0);

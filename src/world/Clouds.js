@@ -12,7 +12,7 @@ import {
 import { G } from '../render/Globals.js';
 import { UNIFORMS, NOISE, LIGHTING, DEPTH } from '../render/shaders/common.js';
 import { getNoiseTexture } from '../render/NoiseTex.js';
-import { rng, clamp, smoothstep, lerp } from '../core/math.js';
+import { rng, clamp, smoothstep, lerp, TAU } from '../core/math.js';
 
 const VERT = /* glsl */ `
 ${UNIFORMS}
@@ -434,17 +434,48 @@ export class Clouds {
     return cl;
   }
 
-  /** A towering storm cell. */
+  /**
+   * A towering storm cell (cumulonimbus): ONE cloud, lit as one mass from the flat dark base up a
+   * billowing column to a wide anvil sheared downwind (not a stack of separate cumulus).
+   */
   tower(center, w, h, opts = {}) {
     const r = rng(opts.seed ?? 9);
-    const layers = Math.max(2, Math.round(h / (w * 0.45)));
-    let cl = null;
-    for (let i = 0; i < layers; i++) {
-      const f = i / layers;
-      const lw = w * lerp(1.0, 0.65, f) * (i === layers - 1 ? 1.3 : 1);
-      const c = new Vector3(center.x + (r() - 0.5) * w * 0.15, center.y + f * h * 0.85, center.z + (r() - 0.5) * w * 0.15);
-      cl = this.cumulus(c, lw, h / layers * 1.6, Object.assign({}, opts, { seed: (opts.seed ?? 9) + i * 13, noBase: i > 0, shear: (opts.shear ?? 0.18) }));
+    const start = this.count;
+    const base = center.y;
+    const cc = new Vector3(center.x, base + h * 0.5, center.z);
+    const rad = Math.max(w * 0.6, h * 0.5);
+    const wd = opts.windDir ?? 0.6;
+    const shearK = opts.shear ?? 0.35;
+    const sx = Math.sin(wd), sz = Math.cos(wd);
+    const anvil = opts.anvil ?? (h > w * 1.2 ? 1 : 0.4);
+    // width profile up the column: broad base, waisted column, spreading anvil
+    const prof = (t) => w * 0.5 * (lerp(0.95, 0.62, smoothstep(0, 0.55, t)) + anvil * 0.9 * smoothstep(0.7, 1.0, t));
+    const n = Math.round(clamp((w * h) / 900, 24, opts.maxPuffs ?? 160) * (opts.density ?? 1));
+    const minR = opts.minR ?? 10;
+    const baseL = (base - cc.y) / rad;
+    const v = new Vector3();
+    const add = (t, ang, ringK, prK, op, flat = 0) => {
+      const R = prof(t);
+      const up = t * h;
+      // the anvil streams downwind, the column leans a little
+      const sh = shearK * up * (0.25 + 0.75 * smoothstep(0.65, 1, t)) * anvil + shearK * 0.15 * up;
+      const px = center.x + Math.cos(ang) * R * ringK + sx * sh;
+      const pz = center.z + Math.sin(ang) * R * ringK * lerp(0.75, 1, r()) + sz * sh;
+      const pr = Math.max(minR, R * prK);
+      const py = Math.max(base + pr * 0.4, base + up);
+      v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
+      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * op, pr / rad, opts.dark ?? 0, flat, baseL);
+    };
+    // the core: big puffs up the axis keep it solid from every side
+    for (let i = 0; i < 6; i++) add((i + 0.5) / 6, r() * TAU, 0.15, 0.62, 0.95);
+    for (let i = 0; i < n; i++) {
+      const t = Math.pow(r(), 0.85);
+      // billows on the shell, smaller toward the sunlit cauliflower top of the column
+      add(t, r() * TAU, lerp(0.7, 1.0, r()), lerp(0.42, 0.26, t) * lerp(0.8, 1.2, r()), lerp(0.85, 1, r()), t > 0.82 ? 0.45 * anvil : 0);
     }
+    const cl = { center: cc.clone(), radius: Math.max(rad, w * 0.9) * 1.3, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'cumulus',
+      towers: [{ x: center.x, z: center.z, r: w * 0.5, y: base }], opacity: opts.opacity ?? 1 };
+    this.clusters.push(cl);
     return cl;
   }
 

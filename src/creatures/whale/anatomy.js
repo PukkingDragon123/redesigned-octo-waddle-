@@ -75,7 +75,7 @@ export const PROFILES = {
     wing: { t: 0.69, m: -0.44, span: 0.47, chordRoot: 0.15, chordMax: 0.22, armR: 0.028 },
     rearFin: { t: 0.42, m: -0.6, span: 0.12, chord: 0.085, armR: 0.013 },
     fluke: { span: 0.19, chord: 0.125 },
-    plates: { t0: 0.18, t1: 0.65, n: 7, s0: 0.022, s1: 0.13, thick: 0.007 },
+    plates: { t0: 0.2, t1: 0.64, n: 7, s0: 0.022, s1: 0.11, thick: 0.0035 },
     pleats: { t0: 0.5, t1: 0.985, n: 24 },
     mane: { t0: 0.6, t1: 0.77 },
     navel: 0.5,
@@ -399,7 +399,7 @@ const HORN_STYLES = {
   forward: { len: 0.25, baseR: 0.021, up: 0.72, back: 0.5, out: 0.45, bendBack: 0.6, bendOut: 0.5, curl: 0, twist: 0.4, rings: 14, ringAmp: 0.08, droop: 0, fwd: 1.9, gnarl: 0 },
   gnarled: { len: 0.28, baseR: 0.026, up: 0.6, back: 0.55, out: 0.5, bendBack: 1.3, bendOut: 0.45, curl: 2.4, twist: 0.9, rings: 30, ringAmp: 0.16, droop: 0.1, fwd: 0, gnarl: 1 },
   elegant: { len: 0.27, baseR: 0.0185, up: 0.5, back: 0.72, out: 0.36, bendBack: 0.9, bendOut: 0.25, curl: 0, twist: 0.2, rings: 7, ringAmp: 0.025, droop: 0.32, fwd: 0, gnarl: 0 },
-  nub: { len: 0.055, baseR: 0.024, up: 0.8, back: 0.55, out: 0.3, bendBack: 0.6, bendOut: 0.1, curl: 0, twist: 0, rings: 3, ringAmp: 0.04, droop: 0, fwd: 0, gnarl: 0 },
+  nub: { len: 0.032, baseR: 0.0125, up: 0.8, back: 0.55, out: 0.3, bendBack: 0.6, bendOut: 0.1, curl: 0, twist: 0, rings: 3, ringAmp: 0.04, droop: 0, fwd: 0, gnarl: 0 },
 };
 
 function buildLayout(A) {
@@ -465,7 +465,7 @@ function buildLayout(A) {
   for (let i = 0; i < nRake; i++) {
     const t = lerp(0.12, 0.86, r());
     const s = r() < 0.75 ? lerp(0.12, 0.88, r()) : r();
-    scars.push({ kind: 0, s, t, ang: lerp(-1.2, 1.2, r()) + (r() < 0.5 ? 0 : Math.PI / 2), len: L * lerp(0.03, 0.11, r()) * (A.calf ? 0.6 : 1), n: 2 + Math.floor(r() * 3), gap: L * lerp(0.002, 0.0045, r()), w: L * lerp(0.0007, 0.0016, r()), age: r() });
+    scars.push({ kind: 0, s, t, ang: lerp(-1.2, 1.2, r()) + (r() < 0.5 ? 0 : Math.PI / 2), len: L * lerp(0.03, 0.11, r()) * (A.calf ? 0.6 : 1), n: 2 + Math.floor(r() * 3), gap: L * lerp(0.003, 0.006, r()), w: L * lerp(0.0011, 0.0022, r()), age: r() });
   }
   const nCook = Math.round(sc * (A.calf ? 3 : 26));
   for (let i = 0; i < nCook; i++) {
@@ -492,7 +492,7 @@ function buildLayout(A) {
   ];
   for (let i = 0; i < nB; i++) {
     const sp = spots[i % spots.length]();
-    barn.push({ s: sp.s, t: sp.t, rad: L * lerp(0.008, 0.022, r()) * (0.6 + bk * 0.6), dens: lerp(0.5, 1, r()), lice: r() });
+    barn.push({ s: sp.s, t: sp.t, rad: L * lerp(0.012, 0.03, r()) * (0.6 + bk * 0.6), dens: lerp(0.6, 1, r()), lice: r() });
   }
   lay.barnacles = barn.slice(0, 24);
   lay.eyePatch = Object.assign({ size: 1, len: 1.0, angle: 0.15, dark: 0.75 }, g.eyePatch || {});

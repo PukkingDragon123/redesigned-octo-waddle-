@@ -31,7 +31,7 @@ const STRIDE = 20; // floats per fish in the GPU layout (5 x vec4)
 
 export const FISH_SPECIES = {
   glintfin: { max: 24576, nearMax: 1400, len: [0.22, 0.34], cruise: 1.25, burst: 7, beat: 5.2, amp: 0.07, nearPx: 30, minPx: 0.75, edible: 0.25, spacing: 1.65, react: 1 },
-  spiralback: { max: 4096, nearMax: 420, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 1, spacing: 2.0, react: 0.8 },
+  spiralback: { max: 4096, nearMax: 420, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 1, spacing: 1.45, react: 0.8 },
   lanternjack: { max: 64, nearMax: 32, len: [2.6, 4.1], cruise: 2.1, burst: 11, beat: 1.25, amp: 0.06, nearPx: 46, minPx: 0.9, edible: 0, spacing: 0, react: 0.3 },
 };
 
@@ -103,6 +103,7 @@ export class FishSystem {
     this.game = eco.game;
     this.pools = {};
     for (const k of Object.keys(FISH_SPECIES)) this.pools[k] = new Pool(this, k);
+    this.poolList = Object.values(this.pools);
     this.schools = [];
     this.jacks = [];
     this._seed = 1301;
@@ -332,12 +333,12 @@ export class FishSystem {
     const ball = clamp(sc.threat * 1.4, 0, 1) * (1 - net) * (1 - song * 0.7);
     const free = (1 - net) * (1 - song) * (1 - ball);
     const cr = sc.mood === 'cruise' ? 1 : 0;
-    const ease = (k, v, rate) => { w[k] += (v - w[k]) * (1 - Math.exp(-dt * rate)); };
-    ease('cruise', free * cr, 0.5);
-    ease('mill', free * (1 - cr), 0.5);
-    ease('ball', ball, ball > w.ball ? 2.5 : 0.5);
-    ease('net', net, 1.2);
-    ease('song', song, 0.4);
+    const e05 = 1 - Math.exp(-dt * 0.5);
+    w.cruise += (free * cr - w.cruise) * e05;
+    w.mill += (free * (1 - cr) - w.mill) * e05;
+    w.ball += (ball - w.ball) * (1 - Math.exp(-dt * (ball > w.ball ? 2.5 : 0.5)));
+    w.net += (net - w.net) * (1 - Math.exp(-dt * 1.2));
+    w.song += (song - w.song) * (1 - Math.exp(-dt * 0.4));
     // the school's centre: wander (cruise), hold (mill), slide away from danger, rise in the net
     const tgt = _v;
     if (sc.mood === 'cruise' || w.cruise > 0.2) {
@@ -905,8 +906,9 @@ export class FishSystem {
         speed = spec.burst;
         glowT = 0.6;
         if (prey) {
-          const n = this.eatAt(_v.set(px, py, pz).addScaledVector(_v2.set(vx, vy, vz).normalize(), len * 0.45), null, len * 0.16, { sparkles: 0, only: prey, quiet: true });
-          void n;
+          const eo = this._jackEat || (this._jackEat = { sparkles: 0, only: null, quiet: true });
+          eo.only = prey;
+          this.eatAt(_v.set(px, py, pz).addScaledVector(_v2.set(vx, vy, vz).normalize(), len * 0.45), null, len * 0.16, eo);
         }
         // momentum through the surface: breach
         if (py > surf - 2.5 && vy > 5 && !jk.air) {
@@ -1064,7 +1066,7 @@ export class FishSystem {
     list.sort((a, b) => a._d - b._d);
     let fish = 0, tris = 0;
     const camx = ctx.cam.x, camy = ctx.cam.y, camz = ctx.cam.z;
-    for (const pool of Object.values(this.pools)) {
+    for (const pool of this.poolList) {
       const spec = pool.spec;
       const NB = pool.nearBuf.array, FB = pool.farBuf.array, S = pool.S, EAT = pool.EAT;
       let nn = 0, nf = 0;
@@ -1236,7 +1238,7 @@ export class FishSystem {
 
   get count() {
     let n = 0;
-    for (const p of Object.values(this.pools)) n += p.n;
+    for (const p of this.poolList) n += p.n;
     return n;
   }
 

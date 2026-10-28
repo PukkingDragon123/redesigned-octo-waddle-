@@ -27,6 +27,7 @@ import { BubbleSystem } from './eco/Bubbles.js';
 import { SeaGlow } from './eco/SeaGlow.js';
 
 const MAX_TRANSIENT = 48;
+const NO_PERCHES = [];
 const _v = new Vector3();
 const _v2 = new Vector3();
 
@@ -379,9 +380,10 @@ export class Ecosystem {
     if (g.wind?.base) ctx.wind.copy(g.wind.base);
     ctx.roosts = this.roosts;
     ctx.songRadius = this.songRadius;
-    ctx.perches = this.perches || g.story?.world?.perches || [];
-    const sb = this.seabedAt || (g.story?.world?.seabedAt ? (x, z) => g.story.world.seabedAt(x, z) : null);
-    ctx.seabed = sb;
+    ctx.perches = this.perches || g.story?.world?.perches || NO_PERCHES;
+    if (this.seabedAt) ctx.seabed = this.seabedAt;
+    else if (g.story?.world?.seabedAt) ctx.seabed = this._worldSeabed || (this._worldSeabed = (x, z) => g.story.world.seabedAt(x, z));
+    else ctx.seabed = null;
     // small splashes: about a dozen a second at most
     this._splashBudget = Math.min(6, this._splashBudget + dt * 12);
 

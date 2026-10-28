@@ -88,6 +88,8 @@ export class ReptileSystem {
     this.flocks = [];
     this.birds = [];
     this.pools = { skimmer: new Pool(this, 'skimmer'), coilwing: new Pool(this, 'coilwing') };
+    this.poolList = Object.values(this.pools);
+    this._eatOpts = { only: null, sparkles: 1 };
     this._seed = 911;
     this._frame = 0;
     this._roostInfo = new WeakMap();
@@ -254,7 +256,7 @@ export class ReptileSystem {
     const cam = this.game.engine.camera;
     const pxPerM = (1 / Math.tan((cam.fov * Math.PI) / 360)) * G.uResolution.value.y * 0.5;
     let tris = 0, near = 0;
-    for (const pool of Object.values(this.pools)) {
+    for (const pool of this.poolList) {
       const spec = pool.spec;
       const NB = pool.nearBuf.array, FB = pool.farBuf.array;
       let nn = 0, nf = 0;
@@ -866,7 +868,8 @@ export class ReptileSystem {
         const tip = _v3.copy(b.pos).addScaledVector(b.dir, b.span * 0.55).setY(surf - 0.05);
         this.eco.ocean?.wake?.(tip, b.vel, 0.25 * b.span);
         if (sc && sc.alive > 0) {
-          const n = this.eco.fish.eatAt(_v2.copy(tip).setY(surf - 0.35), null, 0.45 * b.span, { only: sc, sparkles: 1 });
+          this._eatOpts.only = sc;
+          const n = this.eco.fish.eatAt(_v2.copy(tip).setY(surf - 0.35), null, 0.45 * b.span, this._eatOpts);
           if (n > 0) { b.snapT = 0.35; b.ate += n; this.eco.splash(tip, 0.12, 0.3, true, { tag: 'snap' }); }
         }
         if ((b.snapT || 0) > 0) { b.snapT -= dt; jawT = 0; hpT = -0.3; }
@@ -909,11 +912,13 @@ export class ReptileSystem {
         // momentum carries it down; it chases fish with half-open wings, then floats up
         const sc = b.prey;
         b.vel.multiplyScalar(Math.exp(-dt * 2.2));
-        if (sc) {
+        // a short chase (only while its breath and momentum last, and never deep), then up
+        const depth = surf - b.pos.y;
+        if (sc && b.t > 0 && depth < 3.5) {
           _v3.subVectors(sc.center, b.pos);
-          b.vel.addScaledVector(_v3.normalize(), 6 * dt);
+          b.vel.addScaledVector(_v3.normalize(), 5 * dt);
         }
-        b.vel.y += 3.2 * dt;
+        b.vel.y += (b.t > 0 ? 3.2 : 9) * dt;
         b.pos.addScaledVector(b.vel, dt);
         b.sweep += (0.6 - b.sweep) * (1 - Math.exp(-dt * 4));
         b.amp += (0.35 - b.amp) * (1 - Math.exp(-dt * 4));
@@ -921,12 +926,17 @@ export class ReptileSystem {
         this._orient(b, _v3.copy(b.vel).lengthSq() > 0.01 ? _v3.normalize() : _v3.set(0, 1, 0), 0, dt, 0);
         if (sc) {
           const beak = _v3.copy(b.pos).addScaledVector(_v2.set(0, 0, 1).applyQuaternion(b.quat), b.span * 0.5);
-          const n = this.eco.fish.eatAt(beak, null, 0.5 * b.span, { only: sc, sparkles: 1 });
+          this._eatOpts.only = sc;
+          const n = this.eco.fish.eatAt(beak, null, 0.5 * b.span, this._eatOpts);
           if (n) b.ate += n;
         }
         this._predator(b, ctx, 2.2, 1.0);
-        if (b.t <= 0 && b.pos.y > surf - 0.3) { b.mode = 'float'; b.t = lerp(2, 5, r()); b.pos.y = surf; }
-        if (b.pos.y > surf && b.vel.y > 0) { b.mode = 'float'; b.t = lerp(2, 5, r()); }
+        if ((b.t <= 0 && b.pos.y > surf - 0.3) || (b.pos.y > surf && b.vel.y > 0) || b.t < -6) {
+          b.mode = 'float';
+          b.t = lerp(2, 5, r());
+          b.pos.y = surf;
+          b.vel.y = 0;
+        }
         return;
       }
       case 'float': {

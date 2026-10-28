@@ -31,11 +31,15 @@ console.log('ready', secs());
 for (const s of shots) {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const r = await page.evaluate((js) => {
+      const tag = `${s.name}-${attempt}-${Date.now()}`;
+      const r = await page.evaluate(([js, tag]) => {
         const g = window.__skysong;
+        window.__lookTag = tag;
         try { return String(eval(js ?? 'null')); } catch (e) { return 'ERR ' + e.message; }
-      }, s.js || 'null');
+      }, [s.js || 'null', tag]);
       await waitFrames(s.frames ?? 3);
+      // a hot reload during the wait loses the shot's settings: take it again
+      if (await page.evaluate(() => window.__lookTag) !== tag) throw new Error('page reloaded during the shot');
       const durl = await page.evaluate(() => document.getElementById('c').toDataURL('image/png'));
       fs.writeFileSync(`${prefix}${s.name}.png`, Buffer.from(durl.split(',')[1], 'base64'));
       const err = await page.evaluate(() => window.__skysongError || null);

@@ -30,7 +30,8 @@ export function buildOrgans(A, acc, res) {
   info.horns = buildHorns(A, acc, q);
   if (!A.calf || A.g.spikes) buildSpikes(A, acc, q);
   info.plates = buildPlates(A, acc, q);
-  buildDomeBands(A, acc, q);
+  // calves are born soft: the keratin of the dome grows in later
+  if (!A.calf) buildDomeBands(A, acc, q);
   info.crest = buildCrest(A, acc, q);
   return info;
 }

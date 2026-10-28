@@ -210,7 +210,7 @@ export function buildLocks(A, bodyGeo, bodySkinTris, finGeo, density = 1) {
     };
   });
   // dorsal ridge: a mohawk between the plate rows down to the tail stock
-  region('ridge', calf ? 160 : 520, (a, b, c) => {
+  region('ridge', calf ? 260 : 520, (a, b, c) => {
     const s = sAt(a), t = tAt(a);
     return Math.abs(s - 0.5) < P.plates.s0 * 1.1 && t > 0.06 && t < P.mane.t0 + 0.02 && furTri(a, b, c) > 0.3 ? 1 : 0;
   }, (sm) => ({

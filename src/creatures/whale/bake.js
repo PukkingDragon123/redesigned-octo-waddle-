@@ -294,7 +294,7 @@ void main() {
     float dl = length(d) / R;
     if (dl > 1.6) continue;
     // a cluster: cells of barnacles, denser at the centre
-    float cell = L * 0.0042;
+    float cell = L * 0.0062;
     vec2 cp = d / cell + bc.xy * 37.0;
     vec2 ci = floor(cp);
     float best = 9.0, bh = 0.0, bang = 0.0, bsz = 1.0;

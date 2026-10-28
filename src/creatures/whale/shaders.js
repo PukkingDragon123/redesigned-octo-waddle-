@@ -400,7 +400,7 @@ void main() {
   Surface s = makeSurface(albedo, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
   s.ao = ao * mix(0.72, 1.0, smoothstep(-1.0, 0.3, N.y));
-  s.rim = rim;
+  s.rim = rim * 0.5;
   s.spec = 0.0;
   s.trans = trans;
   s.wrap = wrap;
@@ -446,7 +446,9 @@ void main() {
     float flap = smoothstep(0.35, 1.0, chord) * exp(-pow((span - 0.53) / 0.07, 2.0)) + smoothstep(0.85, 1.0, chord) * 0.3;
     fl += sin(uTime * 31.0 + span * 40.0 + chord * 12.0) * flap * uTear.y * (0.02 + uFlutter[id] * 2.0) * mem;
   }
-  transformed += uFinUp[id] * (belly * uBillow[id] + fl) * uChord[id];
+  // the whole outer wing bends against the stroke (a flexible flipper, stiffest at the root)
+  float bend = span * span * (1.0 - chord * 0.3) * float(id < 2);
+  transformed += uFinUp[id] * (belly * uBillow[id] + fl + bend * uBillow[id] * 0.35) * uChord[id];
   #include <skinnormal_vertex>
   #include <skinning_vertex>
   vec4 wp = modelMatrix * vec4(transformed, 1.0);
@@ -538,7 +540,7 @@ void main() {
   float hgt = wr * 0.3 + tub * 1.0 + ray * 0.4;
   // membrane: thin dark skin with veins following the rays, lighter toward the trailing edge
   // the membrane is thin dorsal skin: the back's colour, a little warmer and lighter toward the edge
-  vec3 memBase = mix(uBack * 1.25, uMembrane, 0.45);
+  vec3 memBase = mix(uBack * 1.15, uMembrane, 0.32);
   vec3 memCol = mix(memBase, mix(memBase, uFinTip, 0.6), smoothstep(0.45, 1.0, uv.y) * 0.8 + 0.2 * fbm2(m * 0.7));
   memCol = mix(memCol, mix(uBelly, memBase, 0.6), (1.0 - top) * 0.35);
   float veinN = vnoise(vec2(m.x * 3.0, m.y * 0.6) + uSeed);
@@ -555,7 +557,7 @@ void main() {
   s.rim = 0.4;
   s.spec = 0.0;
   // thin membrane glows warm when backlit; the arm and rays stay dark against the sun
-  s.trans = mix(0.7, 0.06, max(arm, ray * 0.75));
+  s.trans = mix(0.42, 0.05, max(arm, ray * 0.75));
   s.wrap = 0.26;
   s.ao = mix(1.0, 0.85, arm);
   vec3 col = stylizedLight(s);
@@ -726,11 +728,15 @@ vec3 hairLight(vec3 albedo, vec3 T, vec3 N, vec3 V, vec3 P, float shadow, float 
   Surface s = makeSurface(albedo, N, P);
   s.shadow = shadow;
   s.ao = ao;
-  s.rim = 0.35 * h;
+  s.rim = 0.06 * h;
   s.spec = 0.0;
   s.trans = trans;
   s.wrap = 0.34;
   vec3 col = stylizedLight(s);
+  // rim light through the hair tips, tinted by the hair (glows against the sun, never frosty)
+  float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  float back = pow(max(dot(-V, uSunDir), 0.0), 2.0);
+  col += albedo * (uSunColor * (0.15 + 1.1 * back) * shadow + uSkyAmbient * 0.35) * fres * h * 0.55;
   vec3 L = uSunDir;
   vec3 H = normalize(L + V);
   vec3 T1 = normalize(T + N * 0.12);

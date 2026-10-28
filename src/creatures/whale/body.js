@@ -47,8 +47,8 @@ export function furAt(A, t, s) {
   const dW = Math.hypot((t - W.t) / 0.045, (Math.min(Math.abs(s - sWing), Math.abs(s - (1 - sWing)))) / 0.06);
   f = Math.max(f, (1 - smoothstep(0.6, 1.1, dW)) * 1.1);
   if (A.calf) {
-    // soft down all over, a fluffy crown and cheeks
-    f = Math.max(f, 0.34);
+    // soft down all over (sleeker toward the tail), a fluffy crown and cheeks
+    f = Math.max(f, 0.34 * lerp(0.55, 1, smoothstep(0.12, 0.4, t)));
     const crown = smoothstep(P.eye.t - 0.05, P.eye.t - 0.01, t) * (1 - smoothstep(P.blow.t + 0.005, P.blow.t + 0.03, t)) * (1 - smoothstep(0.18, 0.32, sw));
     f = Math.max(f, crown * 1.4);
   }
@@ -64,7 +64,7 @@ export function furAt(A, t, s) {
   const bell = bellowsAt(A, t, s);
   f *= 1 - smoothstep(0.05, 0.4, bell);
   // under the plates there is no fur (the plates' edges cover it)
-  if (sw > P.plates.s0 * 1.15 && sw < P.plates.s1 * 0.92 && t > P.plates.t0 && t < P.plates.t1 - 0.01) f *= A.calf ? 0.25 : 0;
+  if (sw > P.plates.s0 * 1.15 && sw < P.plates.s1 * 0.92 && t > P.plates.t0 && t < P.plates.t1 - 0.01) f *= A.calf ? 1.2 : 0;
   // the crest base
   if (t > P.crest.t0 && t < P.crest.t1 && sw < 0.03) f *= 0.2;
   return f * (g.furAmount ?? 1);

@@ -43,7 +43,7 @@ export default async function (game) {
   const caught = { moth: 0, gnat: 0, skitter: 0 };
   bugs.onCatch = (kind, x, y, z) => {
     caught[kind]++;
-    for (let i = 0; i < 6; i++) game.glow.emit({ pos: new Vector3(x, y, z), vel: new Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3), life: 0.7, size: 0.3, sizeEnd: 0.05, kind: 2, color: [1.5, 1.3, 0.8], drag: 2 });
+    for (let i = 0; i < 6; i++) game.glow.emit({ pos: new Vector3(x, y, z), vel: new Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3), life: 0.7, size: 0.3, sizeEnd: 0.05, kind: 1, color: [1.5, 1.3, 0.8], drag: 2 });
   };
   const sp = p.get('species') || 'all';
   const sea = (x, z) => seaHeight(game, x, z);
@@ -82,7 +82,8 @@ export default async function (game) {
       }
       const c = centers[target % centers.length];
       tgt.copy(c);
-      if (move === 'dive' && moveT > 4) tgt.y = sea(c.x, c.z) - 3;
+      if (move === 'slap' || move === 'spout') tgt.y = sea(c.x, c.z) + 0.2; // skim the surface
+      if (move === 'bubbles') tgt.y = sea(c.x, c.z) - 4;
       const to = tgt.clone().sub(calf.pos), d = to.length();
       if (d < 3) target++;
       return { swim: 1, yaw: Math.atan2(to.x, to.z), pitch: Math.asin(clamp(to.y / Math.max(d, 1), -1, 1)) * 0.9 };
@@ -91,16 +92,16 @@ export default async function (game) {
 
   const cam = game.engine.camera;
   const camMode = p.get('cam') || 'follow';
-  const cp = new Vector3(), cl = new Vector3(), want = new Vector3(), wantL = new Vector3();
+  const cp = new Vector3(), cl = new Vector3(), want = new Vector3(), wantL = new Vector3(), _off = new Vector3();
   let camInit = false;
   if (camMode !== 'follow') {
     game.cameraRig.update = (dt) => {
       if (camMode === 'swarm') {
         wantL.copy(centers[0] || calf.pos);
-        want.copy(wantL).add(new Vector3(9, 3, 12));
+        want.copy(wantL).add(_off.set(5, 1.5, 7));
       } else if (camMode === 'wide') {
         wantL.copy(calf.pos);
-        want.copy(calf.pos).add(new Vector3(40, 25, 40));
+        want.copy(calf.pos).add(_off.set(40, 25, 40));
       } else {
         wantL.copy(calf.pos);
         want.copy(calf.pos).addScaledVector(calf.right, 14).add(new Vector3(0, 3, 0));

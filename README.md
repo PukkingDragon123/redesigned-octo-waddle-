@@ -47,10 +47,18 @@ in **Settings**.
 | Barrel roll | Q / E | LB / RB |
 | Hum (hold to sing) | F (or H, middle click) | X |
 | Sonic boom: hold to gather, release | R or right click | Y |
+| Tail slap (a fluke flick in the air) | X | D-pad down |
+| Spout (bubbles under water) | V | D-pad up |
+| Loop | Z | D-pad left or R3 |
+| Dash (a dive bomb when pointing down at the sea) | G or double-tap Shift | D-pad right or double-click L3 |
+| Corkscrew | Q / E again mid-roll | LB / RB again |
+| Breach | Dive deep, then race up | same |
 | Pause | Esc | Start |
 
 On a touch screen: drag to look (you swim while touching), two fingers to hum, double-tap
 and hold to gather a sonic boom, flick sideways to roll, three-finger tap to pause.
+Flick up for a loop, flick down for a tail slap, tap with two fingers to spout, and
+double-tap quickly to dash.
 
 Controls are also listed under **Settings → Controls** in the floating title menu. That
 menu is the only place text ever appears.
@@ -64,6 +72,9 @@ menu is the only place text ever appears.
 - Skim the waves, breach, carve tunnels through clouds, roll through waterfall spray.
 - Bump into your playmates: they bump back or start a chase. Bump your mother softly.
 - Fly low over the islands: the anemones curl shut as you pass.
+- Chase the glowing moths, gnat spirals and sea-skimming skitterflies and eat them; when a
+  playmate spins and chirps at you, race it through the rings of moths.
+- Dive deep, then race up to breach in a slow-motion leap; roll in the air for a spin.
 - When the herd sings, watch your mother breathe in before each note, and answer her.
 - In the storm, fly in your mother's lee: her body breaks the wind.
 - When the falcon comes, get between the adults.

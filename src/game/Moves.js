@@ -130,7 +130,8 @@ export class Moves {
     const w = this.w, g = this.game;
     const m = w.model;
     const p = m.flukePos ? m.flukePos(null, _v) : _v.copy(w.pos).addScaledVector(w.fwd, -w.L * 0.46);
-    const near = Math.abs(p.y - sea) < 2.6 || (this.zone === 'surface');
+    // generous: a calf skimming within a few metres of the sea slaps it
+    const near = Math.abs(p.y - sea) < 3.5 || w.pos.y - sea < w.radius * 2 + 3;
     if (near && this.zone !== 'under') {
       // a big wet slap: splash, spray sheet, foam and a thump
       p.y = sea;
@@ -401,7 +402,7 @@ export class Moves {
       if (m.wingTipPos) m.wingTipPos(side, E.pos); else E.pos.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
       E.vel.copy(w.vel).multiplyScalar(0.1).add(_v.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6));
       E.life = 0.9 + Math.random() * 0.6; E.size = 0.16 + Math.random() * 0.12; E.sizeEnd = 0.05; E.alpha = 0.8;
-      E.drag = 1.2; E.gravity = under ? -0.5 : 0.3; E.kind = Math.random() < 0.4 ? 2 : 1; E.fadeIn = 0.02;
+      E.drag = 1.2; E.gravity = under ? -0.5 : 0.3; E.kind = 1; E.fadeIn = 0.02;
       const warm = Math.random();
       E.color[0] = lerp(0.55, 1.0, warm); E.color[1] = lerp(0.85, 0.82, warm); E.color[2] = lerp(1.0, 0.55, warm);
       g.glow.emit(E);

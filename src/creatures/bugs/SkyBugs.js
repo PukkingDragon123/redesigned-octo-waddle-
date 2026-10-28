@@ -119,6 +119,14 @@ varying vec3 vN;
 varying vec3 vV;
 varying vec2 vVar;
 float ell(vec2 p, vec2 c, vec2 r) { vec2 q = (p - c) / r; return dot(q, q); }
+// hand-drawn: wobble a coordinate like a brush that never quite runs straight
+vec2 wob(vec2 p, float k) { return p + k * vec2(sin(p.y * 13.0 + sin(p.x * 7.0) * 1.7), sin(p.x * 11.0 + sin(p.y * 9.0) * 1.3)); }
+// a painted contour: an ink band inside the edge whose width swells and thins along it, broken into strokes
+float contour(float d, vec2 p, float w) {
+  float a = atan(p.y - 0.5, p.x - 0.5);
+  float width = w * (0.55 + 0.45 * sin(a * 3.0 + p.x * 4.0)) * smoothstep(-0.2, 0.5, sin(a * 5.0 + 1.3));
+  return smoothstep(1.0 - width - 0.06, 1.0 - width, d) * smoothstep(1.0, 0.97, d);
+}
 void main() {
   float a = 0.0;
   float emis = 0.0;
@@ -141,6 +149,7 @@ void main() {
     float vein = 0.0;
     if (uShape < 0.5) {
       // lumen moth: broad rounded forewings with a glowing eye spot, tailed hindwings
+      p = wob(p, 0.012);
       if (hind < 0.5) {
         d = ell(p, vec2(0.52, 0.42 + p.x * 0.12), vec2(0.56, 0.4));
         float eye = length((p - vec2(0.62, 0.5)) / vec2(1.0, 1.15));
@@ -152,7 +161,10 @@ void main() {
         col = mix(cA, cB, 0.4 + 0.4 * p.x);
         emis = smoothstep(0.6, 1.0, d) * 0.5 + smoothstep(0.35, 0.0, p.y) * 0.9;
       }
-      vein = smoothstep(0.92, 1.0, sin(atan(p.y - 0.5, p.x) * 11.0)) * 0.25;
+      // veins: wobbly brush strokes fanning from the root, fading before the edge
+      float va = atan(p.y - 0.5, p.x) * 11.0 + sin(p.x * 8.0 + p.y * 5.0) * 0.9 + sin(p.x * 23.0) * 0.25;
+      vein = smoothstep(0.9, 1.0, sin(va)) * 0.28 * smoothstep(0.05, 0.25, p.x) * (1.0 - smoothstep(0.45, 0.9, d));
+      vein += contour(d, p, 0.1) * 0.55;
     } else if (uShape < 1.5) {
       // spiral gnat: little clear wings, all shimmer
       d = ell(p, vec2(0.5, hind > 0.5 ? 0.6 : 0.45), vec2(0.5, 0.32));
@@ -163,7 +175,10 @@ void main() {
       d = ell(p, vec2(0.5, hind > 0.5 ? 0.62 : 0.4), vec2(0.52, 0.42));
       float irid = 0.5 + 0.5 * sin(dot(normalize(vN), vV) * 7.0 + p.x * 5.0 + var * 6.0);
       col = mix(cA, cB, irid);
-      vein = (smoothstep(0.9, 1.0, sin(p.x * 34.0)) + smoothstep(0.85, 1.0, sin(p.y * 15.0))) * 0.18;
+      vec2 q = wob(p, 0.02);
+      vein = (smoothstep(0.9, 1.0, sin(q.x * 34.0 + sin(q.y * 12.0) * 1.4)) * (0.6 + 0.4 * sin(q.x * 5.0))
+            + smoothstep(0.86, 1.0, sin(q.y * 15.0 + sin(q.x * 10.0) * 1.8)) * smoothstep(0.0, 0.3, q.x)) * 0.18 * (1.0 - smoothstep(0.5, 0.95, d));
+      vein += contour(d, p, 0.12) * 0.5;
       col = mix(col, vec3(0.06, 0.08, 0.14), smoothstep(0.05, 0.02, length((p - vec2(0.86, 0.55)) / vec2(1.0, 2.5))));
       emis = smoothstep(0.7, 1.0, d) * 0.6 + irid * 0.25;
     }

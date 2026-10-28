@@ -49,7 +49,7 @@ export class Activities {
     this.raceCount = 0;
     this.r = 1;
     this._eater = { mouth: _mouth, fwd: new Vector3(), body: new Vector3(), speed: 0, open: 0 };
-    this._em = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 0.1, alpha: 1, drag: 1.2, gravity: 0, kind: 2, color: [1, 1, 1], fadeIn: 0.02 };
+    this._em = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 0.1, alpha: 1, drag: 1.2, gravity: 0, kind: 1, color: [1, 1, 1], fadeIn: 0.02 };
     this._col = {};
     for (const k of KINDS) { const c = this.bugs.kinds[k].glowCol; this._col[k] = [c.r, c.g, c.b]; }
     this.moves = story?.player?.moves || null;
@@ -121,7 +121,7 @@ export class Activities {
       E.pos.set(x, y, z);
       E.vel.set((Math.random() - 0.5) * 3, (Math.random() - 0.2) * 3, (Math.random() - 0.5) * 3).addScaledVector(calf.vel, 0.6);
       E.life = 0.5 + Math.random() * 0.6; E.size = kind === 'gnat' ? 0.18 : 0.32; E.sizeEnd = 0.04; E.alpha = 1;
-      E.drag = 2.5; E.gravity = -0.3; E.kind = i % 3 === 0 ? 1 : 2; E.fadeIn = 0.01;
+      E.drag = 2.5; E.gravity = -0.3; E.kind = 1; E.fadeIn = 0.01;
       E.color[0] = col[0] * 1.6; E.color[1] = col[1] * 1.6; E.color[2] = col[2] * 1.6;
       g.glow?.emit(E);
     }
@@ -464,7 +464,7 @@ export class Activities {
       const a = (i / 36) * TAU;
       E.pos.copy(ring.c).addScaledVector(_v, Math.cos(a) * ring.r).addScaledVector(_v2, Math.sin(a) * ring.r);
       E.vel.copy(_v).multiplyScalar(Math.cos(a) * 3).addScaledVector(_v2, Math.sin(a) * 3).addScaledVector(ring.n, 2);
-      E.life = 0.9 + Math.random() * 0.5; E.size = 0.35; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.6; E.gravity = 0.2; E.kind = i % 2 ? 2 : 1;
+      E.life = 0.9 + Math.random() * 0.5; E.size = 0.35; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.6; E.gravity = 0.2; E.kind = 1;
       E.color[0] = 1.6; E.color[1] = 1.3; E.color[2] = 0.7;
       g.glow?.emit(E);
     }
@@ -496,7 +496,7 @@ export class Activities {
     for (let i = 0; i < 60; i++) {
       E.pos.copy(calf.pos);
       E.vel.set((Math.random() - 0.5) * 8, Math.random() * 7, (Math.random() - 0.5) * 8).addScaledVector(calf.vel, 0.5);
-      E.life = 1.2 + Math.random(); E.size = 0.3; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.2; E.gravity = 1.5; E.kind = i % 3 ? 2 : 1;
+      E.life = 1.2 + Math.random(); E.size = 0.3; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.2; E.gravity = 1.5; E.kind = 1;
       E.color[0] = 1.5; E.color[1] = 1.2; E.color[2] = 0.8;
       g.glow?.emit(E);
     }

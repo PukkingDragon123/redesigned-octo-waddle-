@@ -115,7 +115,7 @@ export class Story {
       this.populateEcosystem(Math.max(0, this.chapterIndex));
       // compile every remaining shader (falcon, creatures, shadow variants) while the title is up,
       // so nothing stalls the first time it appears in the journey
-      setTimeout(() => g.engine.precompile([g.engine.scene, g.engine.sceneT]), 1200);
+      setTimeout(() => g.engine.precompile([g.engine.scene, g.engine.sceneT, g.engine.sceneUI].filter(Boolean)), 1200);
       // start judging the frame rate once the background building has settled
       setTimeout(() => { g.perf.ready = true; }, 2500);
     });
@@ -297,6 +297,7 @@ export class Story {
   enterMenu() {
     const g = this.game;
     this.state = 'menu';
+    g.engine.setLook?.('title', { focusOn: this.herd.mother.pos, ease: 0 });
     this.chapterIndex = -1;
     this.script.cancel();
     this.resetWorldState();
@@ -357,6 +358,7 @@ export class Story {
       this.audio.start?.().then(() => this.applyVolumes());
       this.menu.dissolveAll();
       this.state = 'intro';
+      g.engine.setLook?.('cinematic', { focusOn: this.herd.calf.pos, ease: 2 });
       this.script.run(this.intro(), 'intro');
       return;
     }
@@ -410,6 +412,7 @@ export class Story {
     this.menu.returnPage = 'pause';
     this.menu.dissolving = false;
     for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;
+    this.game.engine.setLook?.('title', { focusOn: this.herd.calf.pos, ease: 0.8 });
     this.menu.show('pause');
     this.audio.duck?.(0.5, 0.4);
   }
@@ -418,6 +421,7 @@ export class Story {
     if (this.state !== 'paused') return;
     this.state = 'play';
     this.game.timeScaleTarget = 1;
+    this.game.engine.setLook?.('gameplay', { focusOn: this.herd.calf.pos });
     this.menu.hide();
     this.player.enabled = true;
     this.game.input.setGameplayMode(true);
@@ -505,6 +509,7 @@ export class Story {
     this.script.cancel('chapter');
     if (!opts.fromIntro) this.resetWorldState();
     this.state = 'play';
+    g.engine.setLook?.('gameplay', { focusOn: herd.calf.pos });
     this.player.enabled = true;
     g.input.setGameplayMode(true);
     document.body.classList.add('playing');
@@ -1116,6 +1121,7 @@ export class Story {
     // the finale cannot start under the pause menu (Resume would then be dead)
     while (this.state === 'paused') yield 0;
     this.state = 'ending';
+    g.engine.setLook?.('cinematic', { focusOn: calf.pos, ease: 3 });
     const mt = this.world.motherTree || this.path.pointAt(11150);
     const center = mt.clone().add(new Vector3(0, 120, 0));
     herd.mode = 'gather';

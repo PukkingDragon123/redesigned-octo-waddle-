@@ -143,7 +143,8 @@ export class Menu {
     this.game = game;
     this.group = new Group();
     this.group.name = 'menu';
-    game.engine.sceneT.add(this.group);
+    // the lettering stays crisp: no brush strokes or depth of field, but graded and faded with the frame
+    (game.engine.sceneUI || game.engine.sceneT).add(this.group);
     this.page = null;
     this.items = [];
     this.sel = 0;

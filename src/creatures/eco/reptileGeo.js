@@ -166,8 +166,8 @@ export function buildSkimmer(near = true) {
 // spiral when it perches and streams with a feather frond in flight.
 export function buildCoilwing(near = true) {
   const B = new Builder(REPTILE_ATTRS);
-  torso(B, 0.17, -0.14, 0.05, 0.05, 0.05, near ? 9 : 5, near ? 10 : 6);
-  procTube(B, 1, near ? 4 : 2, near ? 8 : 5, (u) => 0.034 - u * 0.006);
+  torso(B, 0.17, -0.15, 0.068, 0.066, 0.07, near ? 9 : 5, near ? 10 : 6);
+  procTube(B, 1, near ? 4 : 2, near ? 8 : 5, (u) => 0.045 - u * 0.008);
   procTube(B, 6, near ? 24 : 8, near ? 6 : 4, (u) => 0.026 * Math.pow(1 - u, 0.8) + 0.003);
   // head: a lizard skull with a short toothed snout and a crest of quills
   const nH = near ? 8 : 4, aH = near ? 10 : 6;

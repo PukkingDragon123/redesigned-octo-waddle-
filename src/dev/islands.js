@@ -49,17 +49,16 @@ export default async function (game) {
   // the specimen garden on a sandbar
   const garden = new FloraSet('flora-garden');
   world.shoal(id, 0, 120, 40, 1.4, { seed: 9 });
+  // the game's plants: the moving alien species (AlienFlora), then the painted tufts and the few
+  // accent trees that remain
+  const alienRow = [['fiddle', 1.6], ['fiddle', 3.5], ['tubes', 1.2], ['bells', 1.2], ['anemone', 1.4], ['kelp', 1], ['seafan', 1.2], ['puffball', 1.3], ['moss', 1.4], ['sprouts', 1.5]];
+  if (world.flora) alienRow.forEach(([sp, sc], i) => world.flora.place(sp, new Vector3(-50 + i * 6, 1.1, 120), null, sc, i * 0.17));
   const row = [
-    ['fern-a', () => SPECIES.fiddlehead(1000, 4, FLORA_PAL.fern), 4], ['fern-b', () => SPECIES.fiddlehead(1001, 4, FLORA_PAL.fernTeal), 3],
-    ['anem', () => SPECIES.anemone(7000, 1.5, FLORA_PAL.anemone), 2], ['anem-v', () => SPECIES.anemone(7001, 1.5, FLORA_PAL.anemoneViolet), 2],
-    ['kelp', () => SPECIES.kelp(9000, 8, FLORA_PAL.kelp), 0.8], ['tubes', () => SPECIES.tubes(5000, 2.5, FLORA_PAL.tubes), 1.6],
-    ['bells', () => SPECIES.bells(6000, 3, FLORA_PAL.bells), 1.6], ['fan', () => SPECIES.fan(8000, 2, FLORA_PAL.fan), 1.4],
-    ['puffs', () => SPECIES.puffs(2000, 2, FLORA_PAL.puff), 1.4], ['tuftA', () => SPECIES.tuft(4010, 1, FLORA_PAL.grass, SLOT.grassA), 1.4],
-    ['tuftT', () => SPECIES.tuft(4019, 1, FLORA_PAL.grassTeal, SLOT.tendril), 1.4], ['flowers', () => SPECIES.tuft(4100, 1, FLORA_PAL.flowers, SLOT.flowers), 1.2],
-    ['moss', () => SPECIES.moss(3000, 2.4, FLORA_PAL.moss), 1.2], ['palm', () => SPECIES.palm(9800, 14), 1], ['cycad', () => SPECIES.cycad(9850, 5), 1],
+    ['tuftA', () => SPECIES.tuft(4010, 1, FLORA_PAL.grass, SLOT.grassA), 1.4], ['tuftT', () => SPECIES.tuft(4019, 1, FLORA_PAL.grassTeal, SLOT.tendril), 1.4],
+    ['flowers', () => SPECIES.tuft(4100, 1, FLORA_PAL.flowers, SLOT.flowers), 1.2], ['palm', () => SPECIES.palm(9800, 14), 1], ['cycad', () => SPECIES.cycad(9850, 5), 1],
     ['pine', () => SPECIES.pine(9900, 16), 1], ['coil', () => SPECIES.coilTree(9700, 22), 0.8], ['blossom', () => SPECIES.blossomTree(9600, 18), 0.8],
   ];
-  row.forEach(([k, make, sc], i) => garden.add('garden-' + k, make, new Vector3(-50 + i * 6, 1.2, 120), sc, 0.3 * i, [i, 0, 1, 1]));
+  row.forEach(([k, make, sc], i) => garden.add('garden-' + k, make, new Vector3(-50 + (i + alienRow.length) * 6, 1.2, 120), sc, 0.3 * i, [i, 0, 1, 1]));
   world.extra(id, (w) => w.group(id).add(garden.build(game.engine.shadows)));
   await world.buildChapter(id);
   if (p.get('lod') === '1') world.lodDist = -1e9;
@@ -99,5 +98,8 @@ export default async function (game) {
   };
   game.focus.set(v[1][0], Math.max(10, v[1][1]), v[1][2]);
   game.engine.shadows.radius = 260;
-  game.devUpdate = () => world.updateVisibility(0);
+  game.devUpdate = (dt) => {
+    world.flora?.update(dt || 0.016, { disturbers: null });
+    world.updateVisibility(0);
+  };
 }

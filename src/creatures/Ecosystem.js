@@ -24,6 +24,7 @@ import { G } from '../render/Globals.js';
 import { FishSystem } from './eco/Fish.js';
 import { ReptileSystem } from './eco/Reptiles.js';
 import { BubbleSystem } from './eco/Bubbles.js';
+import { SeaGlow } from './eco/SeaGlow.js';
 
 const MAX_TRANSIENT = 48;
 const _v = new Vector3();
@@ -64,6 +65,8 @@ export class Ecosystem {
     this.fish = new FishSystem(this);
     this.reptiles = new ReptileSystem(this);
     this.bubbles = new BubbleSystem(this);
+    /** Night plankton in the water: flares where fish, whales and the calf stir it. */
+    this.plankton = new SeaGlow(this);
 
     this._transient = []; // short-lived predators: mouths, shocks
     this._mouthOf = new WeakMap();
@@ -136,11 +139,19 @@ export class Ecosystem {
    * small splashes share a budget so a boiling bait ball never floods the ocean's sources.
    */
   splash(pos, strength = 0.3, radius = 0.6, small = false, opts = {}) {
+    const o = this.ocean;
+    if (this.debugSplashes) { this.debugSplashes.push([+pos.x.toFixed(1), +pos.z.toFixed(1), small ? 1 : 0, opts.tag || '']); if (this.debugSplashes.length > 60) this.debugSplashes.shift(); }
     if (small) {
       if (this._splashBudget <= 0) return;
       this._splashBudget -= 1;
+      // a fish-sized splash: a few fine droplets and a ripple (the ocean's own splash spray is
+      // sized for whales)
+      this._smallSplash(pos, strength, radius, opts);
+      // a ripple on the sea's sheet (every other splash: a boiling school must not paint a disc of foam)
+      this._rip = (this._rip || 0) + 1;
+      if (o && o.enabled !== false && o.wake && (this._rip & 1)) o.wake(_v.set(pos.x, pos.y - 0.05, pos.z), _v2.set(1.0, 0, 0), Math.max(0.25, radius * 0.6));
+      return;
     }
-    const o = this.ocean;
     if (o && o.enabled !== false && o.splash) {
       o.splash(pos, strength, radius, opts.dir || null);
       return;
@@ -156,6 +167,23 @@ export class Ecosystem {
         vel: _v2.set(Math.cos(a) * (0.5 + rr), (1.5 + Math.random() * 3) * (0.5 + strength), Math.sin(a) * (0.5 + rr)),
         life: 0.8 + Math.random() * 0.6, size: 0.05 + 0.08 * strength, sizeEnd: 0.2 + 0.3 * strength,
         alpha: 0.7, drag: 0.4, gravity: 8, color: [0.95, 0.98, 1.0], kind: 3, fadeIn: 0.02,
+      });
+    }
+  }
+
+  _smallSplash(pos, strength, radius, opts) {
+    const mist = this.game.mist;
+    if (!mist || opts.foamOnly) return;
+    const k = Math.min(strength, 1.2);
+    const n = Math.round(5 + k * 30);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * radius * 0.6;
+      const out = (0.4 + Math.random() * 1.2) * (0.5 + k);
+      mist.emit({
+        pos: _v.set(pos.x + Math.cos(a) * rr, pos.y + 0.03, pos.z + Math.sin(a) * rr),
+        vel: _v2.set(Math.cos(a) * out, (1.2 + Math.random() * 2.6) * (0.6 + k), Math.sin(a) * out),
+        life: 0.45 + Math.random() * 0.5, size: 0.018 + 0.05 * radius * Math.random(), sizeEnd: 0.012,
+        alpha: 0.85, drag: 0.3, gravity: 9.8, color: [0.95, 0.98, 1.0], kind: 3, fadeIn: 0.02,
       });
     }
   }
@@ -177,6 +205,11 @@ export class Ecosystem {
    */
   addReptileFlock(pos, species = 'coilwing', count = 60, opts = {}) {
     return this.reptiles.addFlock(pos, species, count, opts);
+  }
+
+  /** A bloom of bioluminescent plankton (world spawns.plankton): it glows where stirred at night. */
+  addPlankton(pos, radius = 200) {
+    return this.plankton.addPatch(pos, radius);
   }
 
   /** Start (or reinforce) a spiral bubble net at center: the fish crowd inward and up. */
@@ -204,7 +237,7 @@ export class Ecosystem {
    * Fish inside the mouth are eaten (they regrow into their school later) with a few silver
    * flakes. The mouth also scares nearby fish (they flee, but slower than a lunging whale).
    * Pass `owner` (e.g. the whale) so nearby mouths never swap their frame-to-frame records.
-   * Returns the food eaten by this call (glintfin 1, spiralback 2).
+   * Returns the food eaten by this call, in food units (a glintfin 0.25, a spiralback 1).
    */
   eat(mouthPos, mouthRadius = 0.8, dt = 1 / 60, owner = null) {
     if (!this.enabled) return 0;
@@ -240,13 +273,21 @@ export class Ecosystem {
     } else prev = rec.prevSeg;
     rec.pos.copy(mouthPos);
     rec.t = t;
-    const n = this.fish.eatAt(mouthPos, prev, mouthRadius);
+    // a mouth takes fish only as fast as it can gulp (a calf ~13 fish a second, more for adults)
+    const rate = 6 + 3.5 * mouthRadius, cap = 10 + 4 * mouthRadius;
+    rec.budget = Math.min(cap, (rec.budget ?? cap * 0.5) + rate * Math.min(el, 0.3));
+    let n = 0;
+    if (rec.budget >= 1) {
+      n = this.fish.eatAt(mouthPos, prev, mouthRadius, { max: Math.floor(rec.budget) });
+      rec.budget -= this.fish.lastCount;
+    }
     // the mouth as a predator: fish sense its pressure wave ahead of it
     const sp = rec.vel.length();
     const pred = rec.pred || (rec.pred = { x: 0, y: 0, z: 0, r: 0, s: 0, vx: 0, vy: 0, vz: 0, life: 0 });
     pred.x = mouthPos.x + rec.vel.x * 0.06; pred.y = mouthPos.y + rec.vel.y * 0.06; pred.z = mouthPos.z + rec.vel.z * 0.06;
-    pred.r = mouthRadius * 1.5 + 1.2 + sp * 0.12;
-    pred.s = 0.55;
+    // fish bolt from an open mouth: a vacuole opens round it, only the slow ones are taken
+    pred.r = mouthRadius * 1.8 + 1.5 + sp * 0.15;
+    pred.s = 1.0;
     pred.vx = rec.vel.x; pred.vy = rec.vel.y; pred.vz = rec.vel.z;
     pred.life = 0.25;
     if (!this._transient.includes(pred)) this._addTransient(pred);
@@ -274,6 +315,7 @@ export class Ecosystem {
     this.fish.clear();
     this.reptiles.clear();
     this.bubbles.clear();
+    this.plankton.clear();
     this._transient.length = 0;
     this._mouths.length = 0;
     this._mouthByOwner = new WeakMap();
@@ -289,12 +331,14 @@ export class Ecosystem {
     const r2 = radius * radius;
     this.fish.prune(center, r2);
     this.reptiles.prune(center, r2);
+    this.plankton.prune(center, r2);
   }
 
   dispose() {
     this.fish.dispose();
     this.reptiles.dispose();
     this.bubbles.dispose();
+    this.plankton.dispose();
   }
 
   // ---- compatibility with the sky ecosystem's call sites ----------------------------------
@@ -383,6 +427,7 @@ export class Ecosystem {
     t2 = performance.now(); T.birds += (t2 - t1 - T.birds) * 0.05;
     this._netBubbles(dt, ctx);
     this.bubbles.update(dt);
+    this.plankton.update(dt, ctx);
 
     const ms = performance.now() - t0;
     const s = this.stats;
@@ -488,12 +533,12 @@ export class Ecosystem {
         if (w.pos.y > sc.surf - 1.5) continue;
         const nt = (this._bubbleT.get(w) ?? 0) - dt;
         if (nt > 0) { this._bubbleT.set(w, nt); continue; }
-        this._bubbleT.set(w, 0.22);
+        this._bubbleT.set(w, 0.16);
         const L = w.L || 10;
         const up = w.up || _v2.set(0, 1, 0);
         const f = w.fwd || _v.set(0, 0, 1);
         const p = _v.set(w.pos.x + f.x * L * 0.18 + up.x * L * 0.08, w.pos.y + f.y * L * 0.18 + up.y * L * 0.08, w.pos.z + f.z * L * 0.18 + up.z * L * 0.08);
-        this.bubbles.emit(p, 1.4 * sc.net, {});
+        this.bubbles.emit(p, 1.6 * sc.net, { stream: 2.4, spread: 1.1, big: 1.5 });
       }
     }
   }

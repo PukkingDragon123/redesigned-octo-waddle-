@@ -27,7 +27,7 @@ import { LAYER_SHADOW, depthVariant } from '../render/Shadows.js';
 import { getNoiseTexture } from '../render/NoiseTex.js';
 import { FLORA_VERT_HEAD, FLORA_FRAG_HEAD } from './glsl.js';
 import { instancedGeometry } from './geometry.js';
-import { scatterPatch, plantQuat, FOOTPRINT } from './scatter.js';
+import { scatterPatch, plantQuat, FOOTPRINT, BIOMES, SCATTER_ORDER } from './scatter.js';
 import { SPECIES } from './species/index.js';
 import { buildImpostor } from './impostor.js';
 import { BALLS, puffPeriod, puffPhase } from './species/puffball.js';
@@ -169,6 +169,19 @@ export class AlienFlora {
   }
 
   /**
+   * addPatch split species by species, awaiting slice() between them (a big reef or meadow patch
+   * then never blocks a frame for long while the world builds behind the menu).
+   */
+  async addPatchSliced(opts, slice) {
+    const rules = BIOMES[opts.biome] || BIOMES.meadow;
+    for (const name of SCATTER_ORDER) {
+      if (!rules[name]) continue;
+      this.addPatch(Object.assign({}, opts, { only: [name] }));
+      await slice?.();
+    }
+  }
+
+  /**
    * A single (hero) plant. up: growth direction (default world up); seed: any number (deterministic
    * look). opts: { palette 0..3, hue -1..1, yaw, aux } (aux 2..3 freezes the pose: curl / closed).
    */
@@ -194,9 +207,11 @@ export class AlienFlora {
     const t0 = performance.now();
     const allChunks = [];
     for (const sp of this.species) {
-      const n = sp.raw.length / STRIDE;
+      // raw holds only the plants added since the last build (it is emptied once they are stored)
       const n0 = this.built && sp.pos ? sp.n : 0;
-      if (n0 === n && sp.pos) {
+      const m = sp.raw.length / STRIDE;
+      const n = n0 + m;
+      if (!m && sp.pos) {
         // unchanged since the last build: keep the stores, only reset the culling state
         for (const c of sp.chunks) { c.mask = 0; c.inActive = false; c.off[0] = c.off[1] = c.off[2] = -1; c.used = 0; allChunks.push(c); }
         sp.active = [];
@@ -207,11 +222,10 @@ export class AlienFlora {
         continue;
       }
       // the new plants (n0..n), sorted by chunk so each chunk is one contiguous range
-      const m = n - n0;
       const keys = new Float64Array(m);
       const order = new Uint32Array(m);
       for (let j = 0; j < m; j++) {
-        const i = n0 + j;
+        const i = j;
         const x = sp.raw[i * STRIDE], z = sp.raw[i * STRIDE + 2];
         const rx = Math.floor(x / REGION), rz = Math.floor(z / REGION);
         // dense filler uses smaller chunks: tighter culling and less LOD overlap
@@ -251,7 +265,7 @@ export class AlienFlora {
       const R = sp.raw;
       for (let j = 0; j < m; j++) {
         const k = n0 + j;
-        const o = (n0 + order[j]) * STRIDE;
+        const o = order[j] * STRIDE;
         sp.pos[k * 4] = R[o]; sp.pos[k * 4 + 1] = R[o + 1]; sp.pos[k * 4 + 2] = R[o + 2]; sp.pos[k * 4 + 3] = R[o + 3];
         sp.quat[k * 4] = R[o + 4]; sp.quat[k * 4 + 1] = R[o + 5]; sp.quat[k * 4 + 2] = R[o + 6]; sp.quat[k * 4 + 3] = R[o + 7];
         sp.prm[k * 4] = R[o + 8]; sp.prm[k * 4 + 1] = R[o + 9]; sp.prm[k * 4 + 2] = R[o + 10]; sp.prm[k * 4 + 3] = R[o + 11];
@@ -265,6 +279,7 @@ export class AlienFlora {
         sp.chunkOf[k] = sp.chunks.length - 1;
       }
       sp.n = n;
+      sp.raw = [];
       // chunk bounding spheres of the new chunks (plants reach up to height * scale)
       for (let ci = firstNew; ci < sp.chunks.length; ci++) {
         const c = sp.chunks[ci];

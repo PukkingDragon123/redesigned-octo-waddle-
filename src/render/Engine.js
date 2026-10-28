@@ -42,6 +42,9 @@ export class Engine {
     this.renderer.setClearColor(0x000000, 1);
     this.scene = new Scene();
     this.sceneT = new Scene();
+    // drawn over the finished frame, before the paint pass, and protected from its strokes and depth
+    // of field (the title menu's lettering): crisp, but still graded, canvas-textured and faded
+    this.sceneUI = new Scene();
     this.scene.matrixWorldAutoUpdate = true;
     this.camera = new PerspectiveCamera(52, 1, 0.4, 16000);
     this.camera.position.set(0, 150, 30);

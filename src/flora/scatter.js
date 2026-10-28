@@ -124,6 +124,8 @@ export function plantQuat(normal, align, yaw, out = new Quaternion()) {
  * across patches so overlapping patches (meadow / cliff / shore on one island) never stack plants.
  * Returns { [species]: count }.
  */
+export const SCATTER_ORDER = ['kelp', 'fiddle', 'tubes', 'bells', 'seafan', 'anemone', 'puffball', 'moss', 'sprouts'];
+
 export function scatterPatch(patch, known, emit, shared = null) {
   const { center, radius } = patch;
   const sample = patch.sample;
@@ -132,7 +134,10 @@ export function scatterPatch(patch, known, emit, shared = null) {
   // patch.mult: per-species density multipliers ({ moss: 0.2 }); patch.fillerCap: max filler plants
   // of one species in this patch (a route of islands needs far less ground cover than a showcase)
   const mult = patch.mult || null;
-  const r = rng(((patch.seed ?? 1) * 7919 + 101) >>> 0);
+  // patch.only: scatter just these species (a caller can split a big patch across frames); each
+  // species then draws from its own seeded stream
+  const only = patch.only || null;
+  const r = rng((((patch.seed ?? 1) * 7919 + 101) + (only ? only.join('').length * 7717 + only[0].charCodeAt(0) * 131 : 0)) >>> 0);
   const area = Math.PI * radius * radius;
   const counts = {};
   // occupied footprints of the big plants (hash grid, 2 m cells, shared across patches)
@@ -171,7 +176,7 @@ export function scatterPatch(patch, known, emit, shared = null) {
   const order = ['kelp', 'fiddle', 'tubes', 'bells', 'seafan', 'anemone', 'puffball', 'moss', 'sprouts'];
   for (const name of order) {
     const rule = rules[name];
-    if (!rule || !known.has(name)) continue;
+    if (!rule || !known.has(name) || (only && !only.includes(name))) continue;
     const fp = FOOTPRINT[name];
     const align = rule.align ?? fp.align;
     const palMain = pickPalette(rule.pal, r);

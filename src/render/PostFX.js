@@ -2,7 +2,8 @@
 // in-cloud veil, colour grading, neutral tone mapping, vignette and dithering.
 import {
   WebGLRenderTarget, HalfFloatType, LinearFilter, Vector2, Vector3, Vector4, Color, Matrix4,
-  AdditiveBlending, NoBlending, RGBAFormat,
+  AdditiveBlending, NoBlending, RGBAFormat, CustomBlending, AddEquation, ZeroFactor, OneFactor,
+  SrcAlphaFactor, OneMinusSrcAlphaFactor,
 } from 'three';
 import { FullscreenPass, FS_VERT } from './FullscreenPass.js';
 import { G } from './Globals.js';
@@ -543,10 +544,42 @@ export class PostFX {
       vig.value = on ? v0 * 0.5 : v0; // the paint pass owns the soft edge darkening
       this.composite.render(renderer, pp.ldrTarget);
       vig.value = v0;
+      this._renderUI(renderer, camera, true);
+      // fades end on the exact fade colour, after the paint pass has lifted its blacks
+      const fc = this.composite.uniforms.uFadeColor.value;
+      pp.paint.fade.set(fc.r, fc.g, fc.b, this.composite.uniforms.uFade.value);
       this._ppOpts.time = G.uTime.value;
       pp.apply(pp.ldrTarget.texture, sceneRT.depthTexture, camera, null, this._ppOpts);
       return;
     }
     this.composite.render(renderer, null);
+    this._renderUI(renderer, camera, false);
+  }
+
+  /**
+   * The overlay scene (engine.sceneUI) over the composite. Into the paint target its alpha marks
+   * the pixels the paint pass must keep crisp (dst alpha *= 1 - src alpha).
+   */
+  _renderUI(renderer, camera, mask) {
+    const ui = this.engine.sceneUI;
+    if (!ui || ui.children.length === 0) return;
+    if (mask) {
+      this._uiMask = this._uiMask || ((o) => {
+        const m = o.material;
+        if (!m || Array.isArray(m) || m.blending === NoBlending) return;
+        if (m.blending !== CustomBlending) {
+          const add = m.blending === AdditiveBlending;
+          m.blending = CustomBlending;
+          m.blendEquation = AddEquation;
+          m.blendSrc = add ? (m.premultipliedAlpha ? OneFactor : SrcAlphaFactor) : (m.premultipliedAlpha ? OneFactor : SrcAlphaFactor);
+          m.blendDst = add ? OneFactor : OneMinusSrcAlphaFactor;
+        }
+        m.blendEquationAlpha = AddEquation;
+        m.blendSrcAlpha = ZeroFactor;
+        m.blendDstAlpha = OneMinusSrcAlphaFactor;
+      });
+      ui.traverse(this._uiMask);
+    }
+    renderer.render(ui, camera);
   }
 }

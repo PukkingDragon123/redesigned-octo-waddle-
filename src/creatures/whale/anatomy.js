@@ -56,7 +56,7 @@ export const PROFILES = {
     fluke: { span: 0.185, chord: 0.11 },
     plates: { t0: 0.15, t1: 0.63, n: 8, s0: 0.017, s1: 0.165, thick: 0.0125 },
     pleats: { t0: 0.47, t1: 0.985, n: 34 },
-    mane: { t0: 0.565, t1: 0.735 },
+    mane: { t0: 0.565, t1: 0.716 },
     navel: 0.47,
     texWarp: 1.25, // extra texel density on the head
   }),

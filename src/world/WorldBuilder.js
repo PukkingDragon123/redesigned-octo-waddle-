@@ -74,6 +74,9 @@ export class WorldBuilder {
     this._tiles = new Set();
     this._v = new Vector3();
     this.lodDist = 650;
+    // build slice per frame (ms); ?debug&worldslice=<ms> builds faster in headless checks
+    const ws = game.debug && game.params?.get?.('worldslice');
+    if (ws) this.sliceMs = +ws;
     for (const id of CHAPTER_ORDER) this.plan[id] = { islands: [], extras: [], features: [] };
     this.shelters = []; // calm lagoon water: [x, z, radius, strength] for the ocean
     this.chapterOpts = {};
@@ -557,10 +560,7 @@ export class WorldBuilder {
       t0 = performance.now();
       this.prepareGround(id);
       await slice();
-      for (const p of this.floraPatches(id)) {
-        this.flora.addPatch(p);
-        await slice();
-      }
+      for (const p of this.floraPatches(id)) await this.flora.addPatchSliced(p, slice);
       tm('alienScatter', t0);
       t0 = performance.now();
       this.flora.build();
@@ -987,14 +987,16 @@ export class WorldBuilder {
     const out = [];
     // a route of islands is seen from 20-120 m up: tall plants carry it, ground cover only matters
     // close up, so filler (moss cushions, sprouts) and the small anemones are thinned out
-    const MULT = { moss: 0.16, sprouts: 0.1, anemone: 0.7 };
-    const REEF = { moss: 0.1, anemone: 0.8, seafan: 0.9, kelp: 1, tubes: 0.8 };
+    const MULT = { moss: 0.16, sprouts: 0.1, anemone: 0.5 };
+    const SHORE = { moss: 0.2, sprouts: 0.15, anemone: 0.45, seafan: 0.35, kelp: 0.6, tubes: 0.8, puffball: 1 };
+    // reefs are seen from above through the water: a few colonies on the crest, not a carpet
+    const REEF = { moss: 0.04, anemone: 0.18, seafan: 0.22, kelp: 0.3, tubes: 0.25 };
     const mk = (center, radius, biome, density) => {
       const g = { y: 0, normal: new Vector3(0, 1, 0), island: null };
       // only the islands that can reach into this patch (groundAt would test every island)
       const near = this.islands.filter((rec) => rec.geo && Math.hypot(rec.pos.x - center.x, rec.pos.z - center.z) < radius + rec.R * 1.5 + 5);
       return {
-        center, radius, biome, density, chapter: id, mult: biome === 'reef' ? REEF : MULT, fillerCap: 2500,
+        center, radius, biome, density, chapter: id, mult: biome === 'reef' ? REEF : biome === 'shore' ? SHORE : MULT, fillerCap: 2500,
         sample: (x, z) => {
           this._groundNear(near, x, z, g);
           if (g.y < -24) return null;

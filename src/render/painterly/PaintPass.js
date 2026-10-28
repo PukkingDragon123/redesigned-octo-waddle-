@@ -164,6 +164,7 @@ uniform vec3 uWhite;
 uniform vec4 uGrain;      // x amount, y thread period (px at 1080p), z px scale (height / 1080), w fibre mix
 uniform vec4 uVig;        // x amount, y inner, z outer, w aspect
 uniform vec3 uVigTint;
+uniform vec4 uFade;       // rgb fade colour, a amount (the screen fades end exactly on it)
 uniform float uDofOn;
 uniform float uSplit;
 uniform float uDebug;
@@ -238,7 +239,8 @@ float canvas(vec2 p) {
 
 void main() {
   vec2 uv = gl_FragCoord.xy * uTexel;
-  vec3 src = texture(tColor, uv).rgb;
+  vec4 srcA = texture(tColor, uv);
+  vec3 src = srcA.rgb;
   vec3 col = src;
   if (uv.x >= uSplit) {
     float z = sceneZ(uv, texelFetch(tDepth, ivec2(gl_FragCoord.xy), 0).r);
@@ -272,7 +274,8 @@ void main() {
         // and suggests the fine texture rather than erasing it: some of it stays under the strokes
         // (less along strong coherent edges, where the stroke itself draws the form), so textured
         // surfaces read as brushwork instead of flat posterised cells
-        k += (src - k) * uStroke.x * (1.0 - 0.5 * A);
+        // (clamped: isolated dark speckle, e.g. aliasing in fine relief, stays painted over)
+        k += clamp(src - k, vec3(-0.06), vec3(0.09)) * uStroke.x * (1.0 - 0.5 * A);
         // bristles: fine grain fixed to the canvas, smeared along the stroke direction (a short line
         // integral), so every stroke carries a brush texture that follows the form
         if (uStroke.y > 0.0) {
@@ -289,6 +292,8 @@ void main() {
     }
 #endif
     if (dofT > 0.0) col = mix(col, dofSample(uv, coc), dofT);
+    // overlay lettering (engine.sceneUI) cleared the alpha: no strokes or blur there
+    col = mix(src, col, srcA.a);
     if (uDebug < 0.5) {
       col = grade(col);
       float h = canvas(gl_FragCoord.xy / uGrain.z) - 0.5;
@@ -298,6 +303,7 @@ void main() {
       col = mix(col, col * uVigTint, smoothstep(uVig.y, uVig.z, length(vd)) * uVig.x);
     }
   }
+  col = mix(col, uFade.rgb, uFade.a);
   col += (pIgn(gl_FragCoord.xy) - 0.5) / 255.0;
   o = vec4(col, 1.0);
 }
@@ -336,12 +342,15 @@ function rt(w, h, type, filter = LinearFilter, format = RGBAFormat) {
 }
 
 export const PAINT_DEFAULTS = {
-  radius: 3.6, // Kuwahara radius in px at 1080p (scaled with the frame height)
+  radius: 3.8, // Kuwahara radius in px at 1080p (scaled with the frame height)
+  refHeight: 1080, // the frame height every size here is given for (tests: crops at 1:1 scale)
   alpha: 0.75, // anisotropy (smaller: longer strokes along edges)
   mix: 1.0,
-  hardness: 140, // sector variance hardness (higher: crisper, more posterised strokes)
-  texture: 0.3, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
-  bristle: 0.12, // brush-bristle streaks along the strokes
+  // sector variance hardness (higher: crisper but flatter, posterised cells on textured surfaces
+  // such as waves and fur; lower: softer strokes that keep the form's texture)
+  hardness: 70,
+  texture: 0.25, // fine texture kept under the strokes (0: flat Kuwahara cells, 1: no strokes)
+  bristle: 0.2, // brush-bristle streaks along the strokes
   bristleLen: 9, // their length (px at 1080p)
   detail: 0.85, // how much small bright detail (eye glints, sparkle) the filter must keep
   nearStart: 3, // metres: from here the filter eases in...
@@ -360,7 +369,7 @@ export const PAINT_DEFAULTS = {
   lightTone: new Color(1.05, 1.0, 0.92), // warm highlights
   black: new Color(0.014, 0.012, 0.02), // painted (never pure) black
   white: new Color(0.985, 0.97, 0.935), // warm paper white
-  grain: 0.05, // canvas strength
+  grain: 0.04, // canvas strength
   thread: 3.4, // canvas thread period (px at 1080p)
   fibre: 0.4,
   vignette: 0.22,
@@ -388,6 +397,7 @@ export class PaintPass {
     this.dof = Object.assign({ focus: 60, focusUv: new Vector2(0.5, 0.5), focusRate: 2.5 }, DOF_PRESETS.off);
     this.split = 0;
     this.debug = 0;
+    this.fade = new Vector4(0, 0, 0, 0); // rgb + amount, set by PostFX from its composite fade
     this.sea = opts.sea ?? true; // the flat sea at G.uSeaLevel stands in for the depth-less ocean
     this.width = 1;
     this.height = 1;
@@ -443,7 +453,7 @@ export class PaintPass {
       uShadeLift: { value: new Vector3() }, uGradeB: { value: new Vector4() },
       uBlack: { value: new Vector3() }, uWhite: { value: new Vector3() },
       uGrain: { value: new Vector4() }, uVig: { value: new Vector4() }, uVigTint: { value: new Vector3() },
-      uDofOn: { value: 0 }, uSplit: { value: 0 }, uDebug: { value: 0 },
+      uDofOn: { value: 0 }, uSplit: { value: 0 }, uDebug: { value: 0 }, uFade: { value: new Vector4() },
     }, view, coc);
     this.paintPasses = this.kernels.map((k) => {
       const p = mk(paintFrag(k), paintUniforms, { defines: k ? { KUWAHARA: 1 } : {} });
@@ -498,7 +508,7 @@ export class PaintPass {
     const r = this.renderer;
     const p = this.params;
     const s = strength;
-    const res = this.height / 1080;
+    const res = this.height / (p.refHeight || 1080);
     this._camera(camera);
     if (typeof opts.dof === 'string') {
       if (opts.dof !== this._dofName) this.setDof(opts.dof);
@@ -592,6 +602,7 @@ export class PaintPass {
     U.uVigTint.value.set(p.vigTint.r, p.vigTint.g, p.vigTint.b);
     U.uDofOn.value = dofOn ? 1 : 0;
     U.uSplit.value = this.split;
+    U.uFade.value.copy(this.fade);
     U.uDebug.value = this.debug;
     pass.render(r, out);
   }

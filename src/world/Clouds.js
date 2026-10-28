@@ -1,7 +1,10 @@
 // Volumetric-looking cumulus built from lit spherical impostors ("puffs").
-// Each puff is a soft cauliflower sphere with stylized lighting: warm lit tops, cool lilac
-// undersides, silver linings when backlit. Puffs part and swirl around the calf's path,
-// are blown apart by sonic booms, ripple with the herd's song and glow inside lightning.
+// A cloud is lit as ONE mass: every puff fragment knows where it sits inside its cloud (cluster
+// space), so the light, the flat shaded base and the billow pattern run continuously across
+// overlapping puffs and no single ball reads on its own. Soft, eroded, painterly edges; tops
+// sheared downwind; flat condensation bases. Warm lit tops, cool lilac undersides, silver linings
+// when backlit. Puffs part and swirl around the calf's path, are blown apart by sonic booms,
+// ripple with the herd's song and glow inside lightning.
 import {
   InstancedBufferGeometry, InstancedBufferAttribute, BufferAttribute, Mesh, ShaderMaterial,
   CustomBlending, OneFactor, OneMinusSrcAlphaFactor, Vector3, DynamicDrawUsage,
@@ -16,8 +19,8 @@ ${UNIFORMS}
 ${NOISE}
 ${LIGHTING}
 attribute vec4 aPuff;   // xyz centre, radius
-attribute vec4 aLocal;  // offset from cluster centre (normalised), seed
-attribute vec4 aExtra;  // x opacity, y moisture, z storm darkness, w flatness (sea fog lenses)
+attribute vec4 aLocal;  // offset from cluster centre (normalised); w: base level and seed (see addPuff)
+attribute vec4 aExtra;  // x opacity, y puff radius / cloud radius, z storm darkness, w flatness (sea fog lenses)
 uniform vec3 uDrift;
 uniform vec4 uTrail[24];
 uniform vec4 uMovers[12];
@@ -43,6 +46,9 @@ varying vec3 vWorld;
 varying vec3 vClusterN;
 varying float vPeriph;
 varying vec2 vOutDir;
+varying vec3 vCl;      // the quad point in cluster space (cloud radius = 1)
+varying float vK;      // puff radius in cluster units
+varying float vBase;   // the cloud's flat base in cluster units (-2: none)
 
 vec3 interact(vec3 c, float r) {
   vec3 d = vec3(0.0);
@@ -104,15 +110,19 @@ void main() {
   float flatK = aExtra.w;
   vec3 rightF = right - vec3(0.0, right.y * flatK, 0.0);
   vec3 upF = up - vec3(0.0, up.y * flatK, 0.0);
-  vec3 wp = c + (rightF * position.x + upF * position.y) * sz;
+  vec3 off = (rightF * position.x + upF * position.y) * sz;
+  vec3 wp = c + off;
   vUv = position.xy * 1.18;
+  vK = aExtra.y;
+  vCl = aLocal.xyz + off * (aExtra.y / max(r, 1e-3));
   vRight = right; vUp = up; vBack = back;
   // self-shadowing inside the cluster: sun-facing and upper puffs are brighter
   float sunSide = dot(aLocal.xyz, uSunDir);
   vShade = clamp(0.62 + 0.42 * sunSide + 0.32 * aLocal.y, 0.08, 1.0);
   // a fog bank is lit evenly across its width: only its top is a little brighter
   vShade = mix(vShade, 0.82 + 0.18 * clamp(aLocal.y * 2.0, -1.0, 1.0), flatK);
-  vSeed = aLocal.w;
+  vSeed = fract(aLocal.w) * 10.0;
+  vBase = floor(aLocal.w) / 100.0 - 2.0;
   vClusterN = normalize(aLocal.xyz + vec3(0.0, 0.35, 0.0));
   // silhouette puffs: offset from the cluster centre measured across the view direction
   vec3 vdir = normalize(c - uCamPos);
@@ -161,35 +171,52 @@ varying vec3 vWorld;
 varying vec3 vClusterN;
 varying float vPeriph;
 varying vec2 vOutDir;
+varying vec3 vCl;
+varying float vK;
+varying float vBase;
 void main() {
   vec2 uv = vUv;
   float r2 = dot(uv, uv);
   if (r2 > 1.4) discard;
   vec2 sd = vec2(vSeed, vSeed * 1.37);
+  float z = sqrt(max(1.0 - min(r2, 1.0), 0.0));
+  // where this fragment sits on the cloud: the quad point pushed out to the puff's surface
+  vec3 cl = vCl + vBack * z * vK;
+  // billows in WORLD space: continuous across overlapping puffs (no ball repeats its own pattern)
+  vec3 wq = vWorld + vBack * z * vRadius;
+  float bA = texture2D(uNoise, wq.xz / 210.0 + wq.y / 260.0 + uTime * 0.0008).g;
+  float bB = texture2D(uNoise, vec2(wq.x + wq.z, wq.y) / 75.0 + 0.31).g;
   float n1 = texture2D(uNoise, uv * 0.3 + sd).g;
   float n2 = texture2D(uNoise, uv * 0.8 + sd * 1.7 + uTime * 0.004).b;
-  // cauliflower silhouette
-  float edge = r2 + (n1 - 0.55) * 0.6 + (n2 - 0.5) * 0.28;
-  // a softer core: overlapping puffs build one continuous mass instead of stacked discs
-  float a = smoothstep(1.0, 0.22, edge) * vAlpha;
+  // soft silhouette: the puff fades out over a wide band; only the outline of the whole cloud is
+  // eroded into ragged, brushy wisps (inner puffs melt into each other)
+  float erode = (n1 - 0.55) * mix(0.35, 0.75, vPeriph) + (bB - 0.5) * mix(0.25, 0.6, vPeriph) + (n2 - 0.5) * 0.2;
+  float edge = r2 + erode;
+  float a = smoothstep(1.0, mix(0.05, 0.3, vPeriph), edge) * vAlpha;
+  // the condensation level: the base of the cloud is flat and a little crisper
+  float baseY = vBase + (bA - 0.5) * 0.05;
+  a *= smoothstep(baseY - 0.04, baseY + 0.05, cl.y);
   if (a < 0.003) discard;
-  // pseudo-normal: the cluster's outward normal blended with the lumpy puff surface,
-  // so a cloud is lit as one mass instead of a pile of bubbles
-  float z = sqrt(max(1.0 - min(r2, 1.0), 0.0));
-  vec3 nv = normalize(vec3(uv * (1.0 + (n1 - 0.5) * 0.7), z + 0.2));
-  vec3 Np = normalize(vRight * nv.x + vUp * nv.y + vBack * nv.z);
-  vec3 N = normalize(vClusterN * 0.8 + Np * 0.34);
+  // the cloud's own surface normal (an ellipsoid flattened at the base), lightly bumped by the
+  // world-space billows and a little by the puff's roundness
+  vec3 Nc = normalize(cl * vec3(1.0, 1.35, 1.0) + vec3(0.0, 0.22, 0.0));
+  Nc = normalize(mix(Nc, vec3(0.0, -1.0, 0.0), smoothstep(baseY + 0.18, baseY, cl.y) * 0.85));
+  vec3 Np = normalize(vRight * uv.x + vUp * uv.y + vBack * (z + 0.2));
+  vec3 N = normalize(Nc * 0.85 + Np * 0.12 + vClusterN * 0.18);
   float ndl = dot(N, uSunDir);
-  float light = smoothstep(-0.35, 0.7, ndl) * vShade;
-  light = mix(light, light * light * (3.0 - 2.0 * light), 0.4);
+  // self-shadow through the mass: deeper inside the cloud (toward the sun's far side) is darker
+  float depthSun = clamp(dot(cl, uSunDir) * 0.5 + 0.5, 0.0, 1.0);
+  float light = smoothstep(-0.55, 0.7, ndl) * mix(0.72, 1.0, depthSun) * mix(1.0, vShade, 0.3);
+  light *= 0.82 + 0.36 * bA;
+  light = clamp(mix(light, light * light * (3.0 - 2.0 * light), 0.35), 0.0, 1.0);
   // backlit masses are thick and dim in the middle
   light *= 1.0 - vBacklit * 0.35 * (1.0 - vPeriph);
   // shade: skylight fills the upper shadows, the darker sea below fills the base
   vec3 shade = uCloudShadow * mix(0.72, 1.08, smoothstep(-0.6, 0.7, N.y));
   vec3 col = mix(shade, uCloudLit, light);
   col *= mix(0.9, 1.04, N.y * 0.5 + 0.5);
-  // billow texture: small cauliflower bumps catch the light on the sunny side
-  col *= 1.0 + (n2 - 0.5) * 0.18 * light;
+  // billow texture: cauliflower bumps catch the light on the sunny side (world space, continuous)
+  col *= 1.0 + (bB - 0.5) * 0.22 * light;
   col += uSkyAmbient * 0.04;
   col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.6;
   // silver lining only along the outer silhouette of the cloud
@@ -271,14 +298,21 @@ export class Clouds {
     this._fwd = new Vector3();
   }
 
-  addPuff(x, y, z, r, lx, ly, lz, seed, opacity = 1, moisture = 0, dark = 0, flat = 0) {
+  /**
+   * One puff. (lx, ly, lz): its offset from the cloud centre in cloud radii; k: its radius in cloud
+   * radii (the shader lights every puff as part of one mass); base: the cloud's flat base in cloud
+   * radii below the centre (-2: none). seed only varies the puff's own edge noise.
+   */
+  addPuff(x, y, z, r, lx, ly, lz, seed, opacity = 1, k = 0.25, dark = 0, flat = 0, base = -2) {
     if (this.count >= this.max) return -1;
     const i = this.count++;
     const o = i * 12;
     const d = this.data;
     d[o] = x; d[o + 1] = y; d[o + 2] = z; d[o + 3] = r;
-    d[o + 4] = lx; d[o + 5] = ly; d[o + 6] = lz; d[o + 7] = seed;
-    d[o + 8] = opacity; d[o + 9] = moisture; d[o + 10] = dark; d[o + 11] = flat;
+    // w packs the base level (integer part, 1/100 radius steps) and the seed (fraction)
+    const sf = (((seed % 10) + 10) % 10) / 10;
+    d[o + 4] = lx; d[o + 5] = ly; d[o + 6] = lz; d[o + 7] = Math.round(clamp(base + 2, 0, 4) * 100) + Math.min(sf, 0.999);
+    d[o + 8] = opacity; d[o + 9] = k; d[o + 10] = dark; d[o + 11] = flat;
     return i;
   }
 
@@ -294,6 +328,11 @@ export class Clouds {
     const base = center.y;
     const cc = new Vector3(center.x, base + h * 0.4, center.z);
     const rad = Math.max(ax, az, h * 0.6);
+    // the tops lean downwind (wind shear over the trade-wind layer)
+    const wd = opts.windDir ?? 0.6;
+    const shear = opts.shear ?? lerp(0.12, 0.32, r());
+    const sx = Math.sin(wd) * shear, sz = Math.cos(wd) * shear;
+    const baseL = opts.noBase ? -2 : (base - cc.y) / rad;
     // towers: one main dome and a few shoulders, tallest near the middle
     const nT = opts.towers ?? Math.max(1, Math.min(6, Math.round(1 + w / 140 + r() * 1.5)));
     const towers = [];
@@ -302,49 +341,53 @@ export class Clouds {
       const main = i === 0;
       const a = r() * Math.PI * 2, d = main ? r() * 0.15 : lerp(0.3, 0.75, Math.sqrt(r()));
       const tx = center.x + Math.cos(a) * ax * d, tz = center.z + Math.sin(a) * az * d;
-      const tr = (main ? lerp(0.42, 0.55, r()) : lerp(0.24, 0.4, r())) * Math.min(ax, az) * 1.25;
-      // towers no taller than about their width: tall thin stacks read as trees, not cumulus
-      const th = Math.min(h * (main ? 1 : lerp(0.45, 0.8, r()) * (1 - d * 0.35)), tr * 2.6);
+      const tr = (main ? lerp(0.45, 0.58, r()) : lerp(0.28, 0.42, r())) * Math.min(ax, az) * 1.25;
+      // domes about as tall as they are wide: tall thin stacks read as columns of balls
+      const th = Math.min(h * (main ? 1 : lerp(0.45, 0.8, r()) * (1 - d * 0.35)), tr * (main ? 2.0 : 1.6));
       const t = { x: tx, z: tz, rx: tr, ry: th * 0.6, rz: tr * lerp(0.85, 1.1, r()), cy: base + th * 0.42 };
       t.wgt = t.rx * (t.ry + t.rx);
       wsum += t.wgt;
       towers.push(t);
     }
-    const n = Math.round(clamp((w * h) / (opts.sparse ? 520 : 300), 14, opts.maxPuffs ?? 240) * (opts.density ?? 1));
+    // fewer, bigger, overlapping puffs: the mass is lit as one, the edges carry the detail
+    const n = Math.round(clamp((w * h) / (opts.sparse ? 900 : 560), 10, opts.maxPuffs ?? 170) * (opts.density ?? 1));
     const v = new Vector3();
-    const minR = opts.minR ?? 5;
-    const add = (px, py, pz, pr, op) => {
+    const minR = opts.minR ?? 6;
+    const add = (px, py, pz, pr, op, flat = 0) => {
+      // shear: the higher, the further downwind
+      const up = Math.max(0, py - base);
+      px += sx * up; pz += sz * up;
       v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
-      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * op, opts.moisture ?? 0, opts.dark ?? 0);
+      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * op, pr / rad, opts.dark ?? 0, flat, baseL);
     };
     // a few big core puffs keep the body solid from any angle
-    for (const t of towers) add(t.x, Math.max(t.cy, base + t.rx * 0.5), t.z, Math.max(minR, Math.min(t.rx, t.ry) * 0.8), 0.9);
+    for (const t of towers) add(t.x, Math.max(t.cy, base + t.rx * 0.5), t.z, Math.max(minR, Math.min(t.rx, t.ry) * 0.85), 0.92);
     for (let i = 0; i < n; i++) {
       // pick a tower by size, then a point on its upper shell
       let k = r() * wsum, t = towers[0];
       for (const tt of towers) { k -= tt.wgt; if (k <= 0) { t = tt; break; } }
       const u = r() * 2 - 1, phi = r() * Math.PI * 2;
-      let dy = lerp(-0.35, 1, Math.sqrt((u + 1) * 0.5));
+      const dy = lerp(-0.35, 1, Math.sqrt((u + 1) * 0.5));
       const ring = Math.sqrt(Math.max(0, 1 - dy * dy));
-      const shell = lerp(0.78, 1.0, r());
-      let px = t.x + Math.cos(phi) * ring * t.rx * shell;
-      let pz = t.z + Math.sin(phi) * ring * t.rz * shell;
+      const shell = lerp(0.72, 0.98, r());
+      const px = t.x + Math.cos(phi) * ring * t.rx * shell;
+      const pz = t.z + Math.sin(phi) * ring * t.rz * shell;
       let py = t.cy + dy * t.ry * shell;
       // billows shrink toward the cauliflower tops and widen at the flat base
       const top = smoothstep(0.1, 0.9, dy);
-      let pr = Math.min(t.rx, t.ry) * lerp(0.36, 0.2, top) * lerp(0.75, 1.2, r());
+      let pr = Math.min(t.rx, t.ry) * lerp(0.5, 0.3, top) * lerp(0.8, 1.15, r());
       pr = Math.max(pr, minR);
       // the base is flat: nothing hangs below the condensation level
       if (py - pr * 0.45 < base) py = base + pr * 0.45;
       add(px, py, pz, pr, lerp(0.85, 1, r()));
     }
-    // a skirt of flatter puffs along the base hides the spheres' lower curves
-    const nb = Math.round(n * 0.12);
+    // a skirt of flattened puffs along the base hides the spheres' lower curves
+    const nb = Math.round(n * 0.15);
     for (let i = 0; i < nb; i++) {
       const t = towers[Math.floor(r() * towers.length)];
       const phi = r() * Math.PI * 2, d = Math.sqrt(r()) * 0.9;
-      const pr = Math.max(minR, t.rx * lerp(0.3, 0.45, r()));
-      add(t.x + Math.cos(phi) * t.rx * d, base + pr * 0.42, t.z + Math.sin(phi) * t.rz * d, pr, 0.75);
+      const pr = Math.max(minR, t.rx * lerp(0.35, 0.5, r()));
+      add(t.x + Math.cos(phi) * t.rx * d, base + pr * 0.3, t.z + Math.sin(phi) * t.rz * d, pr, 0.75, 0.45);
     }
     const cl = { center: cc.clone(), radius: rad * 1.3, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'cumulus',
       // footprints for cast shadows: the towers (xz, radius) on the cloud base
@@ -370,7 +413,7 @@ export class Clouds {
       const ex = Math.max(Math.abs(x) / (w * 0.5), Math.abs(z) / (d * 0.5));
       const edge = 1 - smoothstep(0.6, 1.0, ex + (r() - 0.5) * 0.25);
       this.addPuff(center.x + x, y, center.z + z, pr, x / w, (y - center.y) / Math.max(thickness, 1) * 0.5, z / d, r() * 10,
-        (opts.opacity ?? 0.65) * lerp(0.6, 1, r()) * (0.35 + 0.65 * edge), opts.moisture ?? 0, opts.dark ?? 0, flat);
+        (opts.opacity ?? 0.65) * lerp(0.6, 1, r()) * (0.35 + 0.65 * edge), pr / Math.max(w, d), opts.dark ?? 0, flat);
     }
     const cl = { center: center.clone(), radius: Math.max(w, d) * 0.6, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'sheet' };
     this.clusters.push(cl);
@@ -384,7 +427,7 @@ export class Clouds {
     for (let i = 0; i < n; i++) {
       const p = r.inSphere(new Vector3()).multiply(new Vector3(spread, spread * 0.3, spread)).add(center);
       const pr = lerp(opts.minR ?? 10, opts.maxR ?? 26, r());
-      this.addPuff(p.x, p.y, p.z, pr, 0, 0.2, 0, r() * 10, (opts.opacity ?? 0.42) * lerp(0.6, 1, r()), opts.moisture ?? 1, opts.dark ?? 0, opts.flat ?? 0.35);
+      this.addPuff(p.x, p.y, p.z, pr, 0, 0.2, 0, r() * 10, (opts.opacity ?? 0.42) * lerp(0.6, 1, r()), pr / Math.max(spread, 1), opts.dark ?? 0, opts.flat ?? 0.35);
     }
     const cl = { center: center.clone(), radius: spread * 1.2, start, count: this.count - start, moisture: opts.moisture ?? 1, kind: 'wisps' };
     this.clusters.push(cl);
@@ -400,7 +443,7 @@ export class Clouds {
       const f = i / layers;
       const lw = w * lerp(1.0, 0.65, f) * (i === layers - 1 ? 1.3 : 1);
       const c = new Vector3(center.x + (r() - 0.5) * w * 0.15, center.y + f * h * 0.85, center.z + (r() - 0.5) * w * 0.15);
-      cl = this.cumulus(c, lw, h / layers * 1.6, Object.assign({}, opts, { seed: (opts.seed ?? 9) + i * 13 }));
+      cl = this.cumulus(c, lw, h / layers * 1.6, Object.assign({}, opts, { seed: (opts.seed ?? 9) + i * 13, noBase: i > 0, shear: (opts.shear ?? 0.18) }));
     }
     return cl;
   }

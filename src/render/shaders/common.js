@@ -134,8 +134,8 @@ float sampleShadow(vec3 P, vec3 N) {
   if (edge > 1.0 || uvz.z > 1.0 || uvz.z < 0.0) return cs;
   // Soft, wide penumbra (the painted look): a Poisson disc rotated by a world-anchored hash, so
   // the soft edge never crawls as the camera moves; the bias grows with the kernel.
-  float r = uShadowParams.x * 3.0;
-  float z = uvz.z - uShadowParams.y * 1.35;
+  float r = uShadowParams.x * 4.0;
+  float z = uvz.z - uShadowParams.y * 1.5;
   vec3 hp = fract(floor(P * 23.0) * vec3(0.1031, 0.1030, 0.0973));
   hp += dot(hp, hp.yzx + 33.33);
   float ang = fract((hp.x + hp.y) * hp.z) * 6.2831853;

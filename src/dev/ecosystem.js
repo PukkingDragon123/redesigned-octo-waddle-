@@ -30,9 +30,12 @@ function rockStack(seed, radius, height, depth) {
     const k = 1 + coil + (r() - 0.5) * 0.04;
     pos.setX(i, x * k);
     pos.setZ(i, z * k);
-    const wet = y < 1.2 ? 0.5 : 1;
-    tint.setRGB(0.44, 0.38, 0.32).multiplyScalar(wet * (0.85 + coil));
-    if (y < -0.5) tint.setRGB(0.3, 0.36, 0.3);
+    // dark basalt with paler strata following the coil, a wet band and algae below the tide
+    const strata = 0.75 + 0.25 * Math.sin(y * 1.7 + a * 0.6 + Math.sin(y * 0.37) * 2);
+    const wet = y < 1.4 ? 0.55 : 1;
+    tint.setRGB(0.13, 0.115, 0.1).multiplyScalar(wet * strata * (0.85 + coil * 1.5));
+    if (y > 1.4 && y < 2.4) tint.setRGB(0.07, 0.075, 0.06);
+    if (y < -0.3) tint.setRGB(0.06, 0.1, 0.07).multiplyScalar(strata);
     col.push(tint.r, tint.g, tint.b);
   }
   geo.setAttribute('color', new Float32BufferAttribute(col, 3));
@@ -61,7 +64,7 @@ export default async function (game) {
   const p = game.params;
   const shot = p.get('shot') || 'wide';
   const s = game.engine.scene;
-  if (!p.get('time')) game.atmosphere.set(shot === 'night' ? 'night' : 'morning');
+  if (!p.get('time')) game.atmosphere.set(shot === 'night' || shot === 'nightUp' ? 'night' : 'morning');
   // (the game now aliases cloudSea to the ocean: only an old cloud sea is switched off)
   if (game.cloudSea && game.cloudSea !== game.ocean) game.cloudSea.enabled = false;
 
@@ -125,6 +128,27 @@ export default async function (game) {
   const jacks = mk('lanternjack', new Vector3(4, -18, -44), 2, { seed: 11, palette: pal ?? 0 }) || eco.addFishSchool(new Vector3(4, -18, -44), 'lanternjack', 1, { seed: 11 });
   if (!solo || solo === 'skimmer') eco.addReptileFlock(new Vector3(-38, 26, -48), 'skimmer', solo ? +(p.get('count') || 3) : 9, { seed: 13, palette: pal });
   if (!solo || solo === 'coilwing') eco.addReptileFlock(new Vector3(62, 46, -26), 'coilwing', solo ? +(p.get('count') || 12) : 90, { seed: 17, palette: pal });
+  // &pose=amp,fold,sweep,legs,curl,crest,jaw,phase pins the bird-reptiles' pose (blank = live)
+  if (p.has('pose')) {
+    const k = ['amp', 'fold', 'sweep', 'legs', 'curl', 'crest', 'jaw', 'phase'];
+    const v = p.get('pose').split(',');
+    eco.reptiles.debugPose = {};
+    k.forEach((n, i) => { if (v[i] !== undefined && v[i] !== '') eco.reptiles.debugPose[n] = +v[i]; });
+  }
+  if (p.has('leaps')) column.leapRate = +p.get('leaps');
+  if (shot === 'night' || p.has('plankton')) eco.addPlankton(new Vector3(0, -6, -40), 120);
+  if (p.has('glow')) eco.plankton.force = +p.get('glow');
+  if (p.has('dbgsplash')) eco.debugSplashes = [];
+  // &stress: the Feasting Shoals' population (WorldBuilder: 11 glintfin balls of 900-1600,
+  // 5 spiralback columns, 4 lanternjack pairs, 4 skimmer flocks) plus coilwing flocks
+  if (p.has('stress')) {
+    const r = rng(77);
+    for (let k = 0; k < 11; k++) eco.addFishSchool(new Vector3((r() - 0.5) * 500, -lerp(5, 9, r()), -60 - r() * 600), 'glintfin', Math.round(lerp(900, 1600, r())), { seed: 100 + k });
+    for (let k = 0; k < 5; k++) eco.addFishSchool(new Vector3((r() - 0.5) * 440, -lerp(8, 14, r()), -60 - r() * 600), 'spiralback', Math.round(lerp(160, 320, r())), { seed: 200 + k });
+    for (let k = 0; k < 4; k++) eco.addFishSchool(new Vector3((r() - 0.5) * 400, -lerp(14, 22, r()), -60 - r() * 600), 'lanternjack', 2, { seed: 300 + k });
+    for (let k = 0; k < 4; k++) eco.addReptileFlock(new Vector3((r() - 0.5) * 400, lerp(12, 24, r()), -60 - r() * 600), 'skimmer', Math.round(lerp(8, 14, r())), { seed: 400 + k });
+    for (let k = 0; k < 3; k++) eco.addReptileFlock(new Vector3((r() - 0.5) * 400, lerp(40, 80, r()), -60 - r() * 600), 'coilwing', 100, { seed: 500 + k });
+  }
   if (p.has('raise')) eco.fish.debugSpecial = +p.get('raise');
   if (p.has('flare')) eco.fish.debugFlare = +p.get('flare');
   window.__ecoTest = { eaten: 0, ballA, column, jacks };
@@ -167,6 +191,9 @@ export default async function (game) {
     s.add(roostWhale.group);
     roostWhale.model?.castShadows?.(game.engine.shadows);
     eco.roosts.push(roostWhale);
+    // a flock that lives with the whales (no perches of its own): it settles on her back
+    const rf = eco.addReptileFlock(new Vector3(30, 16, -10), 'coilwing', 26, { seed: 23, perch: false, restAfter: 3 });
+    for (const b of rf.birds) b.pos.set(30 + (Math.random() - 0.5) * 16, 10 + Math.random() * 8, -10 + (Math.random() - 0.5) * 16);
   }
   let calf = null;
   if (p.has('calf') && WhaleCls) {
@@ -176,6 +203,13 @@ export default async function (game) {
   }
 
   if (p.has('song')) eco.songFocus = new Vector3(0, 6, -40);
+  // the probe tools print this
+  window.__ecoExtra = () => {
+    const f = (v) => v.toArray().map((x) => +x.toFixed(1));
+    const w = ballA.w;
+    return { A: { c: f(ballA.center), R: +ballA.R.toFixed(1), ext: +ballA.extent.toFixed(1), alive: ballA.alive, threat: +ballA.threat.toFixed(2), net: +ballA.net.toFixed(2), surf: +ballA.surf.toFixed(2), w: [w.cruise, w.mill, w.ball, w.net, w.song].map((x) => +x.toFixed(2)) },
+      birds: eco.reptiles.birds.slice(0, 6).map((b) => `${b.species[0]}:${b.mode}`).join(' ') };
+  };
 
   // ---- camera --------------------------------------------------------------------------------
   const cam = game.engine.camera;
@@ -255,10 +289,11 @@ export default async function (game) {
       pos = orbit(look, dist ?? column.R * 3.4, -1, new Vector3(0.8, 0, 0.6).normalize());
       fov = 58;
     } else if (shot === 'spiralUp') {
+      // at the waterline beside the column, watching the leaps
       const c = column.center;
-      look = new Vector3(c.x, 1.2, c.z);
-      pos = orbit(look, dist ?? 14, 1.6, new Vector3(0.75, 0, 0.66).normalize());
-      fov = 55;
+      look = new Vector3(c.x, 1.0, c.z);
+      pos = orbit(look, dist ?? 11, 0.6, new Vector3(0.75, 0, 0.66).normalize());
+      fov = 60;
     } else if (shot === 'jack' || shot === 'breach') {
       const f = fishPose(jacks, idx);
       if (shot === 'jack') {
@@ -273,9 +308,11 @@ export default async function (game) {
         fov = 55;
       }
     } else if (shot === 'net') {
-      look = A.clone().add(new Vector3(0, -1, 0));
-      pos = orbit(A, dist ?? 34, -4, new Vector3(0.75, 0, 0.66).normalize());
-      fov = 62;
+      // under the trapped ball, looking up at it against the bright surface
+      const sy = ballA.surf;
+      look = new Vector3(A.x, sy - 2.5, A.z);
+      pos = orbit(new Vector3(A.x, sy - 8, A.z), dist ?? 13, 0, new Vector3(0.75, 0, 0.66).normalize());
+      fov = 70;
     } else if (shot === 'netUp') {
       look = new Vector3(A.x, 0, A.z);
       pos = orbit(look, dist ?? 30, 26, new Vector3(0.6, 0, 0.8).normalize());
@@ -315,6 +352,14 @@ export default async function (game) {
       look = w.pos.clone().addScaledVector(w.up, w.L * 0.15);
       pos = look.clone().addScaledVector(w.right, -(dist ?? 14)).addScaledVector(w.fwd, -6).add(new Vector3(0, 5 + hOff, 0));
       fov = 50;
+    } else if (shot === 'night') {
+      look = A.clone().add(new Vector3(0, -2, 0));
+      pos = orbit(A, dist ?? 15, -3, new Vector3(0.65, 0, 0.76).normalize());
+      fov = 62;
+    } else if (shot === 'nightUp') {
+      look = new Vector3(A.x, -3, A.z);
+      pos = orbit(look, dist ?? 18, 14, new Vector3(0.6, 0, 0.8).normalize());
+      fov = 55;
     } else if (shot === 'song') {
       look = new Vector3(0, -2, -40);
       pos = orbit(look, dist ?? 55, 48, new Vector3(0.2, 0, 1).normalize());

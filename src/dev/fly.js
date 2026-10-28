@@ -1,6 +1,7 @@
 // Dev scene: the calf flies with its mother and the herd low over the sea of Vur Sok.
 // ?debug&test=fly&time=morning&dt=0.033&warp=8&auto=cruise|turn|glide|dive|idle|look|sun|straight
 //   &cam=follow|side|front|momside|momfront|alphaside|top|low   &solo   &nosea (old cloud sea)
+//   &plain       sky only, no sea at all (fast headless checks of the animation)
 //   &gesture=tailSlap|finSlap|spyhop|nuzzle|happyWiggle|breachArch|rollOver  (mother + calf, every 7 s)
 //   &bump        calf and mother bump into each other every 4 s (anim.bump on both)
 //   &sing &hum &charge &feed &happy   voice / mood drives on the calf and the mother
@@ -18,7 +19,8 @@ export default async function (game) {
   const s = game.engine.scene;
   const p = game.params;
   if (p.has('skin')) BAKE.scale = +p.get('skin');
-  if (!p.has('nosea')) {
+  if (p.has('plain') && game.cloudSea) game.cloudSea.enabled = false;
+  if (!p.has('nosea') && !p.has('plain')) {
     if (game.cloudSea) game.cloudSea.enabled = false;
     try {
       const { Ocean } = await import('../world/Ocean.js');

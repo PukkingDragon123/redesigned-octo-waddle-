@@ -203,7 +203,7 @@ export class WhaleModel {
       uAirflow: { value: new Vector3() },
       // fur (Birds.js reads uFurLen to perch on the back)
       uFurLen: { value: (this.calf ? 0.03 : 0.016) * L * (g.furScale ?? 1) },
-      uFurDensity: { value: (this.calf ? 46 : 9) * (g.furDensityScale ?? 1) },
+      uFurDensity: { value: (this.calf ? 52 : 34) * (g.furDensityScale ?? 1) },
       uFurShade: { value: g.furShade ?? 0.72 },
       uFurTip: { value: g.furTip ?? 1.12 },
       uBlowLoc: { value: new Vector4(P.blow.t, P.blow.len * 0.5, P.blow.gap, P.blow.splay) },
@@ -298,7 +298,8 @@ export class WhaleModel {
       const key = 'eyeGeo' + Math.round(r * 10000);
       const geo = C[key] || (C[key] = new SphereGeometry(r, 36, 26));
       const sp = A.spot(e.t, e.m, side);
-      const center = sp.p.clone().addScaledVector(sp.n, -r * 0.48);
+      // sunk deep in its socket: only a shallow cap shows between the lids
+      const center = sp.p.clone().addScaledVector(sp.n, -r * 0.72);
       // socket frame: looking out and a little forward, up = world up
       const fwd = sp.n.clone().multiplyScalar(0.8).add(new Vector3(0, 0.02, 0.2)).normalize();
       const upv = new Vector3(0, 1, 0);
@@ -312,7 +313,8 @@ export class WhaleModel {
       const pT = A.surfacePoint(e.t + dt, th).sub(A.surfacePoint(e.t - dt, th)).divideScalar(2 * dt);
       const dth = 0.004;
       const dsdth = (A.sOf(e.t, th + dth) - A.sOf(e.t, th - dth)) / (2 * dth);
-      const pS = A.surfacePoint(e.t, th + dth).sub(A.surfacePoint(e.t, th - dth)).divideScalar(2 * dth / dsdth);
+      // dP/ds = (dP/dtheta) / (ds/dtheta)
+      const pS = A.surfacePoint(e.t, th + dth).sub(A.surfacePoint(e.t, th - dth)).divideScalar(2 * dth * dsdth);
       const dv = A.texDvDt(e.t);
       const J = new Vector4(
         (x.dot(pS) / pS.lengthSq()) * r, (y.dot(pS) / pS.lengthSq()) * r,
@@ -333,6 +335,7 @@ export class WhaleModel {
         uBaked: this.u.uBaked,
         uSkinUV: { value: new Vector4(sC, vC, 0, 0) },
         uSkinJ: { value: J },
+        uSkinNL: { value: sp.n.clone().applyQuaternion(q.clone().invert()) },
         uWetSelf: this.u.uWetSelf,
       });
       const mat = new ShaderMaterial({ vertexShader: EYE_VERT, fragmentShader: EYE_FRAG, uniforms: u });

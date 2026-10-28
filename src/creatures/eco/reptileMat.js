@@ -77,7 +77,9 @@ Chain foreChain(float side, float ph, float amp, float fold, float sweep, float 
 #if SPECIES == 0
   vec3 yawS = vec3(0.12, -0.1, 0.2), elS = vec3(0.06, 0.0, -0.05);
   vec3 yawD = vec3(0.95, 0.25, 0.75), elD = vec3(0.12, 0.05, 0.02);
-  vec3 yawF = vec3(1.35, -1.25, 1.45), elF = vec3(-0.45, -1.05, 0.75);
+  // at rest: humerus back and down, forearm forward and down to the ground (the knuckle walks),
+  // the long wing finger folded back along the flank
+  vec3 yawF = vec3(1.2, -1.35, 1.58), elF = vec3(-0.55, -1.0, 0.22);
 #else
   vec3 yawS = vec3(0.3, -0.18, 0.28), elS = vec3(0.04, 0.02, -0.04);
   vec3 yawD = vec3(1.0, 0.35, 0.8), elD = vec3(0.1, 0.0, 0.0);
@@ -114,7 +116,9 @@ Chain foreChain(float side, float ph, float amp, float fold, float sweep, float 
 // The coilwing's hind wing: the leg (hip - knee - ankle - toe) held out back and to the side
 // in flight with long feathers on the shank; tucked down to stand when perched.
 Chain hindChain(float side, float ph, float amp, float fold, float sweep) {
-  vec3 yawS = vec3(1.15, 1.4, 1.5), elS = vec3(-0.15, 0.0, 0.05);
+  // in flight the legs sprawl out to the sides and back (a second, smaller pair of wings
+  // behind the first); perched, they fold down to stand
+  vec3 yawS = vec3(0.62, 0.95, 1.15), elS = vec3(-0.12, -0.04, 0.0);
   vec3 yawF = vec3(0.3, -0.5, 0.2), elF = vec3(-1.2, -1.25, -0.4);
   vec3 yaw = mix(yawS, yawF, fold);
   vec3 el = mix(elS, elF, fold);
@@ -123,9 +127,9 @@ Chain hindChain(float side, float ph, float amp, float fold, float sweep) {
   yaw += vec3(sweep * 0.25, sweep * 0.1, 0.0);
   Chain c;
   c.S = vec3(side * ${fl(COILWING.hipJoint[0])}, ${fl(COILWING.hipJoint[1])}, ${fl(COILWING.hipJoint[2])});
-  c.E = c.S + boneDir(yaw.x, el.x, side) * 0.13;
-  c.W = c.E + boneDir(yaw.y, el.y, side) * 0.15;
-  c.F = c.W + boneDir(yaw.z, el.z, side) * 0.09;
+  c.E = c.S + boneDir(yaw.x, el.x, side) * 0.16;
+  c.W = c.E + boneDir(yaw.y, el.y, side) * 0.19;
+  c.F = c.W + boneDir(yaw.z, el.z, side) * 0.11;
   c.A = vec3(side * 0.02, 0.0, -0.3);
   c.nrm = normalize(cross(c.A - c.W, c.F - c.S)) * side;
   return c;
@@ -152,14 +156,16 @@ vec3 wingSurface(Chain c, float u, float v, float sgn, float side, float fold, f
   // propatagium: a narrow membrane in front of the arm, from shoulder to wrist
   vec3 fwdBody = vec3(0.0, 0.0, 1.0);
   le += fwdBody * 0.035 * sin(3.14159 * clamp(u / uW, 0.0, 1.0)) * (1.0 - fold);
-  // wing finger tip: the membrane narrows to a point
+  // wing finger tip: the membrane narrows to a point; folded, it collapses along the arm
   te = mix(te, le, smoothstep(0.86, 1.0, u));
+  te = mix(te, le, fold * 0.88);
 #else
   // feathers: the trailing edge is the line of feather tips, longest at the hand (primaries)
   vec3 back = normalize(mix(vec3(0.0, -0.05, -1.0), -normalize(c.F - c.S) * 0.3 + vec3(0.0, 0.0, -1.0), 0.35));
   float fl;
-  if (hind > 0.5) fl = 0.07 + 0.09 * smoothstep(0.1, 0.9, u);
-  else fl = 0.11 + 0.1 * smoothstep(0.35, 0.85, u) - 0.08 * smoothstep(0.92, 1.0, u);
+  // (secondaries along the forearm, long primaries on the hand, the tip rounded)
+  if (hind > 0.5) fl = 0.1 + 0.15 * smoothstep(0.1, 0.85, u) - 0.06 * smoothstep(0.9, 1.0, u);
+  else fl = 0.15 + 0.22 * smoothstep(0.25, 0.8, u) - 0.2 * smoothstep(0.88, 1.0, u);
   // the feathers sweep toward the tip along the hand, back along the arm
   vec3 along = normalize(c.F - c.S);
   vec3 fdir = normalize(back * (1.0 - u * 0.5) + along * u * 0.75);
@@ -444,7 +450,7 @@ void main() {
     float arm = smoothstep(0.22, 0.05, v);
     float fib = smoothstep(0.55, 1.0, sin((u * 160.0 + v * 22.0)));
     float veins = smoothstep(0.12, 0.0, abs(sin(u * 30.0 + v * 6.0 + vnoise(vec2(u, v) * 18.0) * 2.0)) - 0.0) * 0.4;
-    vec3 mem = pC * (0.75 + 0.25 * vnoise(vec2(u * 9.0, v * 5.0) + seed));
+    vec3 mem = mix(pC, pA, 0.35) * 0.62 * (0.8 + 0.2 * vnoise(vec2(u * 9.0, v * 5.0) + seed));
     mem = mix(mem, mem * 0.55, smoothstep(0.55, 1.0, v));
     mem *= 1.0 - fib * 0.12 - veins * 0.2;
     // a dark band near the tip
@@ -518,10 +524,14 @@ void main() {
     float covert = smoothstep(0.42, 0.25, v);
     float rachis = smoothstep(0.06, 0.0, abs(fi - 0.5 + (v - 0.5) * 0.2)) * (1.0 - covert);
     float tipD = smoothstep(0.78, 0.95, v);
-    albedo = mix(pA * 1.05, pA * 0.75, v);
-    albedo = mix(albedo, pD, smoothstep(0.25, 0.45, v) * smoothstep(0.75, 0.55, v) * (0.35 + 0.35 * step(0.5, fract(floor(f) * 0.5))) * (1.0 - hind * 0.4));
-    albedo = mix(albedo, vec3(0.03), tipD * 0.75);
-    albedo = mix(albedo, pB * 0.7, covert * 0.25);
+    albedo = mix(pA * 1.1, pA * 0.7, v);
+    // one coloured bar across the coverts, and a thin pale fringe on each feather
+    float bar = smoothstep(0.2, 0.3, v) * smoothstep(0.42, 0.32, v);
+    albedo = mix(albedo, pD * 0.85, bar * 0.8 * (1.0 - hind * 0.5));
+    float fringe = smoothstep(0.035, 0.0, abs(abs(fi - 0.5) - 0.47)) * (1.0 - covert);
+    albedo = mix(albedo, pB * 0.6, fringe * 0.35);
+    albedo = mix(albedo, vec3(0.9, 0.86, 0.78) * 0.7, tipD * 0.35);
+    albedo = mix(albedo, pB * 0.7, covert * 0.2);
     albedo *= 1.0 - rachis * 0.25;
     // each feather's rounded tip; primaries at the hand separate (slots)
     float slot = hind < 0.5 ? smoothstep(0.62, 0.85, u) : 0.0;

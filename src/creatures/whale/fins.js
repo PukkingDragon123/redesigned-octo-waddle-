@@ -184,7 +184,7 @@ export function buildFins(A, bi, boneAbs, res) {
       bones: ['fin' + s + '1', 'fin' + s + '2', 'fin' + s + '3'], parent: 'chest', seed: A.shapeSeed + 3 + side,
       rayW: calf ? 0.016 : 0.0105, rayH: calf ? 0.008 : 0.0055, memT: L * (calf ? 0.005 : 0.0028),
       fur: (u, v, top) => (1 - smoothstep(0.05, 0.16, v)) * (top > 0 ? 1 : 0.5) * (calf ? 1 - smoothstep(0.5, 0.85, u) * 0.7 : 1 - smoothstep(0.35, 0.8, u)) * (calf ? 1.0 : 0.8),
-    }, xf, res.nU, res.nLoop, { tex: [A.sOf(W.t, root.th), A.texV(W.t)], loft: [W.t, A.sOf(W.t, root.th)] });
+    }, xf, res.nU, res.nLoop, { tex: [side > 0 ? 0.47 : 0.53, A.texV(W.t - 0.02)], loft: [W.t, A.sOf(W.t, root.th)] });
     info.wings[s] = { xf, span, side };
   }
   // ---- rear fins ----

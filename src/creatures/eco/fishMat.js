@@ -434,7 +434,8 @@ void main() {
     albedo *= 1.0 - scaleEdge * 0.18;
     // platelets stay (nearly) vertical across the curved flank: a mirror facing sideways
     vec3 lateral = vRight * side;
-    Nm = normalize(mix(N, lateral, 0.42 * (1.0 - dors * 0.7) * (1.0 - eyeSpec)));
+    // (the belly's platelets face down: seen from below, fish are dark against the surface)
+    Nm = normalize(mix(N, lateral, 0.42 * (1.0 - dors * 0.7) * (1.0 - eyeSpec) * (1.0 - belly * 0.8)));
     // each scale's platelets tilt a little differently: a fine mosaic of silvers, not sequins
     Nm = normalize(Nm + (T * (scaleId - 0.5) * 0.16 + vUp * (fract(scaleId * 7.31) - 0.5) * 0.12) * (1.0 - dors));
     trans = 0.08;

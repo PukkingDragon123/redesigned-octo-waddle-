@@ -30,8 +30,8 @@ const STRIDE = 20; // floats per fish in the GPU layout (5 x vec4)
 // 14 special, 15 flash | 16 seed, 17 length, 18 palette+tint, 19 surface height
 
 export const FISH_SPECIES = {
-  glintfin: { max: 24576, nearMax: 1400, len: [0.22, 0.34], cruise: 1.25, burst: 6.5, beat: 5.2, amp: 0.07, nearPx: 30, minPx: 0.75, edible: 1, spacing: 1.65, react: 1 },
-  spiralback: { max: 4096, nearMax: 420, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 2, spacing: 2.0, react: 0.8 },
+  glintfin: { max: 24576, nearMax: 1400, len: [0.22, 0.34], cruise: 1.25, burst: 7, beat: 5.2, amp: 0.07, nearPx: 30, minPx: 0.75, edible: 0.25, spacing: 1.65, react: 1 },
+  spiralback: { max: 4096, nearMax: 420, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 1, spacing: 2.0, react: 0.8 },
   lanternjack: { max: 64, nearMax: 32, len: [2.6, 4.1], cruise: 2.1, burst: 11, beat: 1.25, amp: 0.06, nearPx: 46, minPx: 0.9, edible: 0, spacing: 0, react: 0.3 },
 };
 
@@ -114,6 +114,7 @@ export class FishSystem {
     this._res = new Map();
     this.debugSpecial = null;
     this.debugFlare = null;
+    this.lastCount = 0;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -481,6 +482,9 @@ export class FishSystem {
     const cp = sc.colPh;
     const colH = R * 2.2, colTop = sc.surf - 1.5;
     const kPos = 1.25, kVel = (1 - Math.exp(-dt * 2.6)) / Math.max(dt, 1e-4);
+    // per-step damping factors (shared by every fish of the school)
+    const e2 = 1 - Math.exp(-dt * 2.5), e3 = 1 - Math.exp(-dt * 3), e5 = 1 - Math.exp(-dt * 5), e6 = 1 - Math.exp(-dt * 6);
+    const e8 = 1 - Math.exp(-dt * 8), e9 = 1 - Math.exp(-dt * 9), e12 = 1 - Math.exp(-dt * 12), x3 = Math.exp(-dt * 3);
     const agitT = time - sc.alarmT;
     const agit = agitT < 3.5;
     const ax0 = sc.alarmP.x, ay0 = sc.alarmP.y, az0 = sc.alarmP.z;
@@ -489,14 +493,18 @@ export class FishSystem {
     let alive = 0;
     let maxD2 = 0;
     const r = sc.rng;
-    // leaps: spiralbacks leap now and then (and in rhythm when the herd sings)
+    // leaps: spiralbacks leap now and then (and in rhythm when the herd sings); a glintfin ball
+    // pinned against the surface by a bubble net (or a hunt from below) "boils", small fish
+    // skipping out of the water
     let leapNow = -1;
-    if (isSpiral) {
-      sc.leapAcc += dt * sc.leapRate * (1 + sc.threat * 2.5 + sc.song * 4 + sc.net * 2);
-      if (sc.leapAcc >= 1) {
-        sc.leapAcc -= 1;
-        leapNow = sc.start + Math.floor(r() * sc.count);
-      }
+    const boil = isSpiral ? 0 : smoothstep(0.4, 0.9, sc.net) + smoothstep(0.6, 1.0, sc.threat) * smoothstep(3.5, 1.0, sc.surf - sc.center.y - sc.R * 0.6) * 0.5;
+    // while the herd sings the school answers: leaps run out along the spiral arms in waves
+    const songLeap = smoothstep(0.5, 1, ws) * (0.5 + 0.5 * Math.sin(time * 2.2));
+    const rate = isSpiral ? sc.leapRate * (1 + sc.threat * 2.5 + sc.song * 4 + sc.net * 2) : (boil + songLeap) * Math.min(9, sc.count * 0.008);
+    sc.leapAcc += dt * rate;
+    if (sc.leapAcc >= 1) {
+      sc.leapAcc -= 1;
+      leapNow = sc.start + Math.floor(r() * sc.count);
     }
     for (let i = sc.start, end = sc.start + sc.count; i < end; i++) {
       const o = i * STRIDE;
@@ -515,16 +523,17 @@ export class FishSystem {
         vy -= 9.81 * dt;
         px += vx * dt; py += vy * dt; pz += vz * dt;
         const surf = this.eco.seaHeightFast(px, pz);
-        S[o + 12] += (0.16 - S[o + 12]) * (1 - Math.exp(-dt * 8));
+        S[o + 12] += (0.16 - S[o + 12]) * e8;
         S[o + 13] = 1;
-        S[o + 14] += (1 - S[o + 14]) * (1 - Math.exp(-dt * 6));
-        S[o + 9] += (0.025 - S[o + 9]) * (1 - Math.exp(-dt * 5));
+        S[o + 14] += (1 - S[o + 14]) * e6;
+        S[o + 9] += (0.025 - S[o + 9]) * e5;
         S[o + 8] += TAU * 1.5 * dt;
         S[o + 11] += Math.sin(S[o + 16] * 40) * dt * 1.2;
         if (py < surf && vy < 0) {
           ST[i] = 3;
           pool.LT[i] = 1.6;
-          this.eco.splash(_v.set(px, surf, pz), 0.12 + S[o + 17] * 0.12, S[o + 17] * 0.6, true);
+          const len = S[o + 17];
+          this.eco.splash(_v.set(px, surf, pz), 0.25 + len * 0.45, len * 0.7, true, { tag: sc.species[0] + 'in' });
           vx *= 0.5; vy *= 0.4; vz *= 0.5;
         }
         S[o] = px; S[o + 1] = py; S[o + 2] = pz; S[o + 3] = time;
@@ -534,7 +543,16 @@ export class FishSystem {
       }
       // ---- the formation target ----
       let tx = 0, ty = 0, tz = 0, ux = 0, uy = 0, uz = 0;
-      if (isSpiral && wn < 0.98) {
+      if (isSpiral && ws > 0.5) {
+        // song: a wide ring round the singing herd, swimming round it just under the surface
+        const rr = sR0 * 0.75 + (Math.sqrt(sx * sx + sz * sz)) * R * 0.9;
+        const om = (cruise * 1.4) / Math.max(rr, 1) * sc.millDir;
+        ANG[i] += om * dt;
+        const a = ANG[i];
+        const ca = Math.cos(a), sa = Math.sin(a);
+        tx = sF.x + ca * rr; ty = sc.surf - 0.9 - (sy * 0.5 + 0.5) * 2.5; tz = sF.z + sa * rr;
+        ux = -sa * om * rr; uy = 0; uz = ca * om * rr;
+      } else if (isSpiral && wn < 0.98) {
         // a meandering vortex column, the fish rotating in twisted bands
         const h = sy * 0.5 + 0.5;
         const y = colTop - h * colH;
@@ -607,11 +625,11 @@ export class FishSystem {
         // song: spiral arms just under the surface, slowly turning (seen from above, a galaxy)
         const arm = Math.floor(sr * 3);
         const u = Math.sqrt(sx * sx + sz * sz);
-        const rr = sR0 + u * R * 3.2;
-        const th = arm * (TAU / 3) + Math.log(1 + (rr - sR0) / 6) * 1.6 - songRot + sy * 0.18;
+        const rr = sR0 + u * R * 2.2;
+        const th = arm * (TAU / 3) + Math.log(1 + (rr - sR0) / 6) * 1.7 - songRot + sy * 0.12;
         const ca = Math.cos(th), sa = Math.sin(th);
         tx += (sF.x + ca * rr) * ws;
-        ty += (sc.surf - 1.3 - (sy * 0.5 + 0.5) * 2.2) * ws;
+        ty += (sc.surf - 0.6 - (sy * 0.5 + 0.5) * 1.2) * ws;
         tz += (sF.z + sa * rr) * ws;
         // swim along the arm (outward and round)
         const vt = cruise * 0.9;
@@ -628,7 +646,7 @@ export class FishSystem {
         if (py > surf - 0.1 && vy > 0) {
           ST[i] = 2;
           vx = ex; vy = ey; vz = ez;
-          this.eco.splash(_v.set(px, surf, pz), 0.1 + S[o + 17] * 0.1, S[o + 17] * 0.5, true);
+          this.eco.splash(_v.set(px, surf, pz), 0.2 + S[o + 17] * 0.25, S[o + 17] * 0.5, true, { tag: sc.species[0] + 'out' });
         } else if (lt <= 0) ST[i] = 3;
       }
       // ---- steer ----
@@ -693,47 +711,65 @@ export class FishSystem {
       // ---- animation state ----
       const sp = Math.sqrt(vx * vx + vy * vy + vz * vz) + 1e-4;
       // lateral acceleration (turning) bends and banks the fish
-      const fxn = vx / sp, fzn = vz / sp;
-      const hl = Math.hypot(fxn, fzn) + 1e-4;
-      const rx = fzn / hl, rz = -fxn / hl;
+      const hl = Math.sqrt(vx * vx + vz * vz) + 1e-4;
+      const rx = vz / hl, rz = -vx / hl;
       const alat = ax * rx + az * rz;
-      const bendT = clamp(-0.55 * S[o + 17] * alat / Math.max(sp * sp, 0.6), -0.32, 0.32);
-      S[o + 10] += (bendT - S[o + 10]) * (1 - Math.exp(-dt * 6));
-      let fr = FEAR[i];
-      fr = Math.max(fr - dt * 0.8, fear * 1.4, flashT * 0.6);
-      FEAR[i] = fr;
       const len = S[o + 17];
-      const freq = beat * (0.55 + 0.45 * sp / cruise) / Math.sqrt(len / 0.3) * (0.92 + sr * 0.16);
-      S[o + 8] += TAU * Math.min(freq, beat * 3.5) * dt;
+      let bendT = -0.55 * len * alat / (sp * sp > 0.6 ? sp * sp : 0.6);
+      bendT = bendT < -0.32 ? -0.32 : bendT > 0.32 ? 0.32 : bendT;
+      S[o + 10] += (bendT - S[o + 10]) * e6;
+      let fr = FEAR[i] - dt * 0.8;
+      if (fear * 1.4 > fr) fr = fear * 1.4;
+      if (flashT * 0.6 > fr) fr = flashT * 0.6;
+      FEAR[i] = fr;
+      // tail beats: faster when swimming fast, slower for bigger fish (0.548 = sqrt(0.3))
+      const freq = beat * (0.55 + 0.45 * sp / cruise) * 0.548 * (0.92 + sr * 0.16) / Math.sqrt(len);
+      S[o + 8] += TAU * (freq < beat * 3.5 ? freq : beat * 3.5) * dt;
       const accN = Math.sqrt(ax * ax + ay * ay + az * az);
-      const ampT = spec.amp * (0.65 + 0.35 * Math.min(sp / cruise, 2)) + Math.min(accN / 40, 1) * 0.06 + fr * 0.05;
-      S[o + 9] += (ampT - S[o + 9]) * (1 - Math.exp(-dt * 5));
-      // every fish rolls a little on its own (the shimmer of a school), much more when startled
-      const wig = fr * 0.7 * Math.sin(S[o + 8] * 0.23 + S[o + 16] * 31) + 0.2 * Math.sin(time * (0.5 + sr * 0.9) + S[o + 16] * 40);
-      const rollT = clamp(-alat * 0.05, -0.75, 0.75) + wig;
-      S[o + 11] += (rollT - S[o + 11]) * (1 - Math.exp(-dt * 9));
-      S[o + 12] += (0 - S[o + 12]) * (1 - Math.exp(-dt * 3));
-      const flareT = isSpiral ? clamp(fr * 0.6 + wn * 0.3, 0, 1) : clamp(fr * 1.6 + flashT * 1.2 + wn * 0.6, 0, 1);
-      S[o + 13] += (flareT - S[o + 13]) * (1 - Math.exp(-dt * (flareT > S[o + 13] ? 12 : 2.5)));
+      const ampT = spec.amp * (0.65 + 0.35 * (sp < cruise * 2 ? sp / cruise : 2)) + (accN < 40 ? accN / 40 : 1) * 0.06 + fr * 0.05;
+      S[o + 9] += (ampT - S[o + 9]) * e5;
+      // every fish rolls a little on its own (the shimmer of a school), much more when startled;
+      // during the song a pulse runs out along the spiral arms and the fish roll their flanks up
+      // to the sky as it passes (seen from above, waves of light travel through the galaxy)
+      let pulse = 0;
+      if (ws > 0.05) {
+        const dxs = px - sF.x, dzs = pz - sF.z;
+        const ps = Math.sin(Math.sqrt(dxs * dxs + dzs * dzs) * 0.3 - time * 2.2);
+        if (ps > 0.55) pulse = (ps - 0.55) * 2.2 * ws;
+      }
+      const wig = fr * 0.7 * Math.sin(S[o + 8] * 0.23 + S[o + 16] * 31) + 0.2 * Math.sin(time * (0.5 + sr * 0.9) + S[o + 16] * 40) + pulse * (S[o + 16] > 0.5 ? 1 : -1);
+      let rollT = -alat * 0.05;
+      rollT = (rollT < -0.75 ? -0.75 : rollT > 0.75 ? 0.75 : rollT) + wig;
+      S[o + 11] += (rollT - S[o + 11]) * e9;
+      S[o + 12] -= S[o + 12] * e3;
+      let flareT = isSpiral ? fr * 0.6 + wn * 0.3 : fr * 1.6 + flashT * 1.2 + wn * 0.6;
+      if (flareT > 1) flareT = 1;
+      S[o + 13] += (flareT - S[o + 13]) * (flareT > S[o + 13] ? e12 : e2);
       if (isSpiral) {
         // the sail lies folded while cruising; it rises when alarmed, singing, in the net, and
         // now and then in display (each fish on its own slow rhythm)
-        const disp = smoothstep(0.75, 0.95, Math.sin(time * 0.21 + S[o + 16] * 37));
-        const raiseT = clamp(0.08 + fr * 1.4 + ws * 0.9 + wn * 0.6 + disp * 0.8 + (st === 1 ? 1 : 0), 0, 1);
-        S[o + 14] += (raiseT - S[o + 14]) * (1 - Math.exp(-dt * 3));
+        const ds = Math.sin(time * 0.21 + S[o + 16] * 37);
+        const disp = ds > 0.75 ? smoothstep(0.75, 0.95, ds) : 0;
+        let raiseT = 0.08 + fr * 1.4 + ws * 0.9 + wn * 0.6 + disp * 0.8 + (st === 1 ? 1 : 0);
+        if (raiseT > 1) raiseT = 1;
+        S[o + 14] += (raiseT - S[o + 14]) * e3;
       }
-      S[o + 15] = Math.max(S[o + 15] * Math.exp(-dt * 3), flashT, fr * 0.5);
+      let fl = S[o + 15] * x3;
+      if (flashT > fl) fl = flashT;
+      if (pulse * 0.5 > fl) fl = pulse * 0.5;
+      if (fr * 0.5 > fl) fl = fr * 0.5;
+      S[o + 15] = fl;
       if (S[o + 7] < 1) S[o + 7] = Math.min(1, S[o + 7] + dt * 0.6);
       if (st === 3) {
         pool.LT[i] -= dt;
         if (pool.LT[i] <= 0) ST[i] = 0;
       }
-      // start a leap (spiralbacks near the top of the column)
-      if (i === leapNow && st === 0 && py > sc.surf - 9) {
+      // start a leap (fish near the top of the column / ball)
+      if (i === leapNow && st === 0 && py > sc.surf - (isSpiral ? 9 : 2.2)) {
         const hx = vx / sp, hz = vz / sp;
         const hh = Math.hypot(hx, hz) || 1;
         const ang = lerp(0.6, 0.95, r());
-        const vex = lerp(5.5, 8, r()) * (0.8 + sc.song * 0.3);
+        const vex = isSpiral ? lerp(5.5, 8, r()) * (0.8 + sc.song * 0.3) : lerp(2.2, 3.6, r());
         pool.LV[i * 3] = (hx / hh) * Math.cos(ang) * vex;
         pool.LV[i * 3 + 1] = Math.sin(ang) * vex;
         pool.LV[i * 3 + 2] = (hz / hh) * Math.cos(ang) * vex;
@@ -796,7 +832,7 @@ export class FishSystem {
           jk.air = false;
           jk.state = 'recover';
           jk.t = lerp(5, 8, r());
-          this.eco.splash(_v.set(px, surf, pz), 1.1 + len * 0.15, len * 0.7, false);
+          this.eco.splash(_v.set(px, surf, pz), 0.55 + len * 0.1, len * 0.45, false, { tag: 'jackIn' });
           vx *= 0.4; vy *= 0.3; vz *= 0.4;
         }
         S[o] = px; S[o + 1] = py; S[o + 2] = pz; S[o + 3] = time;
@@ -876,7 +912,7 @@ export class FishSystem {
         if (py > surf - 2.5 && vy > 5 && !jk.air) {
           jk.air = true;
           vy = Math.max(vy, 7.5);
-          this.eco.splash(_v.set(px, surf, pz), 0.9 + len * 0.1, len * 0.6, false);
+          this.eco.splash(_v.set(px, surf, pz), 0.45 + len * 0.08, len * 0.35, false, { tag: 'jackOut' });
         }
         if (jk.t <= 0 || py > base.y + baseR + 3) {
           jk.state = 'recover';
@@ -954,7 +990,7 @@ export class FishSystem {
     const visDist = under ? 120 : 340;
     // lanternjacks first: they are predators for the schools this frame
     this._simJacks(dt, ctx);
-    let active = 0;
+    let active = 0, simmed = 0;
     for (let si = 0; si < this.schools.length; si++) {
       const sc = this.schools[si];
       if (sc.species === 'lanternjack') {
@@ -976,8 +1012,9 @@ export class FishSystem {
       let rate;
       if (d < 40) rate = 1;
       else if (!sc.visible) rate = d < 150 ? 4 : 8;
-      else rate = d < 90 ? 1 : d < 180 ? 2 : 3;
-      if (rate > 1 && (sc.threat > 0.1 || sc.net > 0.05 || sc.song > 0.05 || sc.forceSim)) rate = 1;
+      else rate = d < 90 ? 1 : d < 180 ? 2 : d < 260 ? 3 : 4;
+      // anything happening to the school (a hunt, a net, a song) gets more updates nearby
+      if (rate > 1 && (sc.threat > 0.1 || sc.net > 0.05 || sc.song > 0.05 || sc.forceSim)) rate = d < 130 ? 1 : 2;
       sc.rate = rate;
       sc.acc += dt;
       if (!sc.forceSim && (this.frame + si) % rate !== 0 && sc.acc < 0.3) continue;
@@ -986,6 +1023,7 @@ export class FishSystem {
       sc.acc = 0;
       this._simSchool(sc, sdt, ctx);
       active++;
+      simmed += sc.count;
     }
     // dev overrides (inspection): force the sail / fin flare of every fish
     if (this.debugSpecial != null || this.debugFlare != null) {
@@ -999,6 +1037,7 @@ export class FishSystem {
     }
     this._compact(pxPerM, ctx);
     this.stats.active = active;
+    this.stats.simmed = simmed;
     this.stats.schools = this.schools.length;
   }
 
@@ -1065,19 +1104,22 @@ export class FishSystem {
   // ---------------------------------------------------------------------------------------
   // interactions
   /**
-   * Eat fish inside a capsule (prev -> cur) of the given radius. Returns the food value eaten
-   * (glintfin 1, spiralback 2; lanternjacks are never eaten).
+   * Eat fish inside a capsule (prev -> cur) of the given radius. Returns the food eaten, in
+   * food units (a glintfin 0.25, a spiralback 1; lanternjacks are never eaten).
    * opts: { only (one school), sparkles, quiet }
    */
   eatAt(cur, prev, radius, opts = {}) {
     let eaten = 0;
+    let fishN = 0;
     const r2 = radius * radius;
     const ax = prev ? prev.x : cur.x, ay = prev ? prev.y : cur.y, az = prev ? prev.z : cur.z;
     const sx = cur.x - ax, sy = cur.y - ay, sz = cur.z - az;
     const sl2 = sx * sx + sy * sy + sz * sz;
     let sparkles = 0;
     const maxSparkle = opts.sparkles ?? 4;
+    let left = opts.max ?? Infinity;
     for (const sc of this.schools) {
+      if (left <= 0) break;
       if (opts.only && sc !== opts.only) continue;
       const pool = sc.pool;
       const value = pool.spec.edible;
@@ -1099,6 +1141,7 @@ export class FishSystem {
         if (dx * dx + dy * dy + dz * dz > Math.max(r2, rr2 * rr2 * 0.6)) continue;
         EAT[i] = lerp(18, 45, r());
         here++;
+        if (--left <= 0) break;
         if (!opts.quiet && sparkles < maxSparkle && Math.random() < 0.5) {
           sparkles++;
           this._eatFx(S[o], S[o + 1], S[o + 2]);
@@ -1107,11 +1150,14 @@ export class FishSystem {
       if (here) {
         sc.alive = Math.max(0, sc.alive - here);
         eaten += here * value;
+        fishN += here;
         // the school feels the bite: a flash runs out from the mouth
         if (ctx_time(this) - sc.alarmT > 1.5) { sc.alarmT = ctx_time(this); sc.alarmP.copy(cur); }
         sc.forceSim = true;
       }
     }
+    /** How many fish (not food units) the last call took. */
+    this.lastCount = fishN;
     return eaten;
   }
 

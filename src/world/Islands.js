@@ -707,16 +707,32 @@ export function boulderGeometry(rock = 'banded', variant = 0) {
   const ids = [];
   const v = new Vector3();
   const seed = variant * 3.7 + 1;
+  // fracture planes: a joint-bounded block, its faces flat, its edges sea-worn round
+  const rr = rng(variant * 977 + (rock === 'basalt' || rock === 'volcanic' ? 13 : 1));
+  const planes = [];
+  const nP = 7 + Math.floor(rr() * 4);
+  for (let i = 0; i < nP; i++) {
+    const n = new Vector3(rr() * 2 - 1, (rr() * 2 - 1) * 0.8, rr() * 2 - 1).normalize();
+    planes.push([n, lerp(0.72, 0.95, rr())]);
+  }
+  planes.push([new Vector3(0, -1, 0), 0.7]); // a flat-ish bed underneath
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
     const k = `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
     let id = map.get(k);
     if (id === undefined) {
       const d = v.clone().normalize();
-      // blocky: a few big planar facets plus some noise
-      let r = 1 + 0.18 * noise.noise3(d.x * 1.4 + seed, d.y * 1.4, d.z * 1.4) + 0.07 * noise.noise3(d.x * 4 + seed, d.y * 4, d.z * 4);
-      r = Math.min(r, 0.9 / Math.max(0.35, Math.abs(d.x * 0.8 + d.z * 0.6)), 0.95 / Math.max(0.35, Math.abs(d.y)));
-      const y = d.y * r * 0.72;
+      let r = 1 + 0.12 * noise.noise3(d.x * 1.4 + seed, d.y * 1.4, d.z * 1.4) + 0.05 * noise.noise3(d.x * 4 + seed, d.y * 4, d.z * 4);
+      // the nearest fracture plane along this direction (soft minimum: rounded edges)
+      let acc = 0;
+      for (const [n, dist] of planes) {
+        const c = d.dot(n);
+        if (c <= 0.05) continue;
+        acc += Math.pow(c / dist, 10);
+      }
+      const rp = acc > 0 ? Math.pow(acc, -1 / 10) : r;
+      r = Math.min(r, rp * (1 + 0.03 * noise.noise3(d.x * 6 + seed, d.y * 6, d.z * 6)));
+      const y = d.y * r * 0.78;
       id = mesh.add(d.x * r, y, d.z * r, y * 3, 1, 0);
       map.set(k, id);
     }

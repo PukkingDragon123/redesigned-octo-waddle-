@@ -10,8 +10,8 @@ import { G } from '../../render/Globals.js';
 import { UNIFORMS, LIGHTING, DEPTH } from '../../render/shaders/common.js';
 import { quadGeometry } from './kit.js';
 
-const MAX_SRC = 320;
-const PER = 40; // bubbles per source
+const MAX_SRC = 256;
+const PER = 64; // bubbles per source
 
 const VERT = /* glsl */ `
 ${UNIFORMS}
@@ -146,7 +146,7 @@ export class BubbleSystem {
     for (let k = 0; k < PER; k++) {
       const i = slot * PER + k, o = i * 4;
       const big = rnd();
-      const rad = (0.012 + 0.05 * big * big * big) * (0.6 + 0.4 * Math.min(strength, 2));
+      const rad = (0.012 + 0.05 * big * big * big) * (0.6 + 0.4 * Math.min(strength, 2)) * (opts.big ?? 1);
       S[o] = pos.x; S[o + 1] = pos.y - rnd() * 0.4; S[o + 2] = pos.z; S[o + 3] = t;
       B[o] = rnd(); B[o + 1] = 0.35 + 6 * Math.sqrt(rad) * (0.8 + 0.4 * rnd()); B[o + 2] = rad; B[o + 3] = surf;
       B2[o] = (k / PER) * stream * (0.6 + 0.4 * rnd()); B2[o + 1] = spread; B2[o + 2] = depth / B[o + 1] + 2.5; B2[o + 3] = Math.min(1, 0.45 + strength * 0.35);

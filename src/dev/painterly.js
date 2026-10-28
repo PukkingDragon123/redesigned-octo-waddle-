@@ -18,7 +18,14 @@
 //   &shells=N          whale fur shells (fewer is faster headless)
 //   &aor=<m> &aos=<s> &aop=<pow> &bounce=<s> &kr=<px> &kh=<hardness>   tuning overrides
 //   &cam=x,y,z&look=x,y,z   free camera
-import { Vector3, Group, Mesh, CylinderGeometry, Color, Float32BufferAttribute } from 'three';
+//   &img=<url>         paint a still frame instead of a scene (a capture of the composite with the
+//                      painterly pass off, e.g. /tools/out/painterly-final-coast-off.png; run the page
+//                      at the image's size): fast tuning of the strokes and grade, no world to build.
+//                      &imgz=<m> the view depth assumed for every pixel (default 120)
+import {
+  Vector3, Group, Mesh, CylinderGeometry, Color, Float32BufferAttribute, TextureLoader, DataTexture,
+  RedFormat, FloatType, NearestFilter, LinearFilter, NoColorSpace,
+} from 'three';
 import { PainterlyPost } from '../render/painterly/index.js';
 import { WhaleModel } from '../creatures/WhaleModel.js';
 import { CALF, MOTHER, ELDER, ADULTS } from '../creatures/WhaleTypes.js';
@@ -67,9 +74,45 @@ async function fallbackRock(seed, radius, height) {
   return new Mesh(geo, toonMaterial({ color: 0xffffff, vertexColors: true, rim: 0.2, paint: 1 }));
 }
 
+/** Paint a still image through the engine's painterly pass (see &img above). */
+async function paintStill(game) {
+  const p = game.params;
+  const eng = game.engine;
+  const tex = await new TextureLoader().loadAsync(p.get('img'));
+  tex.colorSpace = NoColorSpace;
+  tex.minFilter = LinearFilter;
+  tex.magFilter = LinearFilter;
+  tex.generateMipmaps = false;
+  const pp = eng.painterly;
+  pp.aoEnabled = false;
+  pp.sea = false;
+  if (p.has('q')) pp.setQuality(+p.get('q'));
+  const cam = eng.camera;
+  cam.updateProjectionMatrix();
+  const z = +(p.get('imgz') || 120);
+  const e = cam.projectionMatrix.elements;
+  const d = ((-e[10] * z + e[14]) / z) * 0.5 + 0.5;
+  let depth = null;
+  const opts = { time: 0 };
+  eng.post.render = (r, rt, camera) => {
+    if (!depth || depth.image.width !== eng.width || depth.image.height !== eng.height) {
+      depth?.dispose();
+      depth = new DataTexture(new Float32Array(eng.width * eng.height).fill(d), eng.width, eng.height, RedFormat, FloatType);
+      depth.minFilter = depth.magFilter = NearestFilter;
+      depth.needsUpdate = true;
+    }
+    if (pp.width !== eng.width || pp.height !== eng.height) pp.setSize(eng.width, eng.height);
+    opts.time = game.time;
+    pp.apply(tex, depth, camera, null, opts);
+  };
+  game.painterly = pp;
+  window.__pp = pp;
+}
+
 export default async function (game) {
   const p = game.params;
   const eng = game.engine;
+  if (p.get('img')) return paintStill(game);
   const scene = eng.scene;
   const shells = p.has('shells') ? +p.get('shells') : null;
   if (!p.get('time')) game.atmosphere.set('morning');

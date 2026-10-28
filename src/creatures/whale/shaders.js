@@ -511,13 +511,15 @@ void main() {
   vec3 skinBot = mix(uBelly, uBack * 1.2, mott * 0.55);
   vec3 skin = mix(skinBot, skinTop, top);
   // pale flipper markings (the mother's are bold): big white areas spreading from the leading edge
-  float markN = fbm2(m * 0.28 + uSeed * 2.0 + id) + (1.0 - smoothstep(0.0, 0.5, uv.y)) * 0.25 + (1.0 - top) * 0.2;
-  float mark = smoothstep(0.66, 0.7, markN + uFinMarkAmt * 0.22) * smoothstep(0.0, 0.3, uFinMarkAmt);
+  float markN = fbm2(m * 0.28 + uSeed * 2.0 + id) + (1.0 - smoothstep(0.0, 0.5, uv.y)) * 0.18 + (1.0 - top) * 0.22;
+  // only pale-flippered whales (the mother) carry the white onto the upper side
+  float topK = mix(1.0, smoothstep(0.35, 0.75, uFinMarkAmt), top);
+  float mark = smoothstep(0.62, 0.67, markN + uFinMarkAmt * 0.3 - 0.12) * topK * smoothstep(0.0, 0.25, uFinMarkAmt);
   skin = mix(skin, uFinMark * (0.92 + 0.12 * fbm2(m * 3.0)), mark);
   // leading-edge tubercles: worn pale knobs, wrinkled skin across the arm
   float tubU = (uv.x - 0.14) / 0.8;
   float tub = isWing * pow(max(0.0, sin(3.14159 * 9.0 * clamp(tubU, 0.0, 1.0))), 1.6) * step(0.0, tubU) * step(tubU, 1.0) * (1.0 - smoothstep(0.03, 0.12, uv.y));
-  skin = mix(skin, mix(skin, uFinMark, 0.4) * 1.1, tub * 0.5);
+  skin = mix(skin, skin * 1.25 + 0.02, tub * 0.4);
   float wr = sin(m.x / (uLen * 0.0045) + vnoise(m * 2.0) * 3.0) * arm;
   float hgt = wr * 0.3 + tub * 1.0 + ray * 0.4;
   // membrane: thin dark skin with veins following the rays, lighter toward the trailing edge
@@ -556,11 +558,13 @@ void main() {
 export const EYE_VERT = /* glsl */ `
 ${UNIFORMS}
 uniform vec3 uGaze;
+uniform vec3 uSkinNL;  // the skin's normal at the socket, in socket space
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec3 vLocal;
 varying vec3 vViewL;   // view direction in socket space
 varying vec3 vGazeW;   // gaze in world space
+varying vec3 vSkinN;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorldPos = wp.xyz;
@@ -570,6 +574,7 @@ void main() {
   vec3 V = normalize(uCamPos - wp.xyz);
   vViewL = normalize(V * R);
   vGazeW = normalize(R * uGaze);
+  vSkinN = normalize(R * uSkinNL);
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
@@ -601,6 +606,7 @@ varying vec3 vNormal;
 varying vec3 vLocal;
 varying vec3 vViewL;
 varying vec3 vGazeW;
+varying vec3 vSkinN;
 void main() {
   #ifdef DEPTH_PASS
     gl_FragColor = vec4(1.0);
@@ -632,8 +638,8 @@ void main() {
   // golden-amber iris: radial fibres, crypts, a dark limbal ring, a darker collarette
   float fib = vnoise(vec2(rad * 18.0, rn * 4.0)) * 0.6 + vnoise(vec2(rad * 46.0, rn * 9.0)) * 0.4;
   float crypt = smoothstep(0.55, 0.75, vnoise(vec2(rad * 7.0, rn * 6.0) + 3.0)) * smoothstep(0.25, 0.5, rn) * (1.0 - smoothstep(0.75, 0.9, rn));
-  vec3 iris = mix(uIris * 1.15, uIris2, smoothstep(0.35, 1.0, rn) * 0.85);
-  iris *= 0.7 + 0.5 * fib;
+  vec3 iris = mix(uIris * 0.9, uIris2, smoothstep(0.25, 1.0, rn) * 0.9);
+  iris *= 0.6 + 0.55 * fib;
   iris = mix(iris, uIris2 * 0.6, crypt * 0.5);
   iris = mix(iris, uIris2 * 0.35, smoothstep(0.28, 0.36, rn) * smoothstep(0.44, 0.36, rn) * 0.5);
   iris = mix(iris, uIris2 * 0.15, smoothstep(0.82, 1.0, rn));
@@ -673,11 +679,12 @@ void main() {
   lid = mix(lid, vec3(0.06, 0.04, 0.045), margin * 0.75);
   // ---- lighting ----
   float wet = clamp(uWet + uWetSelf + uUnderwater, 0.0, 1.0);
-  vec3 Nlid = normalize(N + (vec3(0.0, 1.0, 0.0) * fold * 0.15));
+  vec3 Ns = normalize(vSkinN);
+  vec3 Nlid = normalize(mix(Ns, N, 0.25) + (N - Ns * dot(N, Ns)) * fold * 0.3);
   Surface s = makeSurface(lid, Nlid, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);
   s.rim = 0.35; s.wrap = 0.22; s.spec = 0.0;
-  vec3 lidLit = stylizedLight(s) + wetSpecular(Nlid, V, vWorldPos, mix(0.4, 0.28, wet), s.shadow, 1.0, 0.028);
+  vec3 lidLit = stylizedLight(s) + wetSpecular(Nlid, V, vWorldPos, mix(0.45, 0.32, wet), s.shadow, 0.8, 0.028);
   // the eyeball: diffuse is soft (the cornea scatters), reflections are sharp
   Surface e = makeSurface(ball, N, vWorldPos);
   e.shadow = s.shadow;
@@ -685,7 +692,8 @@ void main() {
   vec3 eyeLit = stylizedLight(e) * 0.85;
   // corneal bulge: highlights sit on a more curved surface over the iris
   vec3 Nc = normalize(N + normalize(vGazeW) * 0.35 * irisM);
-  eyeLit += wetSpecular(Nc, V, vWorldPos, 0.04, s.shadow, 1.0, 0.04) * 1.4;
+  // the wet cornea mirrors the sky: the dominant cue that the eye is alive and wet
+  eyeLit = eyeLit * 0.8 + wetSpecular(Nc, V, vWorldPos, 0.03, s.shadow, 1.0, 0.045) * 1.6;
   // a small catchlight from the sky so the eye reads alive even in shade
   vec3 R = reflect(-V, Nc);
   eyeLit += uSkyAmbient * 0.25 * smoothstep(0.85, 0.97, R.y) * uSparkle;
@@ -823,8 +831,8 @@ void main() {
   float strandLen = mix(0.5, 1.0, rnd) * clumpLen * smoothstep(0.02, 0.35, vLen);
   if (h > strandLen) discard;
   float hr = h / strandLen;
-  float radius = mix(0.78, 0.26, pow(hr, 1.4));
-  float cov = smoothstep(radius, radius * 0.35, d + (vnoise(f * 6.0 + cell) - 0.5) * 0.15);
+  float radius = mix(0.62, 0.16, pow(hr, 1.25));
+  float cov = smoothstep(radius, radius * 0.4, d + (vnoise(f * 6.0 + cell) - 0.5) * 0.12);
   // dense undercoat close to the skin hides it
   cov = max(cov, smoothstep(0.32, 0.0, h) * smoothstep(0.03, 0.25, vLen));
   if (cov < 0.3) discard;
@@ -839,7 +847,9 @@ void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(uCamPos - vWorldPos);
   vec3 T = normalize(vComb);
-  vec3 col = hairLight(albedo, T, N, V, vWorldPos, vShadow, mix(0.55, 1.0, h), h, 0.9 * hr);
+  // depth: light reaches the inner coat poorly (self-shadowing of the fur)
+  float depthAO = mix(0.45, 1.0, smoothstep(0.0, 0.9, h));
+  vec3 col = hairLight(albedo, T, N, V, vWorldPos, vShadow * mix(0.6, 1.0, h), depthAO, h, 0.9 * hr);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
 }

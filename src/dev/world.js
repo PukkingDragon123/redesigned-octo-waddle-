@@ -42,6 +42,14 @@ export default async function (game) {
     dir.y += pitch;
     dir.normalize();
     look.copy(camPos).addScaledVector(dir, 100);
+    // &isl=<k>[&dist=m&h=m&az=rad&lookh=m]: frame the k-th island of the chapter (only= or the one at s)
+    if (p.has('isl')) {
+      const list = world.plan[only || ch.id].islands;
+      const rec = list[Math.min(list.length - 1, +p.get('isl'))];
+      const az = +(p.get('az') ?? 0.6), dist = +(p.get('dist') ?? rec.R * 2.2), h = +(p.get('h') ?? rec.H * 0.6);
+      camPos.set(rec.pos.x + Math.cos(az) * (rec.R + dist), h, rec.pos.z + Math.sin(az) * (rec.R + dist));
+      look.set(rec.pos.x, +(p.get('lookh') ?? rec.H * 0.45), rec.pos.z);
+    }
     if (p.get('cam')) camPos.fromArray(p.get('cam').split(',').map(Number));
     if (p.get('look')) look.fromArray(p.get('look').split(',').map(Number));
     game.focus.copy(f.pos);

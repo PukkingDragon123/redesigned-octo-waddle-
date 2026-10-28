@@ -1,7 +1,7 @@
 // Dev scene: static inspection of every whale variant, organ states and close-ups.
 // ?debug&test=whale&who=calf|mother|elder|alpha|a1..a5|pip|moss|ember|lineup&view=<view>&time=<preset>
 //   views: side | q (three-quarter front) | front | back | top | under | face | eye | eye2 | organs |
-//          crest | horn | throat | wing | wingup | fluke | plates | mane | skin | belly | far
+//          crest | horn | throat | wing | wingup | wingL | wingLup | fluke | plates | mane | skin | belly | far
 //   organ states: &sing=0..1 &hum=0..1 &charge=0..1 &blow=0..1 &mouth=0..1 &throat=0..1
 //                 &crest=raise,flare &vent=0..1 &flush=0..1
 //   &sea          the real Ocean under the whales (slow headless)    &alt=<m> altitude (default 26)
@@ -40,8 +40,10 @@ export default async function (game) {
   const add = (genome, pos, yaw = 0) => {
     if (p.has('eyescale')) genome = Object.assign({}, genome, { eyeScale: +p.get('eyescale') });
     const m = new WhaleModel(genome);
-    m.prepare();
-    m.setLOD(p.has('lod') ? +p.get('lod') : 0);
+    const lod = p.has('lod') ? +p.get('lod') : who === 'lineup' ? 1 : 0;
+    if (lod === 0) m.prepare();
+    else WhaleModel.flush();
+    m.setLOD(lod);
     m.group.position.copy(pos);
     m.group.rotation.set(0, yaw, 0);
     s.add(m.group);
@@ -52,16 +54,17 @@ export default async function (game) {
   let subject;
   const yaw = ((+p.get('yaw') || 0) * Math.PI) / 180;
   if (who === 'lineup') {
-    const order = ['calf', 'pip', 'moss', 'ember', 'mother', 'a1', 'a2', 'a3', 'a4', 'a5', 'alpha', 'elder'];
+    // adults in a row facing the camera's right, calves in front of them
+    const adults = ['mother', 'a1', 'a2', 'a3', 'a4', 'a5', 'alpha', 'elder'];
     let x = 0;
-    for (const k of order) {
+    for (const k of adults) {
       const g = all[k];
-      const m = add(g, new Vector3(0, alt, 0), Math.PI / 2 + yaw);
-      x += g.length * 0.7;
-      m.group.position.set(0, alt, -x);
-      x += g.length * 0.7;
+      x += g.length * 0.62;
+      add(g, new Vector3(0, alt + (adults.indexOf(k) % 2) * 6, -x), yaw);
+      x += g.length * 0.62;
     }
-    subject = models[4];
+    ['calf', 'pip', 'moss', 'ember'].forEach((k, i) => add(all[k], new Vector3(26, alt - 6, -20 - i * 14), yaw));
+    subject = models[0];
   } else {
     subject = add(all[who] || MOTHER, new Vector3(0, alt, 0), yaw);
   }
@@ -106,6 +109,8 @@ export default async function (game) {
     throat: [[L * 0.3, -L * 0.3, L * 0.38], [0, -L * 0.08, L * 0.2]],
     wing: [[L * 0.45, L * 0.35, L * 0.05], [L * 0.3, -L * 0.02, -L * 0.05]],
     wingup: [[L * 0.35, -L * 0.25, L * 0.05], [L * 0.3, 0, -L * 0.08]],
+    wingL: [[-L * 0.42, L * 0.42, L * 0.12], [-L * 0.32, -L * 0.02, -L * 0.06]],
+    wingLup: [[-L * 0.3, -L * 0.3, -L * 0.2], [-L * 0.32, 0, -L * 0.06]],
     fluke: [[L * 0.3, L * 0.22, -L * 0.75], [0, 0, -L * 0.52]],
     plates: [[L * 0.25, L * 0.32, -L * 0.25], [0, L * 0.1, -L * 0.1]],
     mane: [[L * 0.32, L * 0.2, L * 0.25], [0, L * 0.1, L * 0.08]],
@@ -114,8 +119,9 @@ export default async function (game) {
     far: [[L * 3.5, L * 1.0, L * 2.0], [0, 0, 0]],
   };
   if (who === 'lineup') {
-    V.side = [[150, 14, -150], [0, 0, -150]];
-    V.q = [[110, 40, -40], [0, 0, -160]];
+    V.side = [[210, 20, -150], [0, 0, -150]];
+    V.q = [[170, 60, 30], [0, 0, -140]];
+    V.calves = [[55, 4, -10], [26, -6, -42]];
   }
   const camRel = new Vector3(), lookRel = new Vector3();
   const setView = (name, k = +(p.get('dist') || 1)) => {

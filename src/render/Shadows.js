@@ -9,6 +9,10 @@ import { G } from './Globals.js';
 
 export const LAYER_SHADOW = 3;
 
+const _fwd = new Vector3();
+const _upRef = new Vector3();
+const _right = new Vector3();
+const _up = new Vector3();
 const _bias = new Matrix4().set(
   0.5, 0, 0, 0.5,
   0, 0.5, 0, 0.5,
@@ -74,10 +78,10 @@ export class Shadows {
     const r = this.radius;
     const cam = this.cam;
     // Light-space basis for texel snapping.
-    const fwd = sunDir.clone().negate();
-    const upRef = Math.abs(fwd.y) > 0.99 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
-    const right = new Vector3().crossVectors(upRef, fwd).normalize();
-    const up = new Vector3().crossVectors(fwd, right).normalize();
+    const fwd = _fwd.copy(sunDir).negate();
+    const upRef = Math.abs(fwd.y) > 0.99 ? _upRef.set(1, 0, 0) : _upRef.set(0, 1, 0);
+    const right = _right.crossVectors(upRef, fwd).normalize();
+    const up = _up.crossVectors(fwd, right).normalize();
     const texel = (2 * r) / this.size;
     const x = Math.round(focus.dot(right) / texel) * texel;
     const y = Math.round(focus.dot(up) / texel) * texel;

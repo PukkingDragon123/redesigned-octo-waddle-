@@ -87,6 +87,8 @@ export class Story {
     await this.world.buildChapter('cradle');
     this.herd = new Herd(g, this.path, this.world);
     this.herd.voiceHooks = (w, kind) => this.voiceCall(w, kind);
+    this.herd.onSplash = this._onSplash; // tail and fin slaps hitting the water
+    this.herd.physics.onContact = (a, b, point, k) => this.onWhaleContact(a, b, point, k);
     this.player = new PlayerController(g, this.herd.calf);
     this.weather = new Weather(g);
     this.weather.onStrike = (pos, dist) => {
@@ -1067,6 +1069,26 @@ export class Story {
   showGathering(v) {
     for (const w of this.gathering || []) w.group.visible = v;
     this.gatheringOn = v;
+    // the Oasis whales collide with the herd too
+    this.herd.extraWhales = v ? this.gathering : null;
+  }
+
+  /** Two whales touched (WhalePhysics): a soft bonk, the calf's voice, a nudge of the camera. */
+  onWhaleContact(a, b, point, k) {
+    const g = this.game, calf = this.herd.calf;
+    if (k > 0.2 && g.time - (this.lastWhaleBonk || 0) > 0.25 && point.distanceTo(g.engine.camera.position) < 160) {
+      this.lastWhaleBonk = g.time;
+      this.audio.sfx?.('bonk', { position: point.clone(), gain: clamp(0.2 + k * 0.45, 0, 1) });
+    }
+    if (a !== calf && b !== calf) return;
+    const o = a === calf ? b : a;
+    if (k > 0.6) g.cameraRig.addShake?.(Math.min(0.3, k * 0.12));
+    calf.drive.happy = Math.max(calf.drive.happy, 0.8);
+    if (g.time - (this.lastNuzzle || 0) < 2.5) return;
+    this.lastNuzzle = g.time;
+    if (o === this.herd.mother) this.voiceCall(calf, k < 0.4 ? 'coo' : 'chirp');
+    else if (o.isCalf) this.voiceCall(calf, 'play');
+    else if (k < 0.5) this.voiceCall(calf, 'coo');
   }
 
   updateGathering(dt) {
@@ -1337,30 +1359,7 @@ export class Story {
       }
       calf._syncTransform();
     }
-    // bumping into the big whales (and nuzzling mother)
-    const ax = this._ax || (this._ax = new Vector3());
-    for (const w of herd.whales) {
-      if (w === calf) continue;
-      // contact is with the body's axis (head to tail), not a sphere at the whale's centre
-      const rad = w.nearestOnBody ? w.nearestOnBody(calf.pos, ax) : (ax.copy(w.pos), w.radius);
-      const d = calf.pos.distanceTo(ax);
-      const min = (calf.radius + rad) * 1.05;
-      if (d < min && d > 0.01) {
-        const n = this._v.copy(calf.pos).sub(ax).divideScalar(d);
-        calf.pos.addScaledVector(n, (min - d) * (w.isCalf ? 0.5 : 0.9));
-        if (w.isCalf) w.pos.addScaledVector(n, -(min - d) * 0.5);
-        const vn = calf.vel.dot(n);
-        if (vn < 0) calf.vel.addScaledVector(n, -vn * 1.2);
-        if (w === herd.mother && calf.vel.length() < 7 && g.time - (this.lastNuzzle || 0) > 4) {
-          this.lastNuzzle = g.time;
-          calf.drive.happy = 1;
-          w.drive.happy = 1;
-          this.voiceCall(calf, 'coo');
-          setTimeout(() => this.voiceCall(w, 'answer'), 500);
-        }
-        calf._syncTransform();
-      }
-    }
+    // bumping into other whales is resolved by the herd's physics (herd.update, onWhaleContact)
     // eating: the mouth opens by itself near krill
     let feed = 0;
     if (this.eco && playing) {

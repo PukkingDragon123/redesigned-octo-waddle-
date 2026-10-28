@@ -37,7 +37,8 @@ export function waterStep(w, dt, game, opts = {}) {
   const wasIn = s.inWater;
   s.depth = depth;
   s.sub = sub;
-  s.inWater = sub > 0.5;
+  // hysteresis: a whale riding the surface in waves does not flicker in and out (and splash each time)
+  s.inWater = wasIn ? sub > 0.35 : sub > 0.6;
 
   if (sub > 0.001) {
     // water is ~800x denser than air: strong drag, linear and quadratic
@@ -95,7 +96,7 @@ export function waterStep(w, dt, game, opts = {}) {
           pos: _p.clone().add(_v.set((Math.random() - 0.5) * 0.3, Math.random() * 0.2, (Math.random() - 0.5) * 0.3)),
           vel: new Vector3((Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 1.2, (Math.random() - 0.5) * 0.4),
           life: 1.6, size: 0.06 + Math.random() * 0.08, sizeEnd: 0.14, alpha: 0.7, drag: 0.6, gravity: -1.5,
-          color: [0.85, 0.95, 1.0], kind: 0, fadeIn: 0.05,
+          color: [0.85, 0.95, 1.0], kind: 4, fadeIn: 0.05,
         });
       }
     }
@@ -125,7 +126,7 @@ function spray(game, p, w, k, up) {
     game.mist?.emit({
       pos: _v.set(p.x + Math.cos(a) * w.radius * rr, p.y + 0.2, p.z + Math.sin(a) * w.radius * rr).clone(),
       vel: new Vector3(Math.cos(a) * (1 + 3 * rr), (3 + 6 * Math.random()) * up * Math.min(1.4, 0.5 + k), Math.sin(a) * (1 + 3 * rr)).addScaledVector(w.vel, 0.25),
-      life: 1.2 + Math.random() * 0.8, size: 0.3 + 0.4 * k, sizeEnd: 1.2 + 1.6 * k, alpha: 0.6, drag: 0.5, gravity: 7,
+      life: 0.9 + Math.random() * 0.5, size: 0.3 + 0.4 * k, sizeEnd: 1.2 + 1.6 * k, alpha: 0.6, drag: 0.5, gravity: 7,
       color: [0.95, 0.98, 1.0], kind: 0, fadeIn: 0.03,
     });
   }

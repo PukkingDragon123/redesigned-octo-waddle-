@@ -176,7 +176,12 @@ export class Game {
   warp(seconds) {
     const dt = this.fixedDt || 1 / 30;
     const n = Math.round(seconds / dt);
-    for (let i = 0; i < n; i++) this.simulate(dt);
+    for (let i = 0; i < n; i++) {
+      this.simulate(dt);
+      // particles age during a warp too, so a warped frame does not show everything emitted on the way
+      this.mist.update(dt);
+      this.glow.update(dt);
+    }
   }
 
   simulate(dt) {

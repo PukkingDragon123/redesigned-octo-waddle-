@@ -89,6 +89,11 @@ detail realistic add shaders like tiny glades etc"*
   `src/render/painterly/` (GTAO, anisotropic Kuwahara strokes, canvas, DOF). The lead wires both in.
 
 ### 0.3 Build coordination (read this first if you are a builder)
+- Update: the "build-vur-sok" workflow has been stopped. Its whale and wildlife work continues with two
+  time-boxed finishers that own the same files. Newest user direction: *"Make game look beautiful have custom
+  2d for the grass make it fluffy the whale model and shader make it like painting handrawn but also
+  beautiful also finish work faster"*. That means fluffy hand-painted 2D grass (world2) and hand-painted,
+  hand-drawn whale shading (the whale finisher).
 - WHALES and WILDLIFE builders already at work: this note does not concern you. Carry on.
 - To go faster, the HERD role is now built by a dedicated agent launched directly by the lead. That agent's
   task prompt contains the code word **TIDEWATER**.

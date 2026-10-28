@@ -83,6 +83,8 @@ void main() {
     // sea spray droplet: dense bright core, lit by sun and sky, a little glint toward the sun
     a = exp(-r2 * 3.5);
     vec3 lit = uSunColor * 0.55 + uSkyAmbient * 0.75 + uMoonColor * uNight * 0.5;
+    // at night the spray carries the sea's plankton light
+    lit += vec3(0.06, 0.45, 0.8) * uWaterParams.z * 0.6;
     col = lit * vCol.rgb;
   } else {
     // sparkle: four-point glint

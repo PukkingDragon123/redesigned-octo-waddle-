@@ -79,7 +79,7 @@ export const PRESETS = {
     cloudLit: C('#ffffff', 1.06), cloudShadow: C('#93a9c4', 0.95),
     bankShadow: C('#9fb8d8'), planet: 0.4, cirrus: 0.75, bank: 0.13, rays: 0.12,
     sat: 1.08,
-    sea: C('#0b4a70'), seaScatter: C('#26d3bb'), seaState: 0.38, clarity: 1.35,
+    sea: C('#0b4a70'), seaScatter: C('#26d3bb'), seaState: 0.38, clarity: 1.1,
   }),
   afternoon: preset({
     sunElev: 30, sunAz: -32, sun: C('#ffeccc', 2.4),
@@ -285,7 +285,7 @@ export class Atmosphere {
     const wr = lerp(p.sea.r, p.seaScatter.r, 0.35), wg = lerp(p.sea.g, p.seaScatter.g, 0.35), wb = lerp(p.sea.b, p.seaScatter.b, 0.35);
     G.uWaterTint.value.setRGB(wr * inR * 1.05, wg * inG * 1.05, wb * inB * 1.05);
     const cl = p.clarity * murk;
-    G.uWaterAbsorb.value.set(0.3 * (0.8 + 0.2 * cl), 0.06 * cl, 0.038 * cl);
+    G.uWaterAbsorb.value.set(0.3 * (0.8 + 0.2 * cl), 0.046 * cl, 0.03 * cl);
     G.uWaterParams.value.z = p.plankton;
 
     if (this.sky) {

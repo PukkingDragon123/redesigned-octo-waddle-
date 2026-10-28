@@ -1,7 +1,16 @@
-// Dev scene: the ocean of Vur Sok.
-// ?debug&test=ocean&state=0..1&time=noon&cam=high|skim|under|look|horizon|sun|shallow|whale|storm
-//   &splash (periodic splashes)  &wake (a mover circling at the surface)  &clouds  &fog  &nowhale
-//   &yaw=<deg> (turn the camera)  &orbit (slowly circle)
+// Dev scene: the ocean of Vur Sok (world/Ocean.js), its sky, clouds and underwater mode.
+// ?debug&test=ocean&state=0..1&time=<preset>&cam=<view>
+//   views: high | skim | under | look | window | deep | horizon | sun | shallow | whale | storm |
+//          stormlow | calm | moons | galaxy | tiles | top | sky | wake | splash | trail
+//   &splash          a splash every 2.5 s        &wake      a mover circling at the surface (wake)
+//   &clouds          cumulus at 380-800 m        &fog       a sea-fog bank and wisps on the water
+//   &nowhale         hide the test whale         &yaw=<deg> turn the camera   &orbit  slow circle
+//   &lookdir=x,y,z   look along a direction      &bob=<s>   camera rises and sinks through the surface
+//   &odebug=1..7     ocean debug views (1 foam, 2 Jacobian, 3 normal, 4 roughness, 5 height, 6 foam mask, 7 sim)
+//   &set=uName:x,y,z pin an ocean uniform        &quality=low|medium|high
+//   &game            the real story on this ocean (with &chapter=N&auto&dt=0.05&warp=20)
+// Test objects: two coiled rock columns standing in deep water, a sandy shelf (shallows, caustics,
+// shore foam) and a whale model floating half-submerged.
 import {
   Vector3, Mesh, CylinderGeometry, CircleGeometry, Color, Float32BufferAttribute,
 } from 'three';
@@ -63,8 +72,32 @@ export default async function (game) {
   if (game.cloudSea) game.cloudSea.enabled = false;
   const ocean = game.ocean && game.ocean instanceof Ocean ? game.ocean : new Ocean(game);
   game.ocean = ocean;
+  window.__ocean = ocean;
+  window.__G = G;
+
+  // &game: the real story on the real ocean (integration check before Game.js swaps it in):
+  // ?debug&test=ocean&game&chapter=2&auto&dt=0.05&warp=20
+  if (p.has('game')) {
+    const { Story } = await import('../game/Story.js');
+    game.story = new Story(game);
+    await game.story.init();
+    return;
+  }
   if (p.has('state')) ocean.setSeaState(+p.get('state'), { dur: 0.01 });
   if (p.has('odebug')) ocean.uniforms.uDebug.value = +p.get('odebug');
+  // &painterly: the painted look through PostFX's own hook (engine.post.painterly)
+  if (p.has('painterly')) {
+    try {
+      const { PainterlyPost } = await import('../render/painterly/index.js');
+      const pp = new PainterlyPost(game.engine.renderer, { quality: 1 });
+      pp.sea = true;
+      pp.setSize(game.engine.width, game.engine.height);
+      pp.precompile?.(game.engine.camera);
+      game.engine.midPasses.unshift(pp.aoPass);
+      game.engine.post.painterly = pp;
+      game.painterly = pp;
+    } catch (e) { console.warn('[ocean] painterly unavailable', e); }
+  }
   // &set=uniform:x,y,z  pins an ocean uniform for experiments
   const pins = (p.get('set') || '').split(';').filter(Boolean).map((e) => e.split(':'));
   game.addSystem({ update() {
@@ -127,11 +160,14 @@ export default async function (game) {
     stormlow: [[0, 9, 40], [0, 6, -200]],
     calm: [[0, 14, 30], [0, 4, -400]],
     moons: [[0, 12, 0], [-1000, 520, -700]],
+    tiles: [[0, 320, 300], [0, 0, -900]],
+    top: [[0, 600, 0.01], [0, 0, 0]],
     galaxy: [[0, 12, 0], [-520, 500, -690]],
     sky: [[0, 60, 200], [0, 330, -1500]],
     wake: [[0, 26, 10], [0, 0, -40]],
     splash: [[0, 7, -6], [4, 0, -30]],
     trail: [[22, 9, -8], [24, 0, -40]],
+    mirror: [[26, 10, 6], [26, 3, -70]],
   };
   const name = p.get('cam') || 'high';
   const v = views[name] || views.high;
@@ -153,6 +189,12 @@ export default async function (game) {
     if (p.has('orbit')) {
       const a = game.time * 0.05;
       cp = pos.clone().applyAxisAngle(new Vector3(0, 1, 0), a);
+    }
+    // &bob=<period s>: the camera rises and sinks through the surface (waterline, wet lens)
+    if (p.has('bob')) {
+      const per = +p.get('bob') || 6;
+      cp = cp.clone();
+      cp.y = Math.sin((game.time / per) * Math.PI * 2) * 2.2;
     }
     cam.position.copy(cp);
     const dir = lk.clone().sub(cp).applyAxisAngle(new Vector3(0, 1, 0), yaw);

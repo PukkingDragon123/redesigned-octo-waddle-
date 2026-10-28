@@ -292,7 +292,7 @@ vec3 waterSubmerge(vec3 col, vec3 P) {
 /** In-scattered light of the water column toward the viewer along rd, at a given depth. */
 vec3 waterFogColor(vec3 rd, float depth) {
   float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-  vec3 c = uWaterTint * mix(0.4, 1.5, up * up);
+  vec3 c = uWaterTint * mix(0.3, 1.7, up * up * up);
   vec3 sr = waterSunRefract();
   float toward = pow(max(dot(rd, -sr), 0.0), 5.0);
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);
@@ -408,6 +408,7 @@ vec3 windSway(vec3 worldPos, float flex, float phase) {
  */
 export const SEA = /* glsl */ `
 uniform sampler2D uSkyEnv;
+uniform float uSkyEnvOn;
 uniform vec3 uSeaBody;
 uniform vec3 uSeaScatter;
 uniform vec4 uSeaFar;
@@ -419,6 +420,11 @@ vec2 skyEnvUv(vec3 d) {
   return vec2(az * 0.15915494 + 0.5, sqrt(el * 0.63661977));
 }
 vec3 skyEnv(vec3 d, float lod) {
+  if (uSkyEnvOn < 0.5) {
+    // no rendered sky yet: the painted gradient
+    float hz = pow(1.0 - clamp(d.y, 0.0, 1.0), 3.6);
+    return mix(mix(uSkyZenith, uSkyHorizon, hz), uFogColor, exp(-max(d.y, 0.0) * 28.0) * 0.85);
+  }
   return textureLod(uSkyEnv, skyEnvUv(d), lod).rgb;
 }
 float seaFresnel(float c) {
@@ -458,8 +464,8 @@ vec3 seaFarColor(vec3 rd) {
   vec3 refl = skyEnv(normalize(R), seaEnvLod(s2) + 1.0);
   vec3 col = refl * F + uSeaBody * (1.0 - F);
   vec3 N = vec3(0.0, 1.0, 0.0);
-  col += seaGlitter(N, V, uSunDir, s2 + 1e-4, uSunColor) * 0.9 * (1.0 - uStorm * 0.85);
-  col += seaGlitter(N, V, uMoonDir, s2 + 1e-4, uMoonColor * 0.35) * uNight;
+  col += seaGlitter(N, V, uSunDir, s2 + 1e-4, uSunColor) * (1.0 - uStorm * 0.85);
+  col += seaGlitter(N, V, uMoonDir, s2 + 1e-4, uMoonColor * 0.9) * uNight;
   vec3 foamCol = uSunColor * max(uSunDir.y, 0.0) * 0.75 + uSkyAmbient * 0.8;
   return mix(col, foamCol, uSeaFar.y * 0.5);
 }

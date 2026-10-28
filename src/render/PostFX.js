@@ -146,13 +146,17 @@ void main() {
     float depth = uSeaLevel - X.y;
     if (depth < 0.0) continue;
     vec2 S = X.xz + sr.xz * (depth / min(sr.y, -0.2));
-    float n1 = texture2D(uNoise, S / 9.0 + vec2(uTime * 0.012, uTime * 0.007)).g;
-    float n2 = texture2D(uNoise, S / 3.7 - vec2(uTime * 0.02, -uTime * 0.013)).b;
-    float shaft = pow(smoothstep(0.45, 0.95, n1 * 0.75 + n2 * 0.4), 2.0);
+    // curtains of light: thin ridges of the focusing pattern, drifting with the swell
+    float n1 = texture2D(uNoise, S / 11.0 + vec2(uTime * 0.012, uTime * 0.007)).r;
+    float n2 = texture2D(uNoise, S / 4.3 - vec2(uTime * 0.02, -uTime * 0.013)).a;
+    float r1 = 1.0 - abs(n1 * 2.0 - 1.0), r2 = 1.0 - abs(n2 * 2.0 - 1.0);
+    float shaft = pow(r1, 9.0) * 0.8 + pow(r2, 12.0) * 0.6;
+    // beams blur out with depth below the surface that focused them
+    shaft = mix(shaft, 0.12, smoothstep(4.0, 40.0, depth));
     // sunlight down to the sample, then back along the view: red is gone within metres
     acc += shaft * exp(-uWaterAbsorb * (depth * 1.2 + t)) * dt;
   }
-  float phase = 0.4 + 1.2 * pow(max(dot(rd, -sr), 0.0), 3.0);
+  float phase = 0.35 + 2.2 * pow(max(dot(rd, -sr), 0.0), 4.0);
   gl_FragColor = vec4(acc * phase * sunUp, 1.0);
 }
 `;
@@ -403,6 +407,15 @@ export class PostFX {
     this.painterly = null;
   }
 
+  /** Compile the passes that only run in some situations (under water) now, not mid-game. */
+  warmup(renderer) {
+    if (this._warm) return;
+    this._warm = true;
+    const prev = renderer.getRenderTarget();
+    this.shafts.render(renderer, this.rayA);
+    renderer.setRenderTarget(prev);
+  }
+
   setSize(w, h) {
     let mw = Math.max(1, w >> 1), mh = Math.max(1, h >> 1);
     for (const m of this.mips) {
@@ -479,7 +492,7 @@ export class PostFX {
       this.rayBlur.render(renderer, this.rayB);
       this.composite.uniforms.tRays.value = this.rayB.texture;
       // scattering of the sunlight toward the eye (the per-channel loss is already in the shafts)
-      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.0045 * (1 - G.uStorm.value * 0.7));
+      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.016 * (1 - G.uStorm.value * 0.7));
     } else if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
       this.rayMask.uniforms.tSrc.value = src;
       this.rayMask.uniforms.tDepth.value = sceneRT.depthTexture;

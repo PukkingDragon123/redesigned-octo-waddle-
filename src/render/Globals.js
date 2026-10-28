@@ -75,6 +75,8 @@ export const G = {
   uSceneTex: { value: null },
   // equirect sky radiance (reflections, Snell's window); rendered each frame by the ocean
   uSkyEnv: { value: null },
+  // 1 once uSkyEnv holds a rendered sky (otherwise skyEnv() falls back to the analytic gradient)
+  uSkyEnvOn: { value: 0 },
   // lit upwelling colour of deep open water, and the turquoise light scattered through thin crests
   uSeaBody: { value: new Color(0.004, 0.03, 0.05) },
   uSeaScatter: { value: new Color(0.05, 0.4, 0.38) },

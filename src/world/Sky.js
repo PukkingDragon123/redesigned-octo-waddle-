@@ -94,14 +94,14 @@ vec3 galaxy(vec3 rd) {
   if (c < 0.2) return vec3(0.0);
   vec2 p = vec2(dot(rd, uGalaxyU), dot(rd, uGalaxyV)) / c;
   p.y /= 0.46;              // inclination
-  float r = length(p) / 0.62;
+  float r = length(p) / 0.3;
   if (r > 2.2) return vec3(0.0);
   float th = atan(p.y, p.x);
   float lr = log(max(r, 0.02));
   float pitch = 2.6;        // arm winding
   float spin = th - lr * pitch;
   float arms = 0.5 + 0.5 * cos(2.0 * spin);
-  arms = pow(arms, 2.2);
+  arms = pow(arms, 3.2);
   // brush strokes along the arms
   vec2 ap = vec2(spin * 1.6, lr * 3.0);
   float brush = fbm2(ap * vec2(1.0, 4.0) + 3.0) * 0.6 + fbm2(p * 6.0 + 11.0) * 0.4;
@@ -111,12 +111,10 @@ vec3 galaxy(vec3 rd) {
   dust = pow(dust, 6.0) * smoothstep(0.12, 0.5, r) * exp(-r * 1.0) * smoothstep(0.35, 0.7, brush);
   float core = exp(-r * r * 38.0) * 1.4 + exp(-r * 6.5) * 0.45;
   float knots = pow(max(fbm2(p * 16.0 + 4.0), 0.0), 6.0) * 26.0 * arms * smoothstep(0.15, 0.5, r) * exp(-r * 1.5);
-  float sparks = step(0.985, hash12(floor(p * 90.0))) * arms * exp(-r * 1.5) * 0.35;
-  vec3 col = vec3(0.5, 0.64, 1.0) * armLight * 0.3
-           + vec3(0.4, 0.44, 0.72) * disc * 0.2
-           + vec3(1.0, 0.8, 0.55) * core * 0.45
-           + vec3(1.0, 0.45, 0.62) * knots * 0.1
-           + vec3(0.85, 0.9, 1.0) * sparks * 0.0;
+  vec3 col = vec3(0.5, 0.64, 1.0) * armLight * 0.24
+           + vec3(0.4, 0.44, 0.72) * disc * 0.14
+           + vec3(1.0, 0.8, 0.55) * core * 0.32
+           + vec3(1.0, 0.45, 0.62) * knots * 0.05;
   col *= 1.0 - dust * 0.75;
   float fade = smoothstep(2.2, 1.2, r);
   return col * fade;
@@ -172,9 +170,7 @@ vec3 skyColor(vec3 rd, float env) {
     vec3 m1 = moonDisk(rd, uMoonDir, 0.028, vec3(0.86, 0.9, 1.0), 3.1, mc1);
     col = mix(col, m1 * 2.2, mc1 * uStars) + m1 * (1.0 - mc1) * uStars;
     vec3 m2 = moonDisk(rd, uMoon2Dir, 0.017, vec3(1.0, 0.8, 0.68), 7.7, mc2);
-    float v2 = max(uMoon2Vis, uStars);
     col = mix(col, m2 * 2.0 + col * 0.15, mc2 * uMoon2Vis) + m2 * (1.0 - mc2) * uMoon2Vis * 0.6;
-    col *= 1.0 - (mc1 * uStars + mc2 * uMoon2Vis) * 0.0;
     col += uMoonColor * pow(max(dot(rd, uMoonDir), 0.0), 60.0) * 0.25 * uStars;
   }
 

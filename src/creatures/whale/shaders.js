@@ -442,15 +442,16 @@ void main() {
     float sn = vnoise(q * vec2(30.0, 90.0) + seed);
     float saa = fwidth(sn);
     float streak = smoothstep(0.035 + saa, 0.0, abs(sn - 0.5)) * 0.5 * PFADE(90.0);
-    slate = mix(slate, slate * 1.4 + 0.025, streak * 0.5 + stepEdge * 0.14);
+    slate = mix(slate, slate * 1.25 + 0.012, streak * 0.4 + stepEdge * 0.1);
     // a worn, slightly paler lip (kept low: bright rims on every plate read as a rib cage)
     slate = mix(slate, slate * 1.18 + 0.02, edge * 0.3 * (0.5 + 0.5 * mix(0.5, vnoise(q * 200.0), PFADE(200.0))));
     slate *= 1.0 - crack * 0.65;
-    albedo = slate;
+    // the plates sit in the back's own dark tone (pale lit plates over dark seams read as ribs)
+    albedo = slate * 0.82;
     creaseInk += crack * 0.4 + stepEdge * 0.1 + step(1.5, kind) * 0.12;
     ao *= (1.0 - crack * 0.45) * mix(1.0, 0.72, step(1.5, kind)) * mix(1.0, 0.88, step(0.5, kind));
     rough = 0.62 - stepEdge * 0.1;
-    rim = 0.35;
+    rim = 0.2;
     #undef PFADE
   } else if (part > 5.5 && part < 6.5) {
     // keratin bands of the sonic dome: dark, finely ridged, a little glossy

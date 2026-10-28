@@ -185,7 +185,7 @@ export function buildFins(A, bi, boneAbs, res) {
       tipRound: 0.16, camber: 0.085, maxAt: 0.3, tipChord: calf ? 0.2 : 0.13, splay: 0.2, side, id: side > 0 ? 0 : 1,
       bones: ['fin' + s + '1', 'fin' + s + '2', 'fin' + s + '3'], parent: 'chest', seed: A.shapeSeed + 3 + side,
       rayW: calf ? 0.016 : 0.0105, rayH: calf ? 0.008 : 0.0055, memT: L * (calf ? 0.005 : 0.0028),
-      fur: (u, v, top) => (1 - smoothstep(0.05, 0.16, v)) * (top > 0 ? 1 : 0.5) * (calf ? 1 - smoothstep(0.5, 0.85, u) * 0.7 : 1 - smoothstep(0.35, 0.8, u)) * (calf ? 1.0 : 0.8),
+      fur: (u, v, top) => (1 - smoothstep(0.05, 0.16, v)) * (top > 0 ? 1 : 0.5) * (calf ? 1 - smoothstep(0.4, 0.75, u) * 0.8 : 1 - smoothstep(0.35, 0.8, u)) * (calf ? 0.55 : 0.8),
     }, xf, res.nU, res.nLoop, { tex: [side > 0 ? 0.47 : 0.53, A.texV(W.t - 0.02)], loft: [W.t, A.sOf(W.t, root.th)] });
     info.wings[s] = { xf, span, side };
   }
@@ -221,7 +221,7 @@ export function buildFins(A, bi, boneAbs, res) {
       rays: [], tub: 0, scallop: 0, serrate: calf ? 0.03 : 0.07, sweep: 0.62, droop: -0.02, bulge: 0.06,
       tipRound: 0.18, camber: 0.02, maxAt: 0.25, tipChord: 0.4, tipThick: 0.2, splay: 0.05, side, id: side > 0 ? 4 : 5,
       bones: ['tail3', 'fluke', 'fluke' + s], parent: 'tail3', seed: A.shapeSeed + 17 + side, notch, memT: L * 0.004,
-      fur: (u, v, top) => (1 - smoothstep(0.04, 0.14, v)) * (1 - smoothstep(0.3, 0.6, u)) * 0.9,
+      fur: (u, v, top) => (1 - smoothstep(0.04, 0.14, v)) * (1 - smoothstep(0.3, 0.6, u)) * (calf ? 0.55 : 0.9),
     }, xf, Math.max(10, Math.round(res.nU * 0.55 * res.fluke)), Math.max(10, Math.round(res.nLoop * 0.7)), { tex: [0.5, A.texV(0.02)], loft: [0.02, 0.5] });
     info.flukes[s] = { xf, side };
   }

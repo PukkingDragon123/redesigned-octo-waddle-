@@ -18,7 +18,7 @@ const TAU = Math.PI * 2;
 /** Species definitions (sizes in metres; the calf is 4.2 m long). */
 export const BUG_SPECIES = {
   moth: {
-    slots: 10, block: 32, size: 0.62, flap: 9, amp: 0.8, base: 0.3, minPx: 2.2,
+    slots: 12, block: 32, size: 0.62, flap: 9, amp: 0.8, base: 0.3, minPx: 2.2,
     bodyW: 0.1, bodyL: 0.42, wing: [1.0, 0.85, 0.82, 0.8],
     colA: 0xffc878, colB: 0x7fd8ff, glow: 0xffd28a, glowDay: 0.35, glowNight: 2.4,
     flee: 6.5, fleeR: 6.5, catchR: 1.9, energy: 0.03, wake: 1, shape: 0, drawDist: 520,

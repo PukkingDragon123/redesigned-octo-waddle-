@@ -3,6 +3,7 @@
 // is shown through breathing, flap strength and body language.
 import { Vector3 } from 'three';
 import { clamp, damp, lerp, smoothstep, wrapAngle, dirFromYawPitch } from '../core/math.js';
+import { Moves } from './Moves.js';
 
 export class PlayerController {
   constructor(game, whale) {
@@ -23,6 +24,8 @@ export class PlayerController {
     this.events = { hum: [], humEnd: [], boom: [], roll: [] };
     this.idleT = 0;
     this.lastHum = -10;
+    // tail slaps, spouts, loops, dashes, corkscrews and breaches (src/game/Moves.js)
+    this.moves = new Moves(game, whale, this);
   }
 
   on(ev, fn) { this.events[ev].push(fn); }
@@ -81,8 +84,9 @@ export class PlayerController {
 
     // barrel rolls
     if (this.enabled) {
-      if (inp.rollLeftPressed && w.barrelRoll(1)) this.emit('roll', 1);
-      if (inp.rollRightPressed && w.barrelRoll(-1)) this.emit('roll', -1);
+      // a roll pressed mid-roll queues the next one: chained, they spin up into a corkscrew
+      if (inp.rollLeftPressed) { if (w.barrelRoll(1)) this.emit('roll', 1); else this.moves.queueRoll(1); }
+      if (inp.rollRightPressed) { if (w.barrelRoll(-1)) this.emit('roll', -1); else this.moves.queueRoll(-1); }
     }
 
     // humming
@@ -126,5 +130,7 @@ export class PlayerController {
     d.tired = tired;
     d.excite = damp(d.excite, canSurge || w.rollSpin > 0 ? 1 : 0, 2, dt);
     this.idleT = swim > 0.05 || this.humming ? 0 : this.idleT + dt;
+    // moves last: a loop or a dive bomb may take the body's controls for a moment
+    this.moves.update(dt, inp, this.enabled);
   }
 }

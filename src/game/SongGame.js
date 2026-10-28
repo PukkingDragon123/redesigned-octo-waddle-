@@ -160,7 +160,7 @@ export class SongGame {
           break;
         }
         tries++;
-        if (tries >= 3) {
+        if (tries >= 2) {
           // the herd carries the calf along anyway
           S.audio.setIntensity?.(clamp(0.25 + pi * 0.15, 0, 1));
           break;

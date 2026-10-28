@@ -13,6 +13,9 @@ import { SonicBooms } from './SonicBoom.js';
 import { Menu } from './Menu.js';
 import { Script, until } from './Script.js';
 import { SongGame } from './SongGame.js';
+import { Cinematics } from './Cinematics.js';
+import { LifeCycle } from './life/LifeCycle.js';
+import { ACTS, CHAPTER_LINES, SKIPS, MOMENTS } from './life/text.js';
 import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
 import { ADULTS, CALVES } from '../creatures/WhaleTypes.js';
@@ -67,6 +70,7 @@ export class Story {
     this.lastBonk = 0;
     this.spawned = new Set();
     this.completed = false;
+    this.act = 1; // the life cycle: 1 the calf (the ten chapters), 2 the song of two, 3 new life, 4 the elder
     this._v = new Vector3();
     this._v2 = new Vector3();
   }
@@ -76,7 +80,11 @@ export class Story {
     const g = this.game;
     try {
       await Promise.race([
-        Promise.all(['300 96px', '400 96px', 'italic 400 96px'].map((f) => document.fonts?.load(`${f} "Cormorant Garamond"`))),
+        Promise.all([
+          ...['300 96px', '400 96px', 'italic 400 96px'].map((f) => document.fonts?.load(`${f} "Cormorant Garamond"`)),
+          ...['400 96px', '500 96px'].map((f) => document.fonts?.load(`${f} "Cinzel"`)),
+          document.fonts?.load('700 96px "Cinzel Decorative"'),
+        ]),
         new Promise((r) => setTimeout(r, 2500)),
       ]);
     } catch (e) { /* fonts unavailable: fall back to Georgia */ }
@@ -97,12 +105,14 @@ export class Story {
     };
     this.booms = new SonicBooms(g);
     this.song = new SongGame(this);
+    this.cine = new Cinematics(this);
+    this.life = new LifeCycle(this);
     g.cameraRig.collide = (from, to) => this.cameraHit(from, to);
     await this.loadOptional();
     this.player.on('hum', () => this.onCalfHum());
     this.player.on('humEnd', () => this.onCalfHumEnd());
     this.player.on('boom', (e) => this.onCalfBoom(e));
-    this.player.on('roll', () => this.voiceCall(this.herd.calf, 'play'));
+    this.player.on('roll', () => { this.voiceCall(this.herd.calf, 'play'); this.life?.onRoll(); });
     this.herd.onCaught = (c) => { this.herd.calf.drive.happy = 1; this.audio.sfx?.('chime', { position: c.pos, gain: 0.5 }); };
     this.menu = new Menu(g, {
       onAction: (a) => this.onMenu(a),
@@ -111,6 +121,7 @@ export class Story {
     this.world.build((p) => { this.buildProgress = p; }).then(() => {
       this.worldReady = true;
       this.prepareGathering();
+      this.life.prepare();
       // chapters built after the title appeared get their creatures now
       this.populateEcosystem(Math.max(0, this.chapterIndex));
       // compile every remaining shader (falcon, creatures, shadow variants) while the title is up,
@@ -133,8 +144,15 @@ export class Story {
     const p = g.params;
     if (g.debug && p.has('auto')) {
       // headless testing: a simple autopilot that follows the herd and its mother
+      this.autoplay = true;
       this.player.autopilot = () => {
         const calf = this.herd.calf;
+        const lg = this.life?.autoGoal?.();
+        if (lg) {
+          const to = this._v2.copy(lg).sub(calf.pos);
+          const d = to.length();
+          return { swim: d > 8 ? 1 : 0.4, yaw: Math.atan2(to.x, to.z), pitch: Math.asin(clamp(to.y / Math.max(d, 1), -1, 1)) * 0.9, surge: d > 60 };
+        }
         const n = this.feastInvite ? this.eco?.nearestSwarm?.(calf.pos, 'glintfin') : null;
         const goal = n ? n.pos.clone() : this.herd.mother.pos.clone().addScaledVector(this.herd.mother.fwd, -6).add(new Vector3(6, 2, 0));
         const to = goal.sub(calf.pos);
@@ -142,7 +160,12 @@ export class Story {
         return { swim: d > 10 ? 1 : 0.4, yaw: Math.atan2(to.x, to.z), pitch: Math.asin(clamp(to.y / Math.max(d, 1), -1, 1)) * 0.8, surge: d > 60 };
       };
     }
-    if (g.debug && p.has('chapter')) {
+    const chQ = p.has('chapter') ? +p.get('chapter') : -1;
+    if (g.debug && (p.has('act') || chQ >= 10)) {
+      // debug: jump straight into an act of the life cycle (?act=2|3|4, or chapter=10|11|12)
+      await this.waitWorld();
+      this.life.start(p.has('act') ? clamp(+p.get('act'), 2, 4) : clamp(chQ - 8, 2, 4));
+    } else if (g.debug && p.has('chapter')) {
       // debug: jump straight into a chapter
       await this.waitWorld();
       this.startChapter(+p.get('chapter'), { skipIntro: true });
@@ -227,8 +250,8 @@ export class Story {
     try { return JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
   }
 
-  save(chapter) {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter, completed: this.completed, t: Date.now() })); } catch (e) { /* private mode */ }
+  save(chapter, act = this.act, lifeDone = false) {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter, act: lifeDone ? 1 : act, completed: this.completed, t: Date.now() })); } catch (e) { /* private mode */ }
   }
 
   // ---- voices ---------------------------------------------------------------------------
@@ -259,6 +282,11 @@ export class Story {
   /** Clear every transient story state (used when entering the menu or a chapter). */
   resetWorldState() {
     const g = this.game, herd = this.herd;
+    if (this.cine?.active) this.cine.end({ release: false });
+    this.cine?.hideCard(true);
+    this.script.cancel('moment');
+    this.script.cancel('card');
+    this._lungeShown = false;
     herd.motherScript = null;
     herd.songCenter = null;
     herd.protectCenter = null;
@@ -312,6 +340,8 @@ export class Story {
     this.chapterIndex = -1;
     this.script.cancel();
     this.resetWorldState();
+    this.life?.restore();
+    this.act = 1;
     this.player.enabled = false;
     g.input.setGameplayMode(false);
     document.body.classList.remove('playing');
@@ -377,7 +407,7 @@ export class Story {
       this.audio.start?.().then(() => this.applyVolumes());
       const s = this.loadSave();
       this.menu.dissolveAll();
-      this.script.run(this.continueFrom(s ? s.chapter : 0), 'continue');
+      this.script.run(this.continueFrom(s ? s.chapter : 0, s ? s.act || 1 : 1), 'continue');
       return;
     }
     if (a === 'resume') return this.resume();
@@ -387,13 +417,14 @@ export class Story {
     }
   }
 
-  *continueFrom(ch) {
+  *continueFrom(ch, act = 1) {
     const g = this.game;
     g.fadeRate = 0.9;
     yield () => g.engine.post.grade.uFade.value >= 0.99;
     this.menu.hide();
     yield* this.waitPromise(this.waitWorld());
-    this.startChapter(ch, { skipIntro: true });
+    if (act >= 2) this.life.start(act);
+    else this.startChapter(ch, { skipIntro: true });
     g.fadeRate = -0.5;
   }
 
@@ -434,7 +465,9 @@ export class Story {
     this.game.timeScaleTarget = 1;
     this.game.engine.setLook?.('gameplay', { focusOn: this.herd.calf.pos });
     this.menu.hide();
-    this.player.enabled = true;
+    // a cinematic in progress keeps the controls until it hands them back
+    this.player.enabled = !this.cine?.held;
+    if (this.cine && this.cine.slow !== 1) this.game.timeScaleTarget = this.cine.slow;
     this.game.input.setGameplayMode(true);
     document.body.classList.add('playing');
   }
@@ -445,6 +478,26 @@ export class Story {
     this.menu.dissolveAll();
     g.atmosphere.transition('dawn', 14);
     this.audio.setMood?.('dawn', { fade: 6 });
+    // ---- Vur Sok at sunrise: the herd gathers in the Dawn Lagoon, this season's migration begins
+    const C = this.cine;
+    this.act = 1;
+    C.begin({ hold: false, focus: herd.elder, rate: 0.3 });
+    yield* C.wait(1.0);
+    const lagoon = this.path.pointAt(60);
+    C.card({ kicker: ACTS[1].kicker, title: this.path.chapters[0].name, line: CHAPTER_LINES.cradle });
+    yield* C.play(C.aerial({ center: lagoon, dist: [640, 380], height: [240, 100], angle: [2.0, 2.45], fov: 50 }), 8.5);
+    C.hideCard();
+    yield* C.play(C.orbit({ center: mom, radius: [150, 64], height: [60, 10], angle: [2.45, 3.1], fov: [48, 42], look: mom }), 6.5);
+    // the elder's call wakes the lagoon; one voice after another answers
+    C.setFocus(herd.elder);
+    herd.elder.drive.sleep = 0;
+    this.voiceCall(herd.elder, 'answer');
+    const answerers = herd.adults.filter((w) => w !== mom && w !== herd.elder).slice(0, 3);
+    let ai = 0;
+    yield* C.play(C.rel({ subject: herd.elder, side: [-30, -22], up: [3, 6], back: [-30, -22], fov: 38, worldUp: true }), 4.5, {
+      onFrame: (k, t) => { if (ai < answerers.length && t > 1.4 + ai * 0.7) this.voiceCall(answerers[ai++], 'answer'); },
+    });
+    C.setFocus(calf);
     // glide from the wide drift down to the sleeping calf, nestled by its mother
     const from = this.shot.pos.clone(), fromLook = this.shot.look.clone();
     const close = new Vector3(), focus = new Vector3();
@@ -458,11 +511,14 @@ export class Story {
       this.shot.fov = lerp(46, 40, k);
     };
     let t = 0;
-    const T = 9;
+    const T = C.skipped ? 2.5 : 8;
     while (t < T) {
       frameCalf(easeInOut(clamp(t / T, 0, 1)));
       t += yield 0;
     }
+    // the waking is the player's: the bars slide away
+    C.letterbox(false);
+    C.skippable = false;
     // hold the framing on the calf, which bobs with its mother's breathing, until hand-over
     this.script.run((function* () { for (;;) { frameCalf(1); yield 0; } })(), 'introCam');
     this.menu.hide();
@@ -473,7 +529,7 @@ export class Story {
     // waits for the player: any key, click or stick (or it wakes on its own)
     let waited = 0;
     let nudged = 0;
-    while (waited < 16) {
+    while (waited < 10) {
       if (g.input.anyPressed || g.input.mouseMovedThisFrame && waited > 1.5) break;
       if (waited > 4 + nudged * 4) {
         // a gentle nudge from the mother
@@ -503,6 +559,7 @@ export class Story {
     // hand over to the player without a cut
     this.script.cancel('introCam');
     this.state = 'play';
+    C.end({ rate: 0.22 });
     this.player.enabled = true;
     this.player.syncAim();
     g.input.setGameplayMode(true);
@@ -518,7 +575,11 @@ export class Story {
     const g = this.game, herd = this.herd;
     const ch = this.path.chapters[i];
     this.script.cancel('chapter');
-    if (!opts.fromIntro) this.resetWorldState();
+    if (!opts.fromIntro) {
+      this.resetWorldState();
+      this.life?.restore();
+    }
+    this.act = 1;
     this.state = 'play';
     g.engine.setLook?.('gameplay', { focusOn: herd.calf.pos });
     this.player.enabled = true;
@@ -551,6 +612,10 @@ export class Story {
     const gen = this['chapter_' + ch.id];
     if (gen) this.script.run(gen.call(this), 'chapter');
     this.chapterStartT = g.time;
+    // the chapter's title card (the opening shows the first one itself)
+    if (this.act === 1 && !(i === 0 && this.state === 'play' && !instant)) {
+      this.cine?.flashCard({ kicker: ACTS[1].kicker, title: ch.name, line: CHAPTER_LINES[ch.id] }, 5);
+    }
   }
 
   populateEcosystem(i) {
@@ -587,35 +652,104 @@ export class Story {
     this.voiceCall(mom, 'answer');
     calf.drive.happy = 1;
     yield 1.5;
-    // the herd wakes and sets off
+    // the herd wakes and lifts off over the sea
     herd.motherScript = null;
     herd.mode = 'travel';
-    herd.targetSpeed = 5;
+    herd.targetSpeed = 9;
     this.voiceCall(herd.elder, 'answer');
-    yield 12;
-    herd.targetSpeed = 8;
+    yield 2;
+    yield* this.moment(function* (C) {
+      yield* C.play(C.track({ subject: mom, side: [-46, -30], up: [3, 10], ahead: [10, 30], fov: 44 }), 5);
+      C.setFocus(herd.elder);
+      yield* C.play(C.low({ subject: herd.elder, side: 34, back: [-70, -36], height: 1.4, fov: 48, lookUp: 6 }), 4.5);
+    });
+    herd.targetSpeed = 12;
     yield () => herd.s > this.path.chapters[1].start;
+  }
+
+  // ---- cinematic helpers ------------------------------------------------------------------------
+  /** A cinematic moment inside a chapter: the camera is taken, the calf carried beside its mother. */
+  *moment(body, opts = {}) {
+    const C = this.cine;
+    if (!C || C.active || (this.state !== 'play' && this.state !== 'paused')) return;
+    C.begin(Object.assign({ focus: this.herd.mother, rate: 0.7 }, opts));
+    yield* body.call(this, C);
+    C.end();
+  }
+
+  /**
+   * A travel cut: a dip to black over a stretch of open sea, the herd further along the route
+   * (arc length toS), then an aerial of the herd on its way. Keeps the journey tight.
+   */
+  *travelCut(toS) {
+    const g = this.game, herd = this.herd, C = this.cine;
+    if (!C || C.active || toS < herd.s + 120 || this.state !== 'play') return;
+    C.begin({ focus: herd.mother, rate: 3 });
+    g.fadeRate = 2.4;
+    let t = 0;
+    while (!g.debug && g.engine.post.grade.uFade.value < 0.99 && t < 1.5) t += yield 0;
+    const sp = herd.speed;
+    herd.placeAt(toS, { speed: sp });
+    herd.speed = sp;
+    this.player.syncAim();
+    g.cameraRig.initialized = false;
+    this.populateEcosystem(this.chapterIndex);
+    g.cameraRig.cineW = 1;
+    g.fadeRate = -1.2;
+    yield* C.play(C.track({ subject: herd.mother, side: [-110, -70], up: [46, 22], ahead: [10, 40], fov: 46 }), 4);
+    C.end({ rate: 0.6 });
+  }
+
+  /** The bubble-net lunge seen from the waterline, in slow motion as the mother breaches. */
+  *lungeMoment(m) {
+    const g = this.game, C = this.cine;
+    if (!C || C.active || this.state !== 'play') return;
+    C.begin({ focus: m, rate: 1.2 });
+    const shot = C.low({ subject: m, side: [24, 16], back: [-30, -12], height: [0.9, 1.8], fov: [46, 36], lookUp: 2 });
+    let t = 0, slowT = 0, slow = false;
+    while (t < 9 && !C.skipped) {
+      const dt = yield 0;
+      t += dt;
+      shot(Math.min(1, t / 9), t, C.shot);
+      if (!slow && m.pos.y > seaHeight(g, m.pos.x, m.pos.z) - m.radius * 0.5) {
+        slow = true;
+        C.slowmo(0.3);
+        this.audio.stinger?.('discover');
+        g.cameraRig.addShake(0.2);
+      }
+      if (slow && (slowT += g.dtReal ?? dt) > 3.4) break;
+    }
+    C.end();
   }
 
   *chapter_valleys() {
     const herd = this.herd, mom = herd.mother, calf = herd.calf;
     herd.mode = 'travel';
-    herd.targetSpeed = 9;
-    yield 20;
+    herd.targetSpeed = 13;
+    yield 10;
     // call and answer: the mother hums and waits for the calf's reply
     this.voiceCall(mom, 'answer');
     mom.drive.lookAt = calf.pos;
     const before = this.calfHums;
     let tries = 0;
-    while (this.calfHums === before && tries < 3) {
-      yield* until(() => this.calfHums > before, 7);
+    while (this.calfHums === before && tries < 2) {
+      yield* until(() => this.calfHums > before, 6);
       if (this.calfHums === before) this.voiceCall(mom, 'answer');
       tries++;
     }
-    yield () => herd.s > (this.world.archInfo?.s ?? 1860) - 80;
-    // beneath the Great Arch
+    const archS = this.world.archInfo?.s ?? 1860;
+    yield () => herd.s > archS - 150;
+    // the first sight of the Spiral Arch: a low angle as the herd sweeps beneath it
     this.audio.stinger?.('discover');
     calf.drive.excite = 1;
+    yield* this.moment(function* (C) {
+      C.card(Object.assign({ low: true }, MOMENTS.arch));
+      yield* C.play(C.low({ subject: mom, side: [34, 22], back: [-90, -40], height: 2, fov: [54, 46], lookUp: [16, 34] }), 6);
+      C.hideCard();
+      yield* C.play(C.rel({ subject: mom, side: [-20, -12], up: [-4, 6], back: [30, 14], ahead: 40, lookUp: [20, 6], fov: 50, worldUp: true }), 4);
+    });
+    yield () => herd.s > archS + 40;
+    yield* this.travelCut(this.path.chapters[2].start - 160);
     yield () => herd.s > this.path.chapters[2].start;
   }
 
@@ -624,8 +758,8 @@ export class Story {
     // bubble net and lunge up through it together, and the mother takes her calf down to feast.
     const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
     herd.mode = 'travel';
-    herd.targetSpeed = 6;
-    yield 6;
+    herd.targetSpeed = 10;
+    yield 3;
     herd.mode = 'feed';
     herd.targetSpeed = 3;
     herd.feedHook = (w) => {
@@ -656,7 +790,11 @@ export class Story {
         tgt.copy(n.pos).y -= 10;
         // her ballast carries her down against the sea's lift
         if (m.pos.y < surf + 2) bal(m, tgt.y, dt);
-        if (m.pos.y < n.pos.y - 5 || g.time - phaseT > 12) next(2);
+        if (m.pos.y < n.pos.y - 5 || g.time - phaseT > 12) {
+          next(2);
+          // the breach, in slow motion from the waterline
+          if (!this._lungeShown) { this._lungeShown = true; this.script.run(this.lungeMoment(m), 'moment'); }
+        }
         return { target: tgt, speed: 8, arrive: 3, minSpeed: 5, lookAt: look, maxPitch: 1.15, pitchGain: 1.3 };
       }
       if (phase === 2) {
@@ -688,14 +826,14 @@ export class Story {
     let lastCall = g.time;
     yield* until(() => {
       if (g.time - lastCall > 9 && (this.calfWater?.depth ?? -9) < 0) { lastCall = g.time; this.voiceCall(mom, 'answer'); }
-      return this.eaten - eaten0 > 14 || g.time - t0 > 75;
-    }, 80);
+      return this.eaten - eaten0 > 14 || g.time - t0 > 50;
+    }, 55);
     if (this.eaten - eaten0 > 14) {
       mom.drive.happy = 1;
       this.voiceCall(mom, 'answer');
       this.audio.stinger?.('discover');
     }
-    yield 6;
+    yield 3;
     // a last rising lunge from the adults, then everyone surfaces, breathes and lifts off
     this.feastInvite = false;
     herd.stopBubbleNet?.();
@@ -703,87 +841,106 @@ export class Story {
     herd.feedHook = null;
     this.voiceCall(herd.elder, 'answer');
     herd.mode = 'travel';
-    herd.targetSpeed = 6;
-    yield 10;
-    herd.targetSpeed = 8;
+    herd.targetSpeed = 10;
+    yield 5;
+    herd.targetSpeed = 13;
+    yield* this.travelCut(this.path.chapters[3].start - 160);
     yield () => herd.s > this.path.chapters[3].start;
   }
 
   *chapter_forest() {
     const herd = this.herd;
     herd.mode = 'travel';
-    herd.targetSpeed = 7;
-    yield 14;
+    herd.targetSpeed = 12;
+    yield 6;
     // playmates come to invite the calf into a chase
-    for (let k = 0; k < herd.calves.length; k++) {
+    for (let k = 0; k < Math.min(2, herd.calves.length); k++) {
       const c = herd.calves[k];
       herd.startPlay(c);
       this.voiceCall(c, 'play');
-      yield* until(() => (c.play?.caught ?? 0) > 0, 40);
-      yield 10;
+      yield* until(() => (c.play?.caught ?? 0) > 0, 28);
+      yield 5;
       c.play = null;
       if (herd.s > this.path.chapters[4].start - 200) break;
     }
     herd.stopPlay();
+    yield* this.travelCut(this.path.chapters[4].start - 160);
     yield () => herd.s > this.path.chapters[4].start;
   }
 
   *chapter_song() {
     const g = this.game, herd = this.herd;
     herd.mode = 'travel';
-    herd.targetSpeed = 6;
+    herd.targetSpeed = 12;
     const center = this.world.songCenter || this.path.pointAt(5800);
     yield () => herd.s > 5650;
     herd.mode = 'gather';
     herd.songCenter = center.clone();
     herd.targetSpeed = 0;
-    yield* until(() => herd.calf.pos.distanceTo(center) < 140, 30);
-    yield 3;
+    yield* until(() => herd.calf.pos.distanceTo(center) < 140, 20);
+    // the ring of whales at golden hour, before the first note
+    yield* this.moment(function* (C) {
+      yield* C.play(C.orbit({ center, radius: [190, 120], height: [70, 24], angle: [0.4, 1.3], fov: [50, 44], look: center }), 6);
+    }, { focus: center });
     yield* this.song.run();
     // dusk falls as the herd moves on
     herd.mode = 'travel';
     herd.songCenter = null;
-    herd.targetSpeed = 8;
-    g.atmosphere.transition('dusk', 40);
+    herd.targetSpeed = 13;
+    g.atmosphere.transition('dusk', 25);
     this.audio.setMood?.('night', { fade: 12 });
+    yield 8;
+    yield* this.travelCut(this.path.chapters[5].start - 150);
     yield () => herd.s > this.path.chapters[5].start;
   }
 
   *chapter_night() {
-    const herd = this.herd;
+    const herd = this.herd, mom = herd.mother;
     herd.mode = 'travel';
-    herd.targetSpeed = 8;
+    herd.targetSpeed = 14;
+    yield 6;
+    // the herd under the spiral galaxy, plankton glowing in its wakes
+    yield* this.moment(function* (C) {
+      yield* C.play(C.track({ subject: mom, side: [-60, -40], up: [3, 26], ahead: [0, 30], fov: [50, 56] }), 6);
+    });
     yield () => herd.s > this.path.chapters[6].start;
   }
 
   *chapter_storm() {
     const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
     herd.mode = 'travel';
-    herd.targetSpeed = 7;
+    herd.targetSpeed = 12;
     this.weather.set(0.6, { lightning: 0.08, spots: this.world.lightningSpots });
     g.wind.set(9, 0.7);
-    yield 15;
+    yield 10;
     this.weather.set(1, { lightning: 0.22 });
     g.wind.set(15, 0.95);
     herd.mode = 'shield';
     herd.formationTight = 1;
     this.audio.setIntensity?.(0.7);
     yield () => herd.s > 7550;
-    // a downdraft tears the calf away from its mother
+    // a downdraft tears the calf away from its mother: lightning, in slow motion
     this.weather.strike(calf.pos.clone().add(new Vector3(40, 140, -60)));
     calf.vel.add(new Vector3(18, -16, 10));
     calf.anim.flinch(1.5);
     calf.drive.fear = 1;
     this.voiceCall(calf, 'coo');
+    yield* this.moment(function* (C) {
+      C.slowmo(0.35);
+      yield* C.play(C.rel({ subject: calf, side: [10, 7], up: [-3, -1], back: [-8, -5], ahead: 0, lookUp: [3, 0], fov: [40, 48], worldUp: true }), 1.3);
+      this.weather.strike(calf.pos.clone().add(new Vector3(-80, 160, -120)));
+    }, { focus: calf, rate: 2, hold: false });
     yield 0.6;
     this.voiceCall(mom, 'warn');
     this.audio.setIntensity?.(1);
     herd.care.mode = 'fetch';
-    yield* until(() => calf.pos.distanceTo(mom.pos) < 24, 40);
+    yield* until(() => calf.pos.distanceTo(mom.pos) < 24, 30);
     calf.drive.fear = 0;
     mom.drive.happy = 1;
     this.voiceCall(mom, 'answer');
     this.audio.setIntensity?.(0.6);
+    yield 6;
+    yield* this.travelCut(Math.min(8200, this.path.chapters[7].start - 150));
     yield () => herd.s > 8150;
     this.weather.set(0.25, { lightning: 0.02 });
     g.wind.set(5, 0.4);
@@ -797,10 +954,10 @@ export class Story {
     const g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf;
     const F = this.falcon;
     herd.mode = 'travel';
-    herd.targetSpeed = 8;
+    herd.targetSpeed = 12;
     g.wind.set(4, 0.3);
     if (F) F.target = calf;
-    yield 8;
+    yield 6;
     // something is wrong: a far cry, the herd tenses
     if (F) F.screech();
     else this.audio.sfx?.('falconScreech', { position: calf.pos.clone().add(new Vector3(-900, 300, -1400)), gain: 0.5 });
@@ -841,11 +998,19 @@ export class Story {
       F.setMode('circle', { center: herd.protectCenter, radius: 240, altitude: herd.protectCenter.y + 190, fadeIn: 1.5 });
       herd.threat = F.pos;
       if (this.eco) this.eco.threat = F.pos;
-      yield 8;
+      // the reveal: looking up past the calf at the hunter wheeling against the clouds
+      yield* this.moment(function* (C) {
+        yield* C.play((k, t, s) => {
+          s.pos.copy(calf.pos).addScaledVector(calf.fwd, -12).addScaledVector(calf.right, 5).y -= 3;
+          s.look.copy(F.pos);
+          s.fov = lerp(52, 30, k);
+          s.roll = 0.05 * k;
+        }, 5);
+      }, { focus: F });
       F.setMode('stalk', { behind: 140, above: 100 });
       yield 5;
     }
-    for (let wave = 0; wave < 3; wave++) {
+    for (let wave = 0; wave < 2; wave++) {
       yield* until(() => safe(), wave === 0 ? 4 : 3);
       if (F) {
         // it dives from its stalking station: high, and neither too close nor too far
@@ -879,8 +1044,8 @@ export class Story {
           F.knockback(w.pos, 1.2);
         }
         // it climbs away to circle and stalk again
-        yield 5;
-        if (wave < 2) F.setMode('stalk', { behind: 140, above: 100 });
+        yield 4;
+        if (wave < 1) F.setMode('stalk', { behind: 140, above: 100 });
       } else {
         yield 6;
         this.herdBoom(0.9);
@@ -909,7 +1074,7 @@ export class Story {
     yield 3;
     // relief
     herd.mode = 'travel';
-    herd.targetSpeed = 8;
+    herd.targetSpeed = 13;
     herd.protectCenter = null;
     this.audio.setMood?.('relief', { fade: 6 });
     this.audio.stinger?.('resolve');
@@ -918,8 +1083,9 @@ export class Story {
     mom.drive.happy = 1;
     calf.drive.happy = 1;
     this.voiceCall(mom, 'answer');
-    yield 6;
+    yield 4;
     herd.motherScript = null;
+    yield* this.travelCut(this.path.chapters[8].start - 150);
     yield () => herd.s > this.path.chapters[8].start;
   }
 
@@ -942,6 +1108,7 @@ export class Story {
       return Math.hypot(q.x - a.x - abx * t, q.y - a.y - aby * t, q.z - a.z - abz * t);
     };
     for (const w of this.herd.adults) {
+      if (!w.group.visible) continue;
       const half = Math.max(0, w.L * 0.5 - w.radius);
       a.copy(w.pos).addScaledVector(w.fwd, -half);
       b.copy(w.pos).addScaledVector(w.fwd, half);
@@ -1017,7 +1184,7 @@ export class Story {
   *chapter_wall() {
     const herd = this.herd, mom = herd.mother, calf = herd.calf;
     herd.mode = 'travel';
-    herd.targetSpeed = 7;
+    herd.targetSpeed = 11;
     // through the wall the mother stays close and keeps calling
     herd.motherScript = () => {
       const sA = clamp(herd.calfS + 25, herd.s - 40, herd.s + 40);
@@ -1034,24 +1201,30 @@ export class Story {
   *chapter_oasis() {
     const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
     herd.mode = 'travel';
-    herd.targetSpeed = 6;
+    herd.targetSpeed = 10;
     this.audio.stinger?.('discover');
     this.showGathering(true);
     // the reveal: the camera rises wide as the calf emerges from the wall
     const t0 = g.time;
-    g.cameraRig.setCinematic(this.shot, 0.35);
-    while (g.time - t0 < 9) {
-      const k = (g.time - t0) / 9;
-      this.shot.pos.copy(calf.pos).addScaledVector(calf.fwd, -20 - k * 30).add(new Vector3(0, 8 + k * 30, 0)).addScaledVector(calf.right, 14);
-      this.shot.look.copy(calf.pos).addScaledVector(calf.fwd, 220).add(new Vector3(0, -20, 0));
-      this.shot.fov = 55;
-      yield 0;
-    }
-    g.cameraRig.cineTarget = 0;
-    // free to explore; the herd drifts toward the Mother Tree
     const mt = this.world.motherTree || this.path.pointAt(11150);
-    yield () => herd.s > 11000 || g.time - t0 > 200;
-    yield* until(() => calf.pos.distanceTo(mom.pos) < 120 && calf.pos.distanceTo(mt) < 600, 60);
+    yield* this.moment(function* (C) {
+      yield* C.play((k, t, s) => {
+        s.pos.copy(calf.pos).addScaledVector(calf.fwd, -20 - k * 30).addScaledVector(calf.right, 14);
+        s.pos.y += 8 + k * 34;
+        s.look.copy(calf.pos).addScaledVector(calf.fwd, 220);
+        s.look.y -= 20;
+        s.fov = 55;
+        s.roll = 0;
+      }, 9);
+      C.setFocus(mt);
+      yield* C.play(C.orbit({ center: mt, radius: [900, 760], height: [260, 200], angle: [-1.2, -0.9], fov: 46, lookUp: 120 }), 5);
+    }, { focus: calf, rate: 0.35 });
+    // free to explore; the herd drifts toward the Mother Tree
+    herd.targetSpeed = 12;
+    yield 18;
+    yield* this.travelCut(10850);
+    yield () => herd.s > 11000 || g.time - t0 > 120;
+    yield* until(() => calf.pos.distanceTo(mom.pos) < 120 && calf.pos.distanceTo(mt) < 600, 30);
     yield* this.ending();
   }
 
@@ -1186,10 +1359,11 @@ export class Story {
     this.audio.setIntensity?.(1);
     // a slow rising crane shot around the herd and the Mother Tree
     this.player.enabled = false;
+    this.cine.begin({ hold: false, focus: calf, rate: 0.18 });
     g.cameraRig.setCinematic(this.shot, 0.18);
     const t0 = g.time;
     this.endTitle = null;
-    while (g.time - t0 < 30) {
+    while (g.time - t0 < 30 && !this.cine.skipped) {
       const k = (g.time - t0) / 30;
       const a = 0.5 + k * 1.3;
       const rad = lerp(40, 260, easeInOut(k));
@@ -1198,31 +1372,29 @@ export class Story {
       this.shot.fov = lerp(45, 55, k);
       if (k > 0.55 && !this.endTitle) {
         this.endTitle = true;
-        this.menu.returnPage = 'main';
-        this.menu.items.forEach((it) => (it.targetOpacity = 0));
-        this.menu.visible = false;
-        this.menu.dissolving = false;
-        this.menu.title.dissolve = 0;
-        this.menu.subtitle.dissolve = 0;
-        this.menu.title.targetOpacity = 1;
+        this.cine.card({ kicker: ACTS[1].kicker, title: 'Home', line: 'The calf has crossed the sea. Its life has only begun.' });
       }
       yield 0;
     }
     this.audio.stinger?.('resolve');
     this.completed = true;
-    this.save(9);
-    yield 6;
-    g.fadeRate = 0.25;
-    yield () => g.engine.post.grade.uFade.value >= 0.99;
+    this.save(9, 2);
+    yield* this.cine.wait(4);
+    this.cine.hideCard();
+    this.cine.end({ release: false });
+    // the seasons turn: the calf grows up (Act II)
+    yield* this.life.seasonsTurn(SKIPS.toAct2);
     G.uSongAmp.value = 0;
+    if (this.eco) { this.eco.songFocus = null; this.eco.songRadius = 16; }
     this.showGathering(false);
-    this.enterMenu();
+    this.life.start(2);
   }
 
   // ---- calf interaction events ---------------------------------------------------------
   onCalfHum() {
     const calf = this.herd.calf;
     this.calfHums++;
+    if (this.act > 1) this.life.onHum();
     let midi = this.song.listening ? this.song.humStart() : null;
     if (midi === null) {
       // free humming: nose-up raises the pitch, snapped to the key
@@ -1267,12 +1439,14 @@ export class Story {
       else if (this.state === 'paused' && this.menu.page === 'pause') this.resume();
     }
     this.script.update(dt);
+    this.cine.update(ud);
     this.menu.update(ud);
     if (this.state === 'menu') {
       this.menuT = (this.menuT || 0) + dt;
       this.menuShot(this.menuT);
     }
     this.updateCalf(dt);
+    this.life.update(dt);
     this.activities?.update?.(dt);
     this.herd.update(dt);
     for (const w of this.herd.whales) if (w !== this.herd.calf) waterStep(w, dt, g, { onSplash: this._onSplash });
@@ -1301,7 +1475,7 @@ export class Story {
     // chapter progression
     if (this.state === 'play' || this.state === 'ending') {
       const next = this.path.chapters[this.chapterIndex + 1];
-      if (next && this.herd.s >= next.start && this.state === 'play') this.enterChapter(this.chapterIndex + 1);
+      if (next && this.act === 1 && this.herd.s >= next.start && this.state === 'play') this.enterChapter(this.chapterIndex + 1);
     }
     // alien plants recoil from whales passing low over them
     const fl = this.world.flora;
@@ -1332,8 +1506,10 @@ export class Story {
   updateCalf(dt) {
     const g = this.game, herd = this.herd, calf = herd.calf;
     const playing = this.state === 'play' || this.state === 'paused';
+    // a whale the act scripts pose by hand (the courtship helix, the elder's descent)
+    const kin = this.life.isKinematic(calf);
     // the calf sleeps in the menu; it is the player's to steer in play
-    if (playing) this.player.update(dt);
+    if (kin) { /* posed by the life cycle */ } else if (playing) this.player.update(dt);
     else {
       calf.ctl.thrust = 0;
       calf.ctl.targetYaw = calf.yaw;
@@ -1355,21 +1531,31 @@ export class Story {
     }
     // wind: the storm buffets the calf unless it shelters in its mother's lee
     g.wind.sample(calf.pos, calf.wind).multiplyScalar(herd.windShelter * (0.35 + this.weather.level * 0.9));
-    calf.step(dt);
-    this.calfWater = waterStep(calf, dt, g, { player: true, onSplash: this._onSplash });
+    // the herd's slipstream: flying with the travelling herd, the young one is carried along
+    // (the air it swims through moves with the herd), so it keeps pace at migration speed
+    if (playing && herd.mode === 'travel' && herd.speed > 4) {
+      const fr = herd.frame;
+      const near = 1 - smoothstep(120, 320, calf.pos.distanceTo(herd.mother.pos));
+      if (fr && near > 0) calf.wind.addScaledVector(fr.fwd, herd.speed * 0.5 * near);
+    }
+    if (!kin) {
+      calf.step(dt);
+      this.calfWater = waterStep(calf, dt, g, { player: true, onSplash: this._onSplash });
+    }
     // soft world limits: the sea below (Swim.js), thin air above, the herd's pull around
     const anchor = herd.anchor;
     const ceiling = anchor.y + 260;
-    if (calf.pos.y > ceiling) calf.vel.y -= (calf.pos.y - ceiling) * 0.5 * dt;
+    const free = this.life.free || kin;
+    if (!free && calf.pos.y > ceiling) calf.vel.y -= (calf.pos.y - ceiling) * 0.5 * dt;
     const away = this._v.copy(calf.pos).sub(anchor);
     const far = away.length();
-    if (playing && far > 420) {
+    if (playing && !free && far > 420) {
       // a homeward wind turns the calf back toward its family
       calf.vel.addScaledVector(away.normalize(), -(far - 420) * 0.04 * dt * 10);
       herd.care.mode = 'fetch';
     }
     // collisions with rock
-    const push = this.world.collide(calf.pos, calf.radius * 0.95, this._v2);
+    const push = kin ? this._v2.set(0, 0, 0) : this.world.collide(calf.pos, calf.radius * 0.95, this._v2);
     if (push.lengthSq() > 1e-6) {
       const n = push.clone().normalize();
       const vn = calf.vel.dot(n);

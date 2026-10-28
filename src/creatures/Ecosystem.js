@@ -25,6 +25,7 @@ import { FishSystem } from './eco/Fish.js';
 import { ReptileSystem } from './eco/Reptiles.js';
 import { BubbleSystem } from './eco/Bubbles.js';
 import { SeaGlow } from './eco/SeaGlow.js';
+import { ReefLife } from './eco/Reef.js';
 
 const MAX_TRANSIENT = 48;
 const NO_PERCHES = [];
@@ -68,6 +69,11 @@ export class Ecosystem {
     this.bubbles = new BubbleSystem(this);
     /** Night plankton in the water: flares where fish, whales and the calf stir it. */
     this.plankton = new SeaGlow(this);
+    /**
+     * Reef life around the camera under the sea: kelp forests, coral gardens, crabs, jellies,
+     * rays, lantern puffers and ribbon eels (eco/Reef.js). Small ones are food (eat, nearestSwarm).
+     */
+    this.reef = new ReefLife(this);
 
     this._transient = []; // short-lived predators: mouths, shocks
     this._mouthOf = new WeakMap();
@@ -287,6 +293,11 @@ export class Ecosystem {
       n = this.fish.eatAt(mouthPos, prev, mouthRadius, { max: Math.floor(rec.budget) });
       rec.budget -= this.fish.lastCount;
     }
+    // reef critters (crabs, puffers, jellies) in the mouth
+    if (rec.budget >= 1) {
+      n += this.reef.eatAt(mouthPos, mouthRadius, Math.min(3, Math.floor(rec.budget)));
+      rec.budget -= this.reef.lastCount;
+    }
     // the mouth as a predator: fish sense its pressure wave ahead of it
     const sp = rec.vel.length();
     const pred = rec.pred || (rec.pred = { x: 0, y: 0, z: 0, r: 0, s: 0, vx: 0, vy: 0, vz: 0, life: 0 });
@@ -313,7 +324,14 @@ export class Ecosystem {
 
   /** Nearest fish school the herd can feed on: { school, swarm, pos, dist, radius, species, count, depth } or null. */
   nearestSwarm(pos, species = null) {
-    return this.fish.nearest(pos, species);
+    if (species === 'reef') return this.reef.nearestFood(pos, 40);
+    const f = this.fish.nearest(pos, species);
+    // under the sea, a crab, puffer or jelly close by is food too (the calf's mouth opens for it)
+    if (species === null) {
+      const r = this.reef.nearestFood(pos, 14);
+      if (r && (!f || r.dist < f.dist)) return r;
+    }
+    return f;
   }
 
   /** Remove every creature (chapter restart). */
@@ -322,6 +340,7 @@ export class Ecosystem {
     this.reptiles.clear();
     this.bubbles.clear();
     this.plankton.clear();
+    this.reef.clear();
     this._transient.length = 0;
     this._mouths.length = 0;
     this._mouthByOwner = new WeakMap();
@@ -347,6 +366,7 @@ export class Ecosystem {
     this.reptiles.dispose();
     this.bubbles.dispose();
     this.plankton.dispose();
+    this.reef.dispose();
   }
 
   // ---- compatibility with the sky ecosystem's call sites ----------------------------------
@@ -437,6 +457,9 @@ export class Ecosystem {
     this._netBubbles(dt, ctx);
     this.bubbles.update(dt);
     this.plankton.update(dt, ctx);
+    t1 = performance.now();
+    this.reef.update(dt, ctx);
+    T.reef = (T.reef || 0) + (performance.now() - t1 - (T.reef || 0)) * 0.05;
 
     const ms = performance.now() - t0;
     const s = this.stats;
@@ -449,6 +472,7 @@ export class Ecosystem {
     s.schools = this.fish.schools.length;
     s.birds = this.reptiles.birds.length;
     s.bubbles = this.bubbles.live.length;
+    s.reef = this.reef.stats;
   }
 
   // ---- internals ------------------------------------------------------------------------

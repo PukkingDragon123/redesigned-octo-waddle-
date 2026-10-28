@@ -47,8 +47,26 @@ vec3 bumpN(vec3 N, vec3 P, float h, float k) {
   float dhx = dFdx(h), dhy = dFdy(h);
   vec3 r1 = cross(dpy, N), r2 = cross(N, dpx);
   float det = dot(dpx, r1);
-  vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
-  return normalize(abs(det) * N - grad * k);
+  vec3 grad = sign(det) * (dhx * r1 + dhy * r2) * k;
+  // cap the tilt (about 45 degrees): a step in h across one pixel quad (a terrace riser, a crack
+  // edge, a grazing view) would otherwise flip the normal and speckle the surface with dark pixels
+  grad -= N * dot(grad, N);
+  float gl = length(grad), lim = abs(det);
+  grad *= gl > lim ? lim / gl : 1.0;
+  vec3 r = abs(det) * N - grad;
+  return dot(r, r) > 1e-30 ? normalize(r) : N;
+}
+`;
+
+// ---- shadow lookup for big curved bodies ------------------------------------------------------
+// The shared sampler filters with a wide Poisson kernel rotated per world cell. The lookup follows
+// the true surface (a bumped normal would scatter the offset per pixel) and is pushed out by a
+// fraction of the kernel's footprint in metres, so the domed armour never self-shadows in grain.
+const WSHADOW = /* glsl */ `
+float bodyShadow(vec3 P, vec3 Ng) {
+  float uvPerM = length(vec3(uShadowMatrix[0].x, uShadowMatrix[1].x, uShadowMatrix[2].x));
+  float kM = min(4.0 * uShadowParams.x / max(uvPerM, 1e-6), 1.5);
+  return sampleShadow(P + Ng * kM * 0.3, Ng);
 }
 `;
 
@@ -196,9 +214,11 @@ ${SHADOW}
 ${LIGHTING}
 ${SEA}
 ${WET}
+${WSHADOW}
 ${PAINT}
 ${PLEATS}
 uniform vec4 uPleat;
+uniform float uDbg;      // dev scene debug views (0 off)
 uniform sampler2D uSkinA;
 uniform sampler2D uSkinB;
 uniform float uBaked;
@@ -370,39 +390,67 @@ void main() {
       rough = 0.8;
     }
     rough = mix(0.5, 0.28, s) + chip * 0.3;
+    // skin sleeve over the flared root: folded hide creeping up the horn, its edge wavering
+    float sleeveEdge = 0.055 + 0.018 * (vnoise(vec2(around * 9.0, 2.0) + uSeed) - 0.5) * 2.0;
+    float sleeve = 1.0 - smoothstep(sleeveEdge - 0.012, sleeveEdge + 0.004, s);
+    float sfold = sin(s * 260.0 + vnoise(vec2(around * 30.0, s * 40.0)) * 3.0);
+    albedo = mix(albedo, uBack * (0.72 + 0.12 * sfold), sleeve);
+    rough = mix(rough, 0.45, sleeve);
+    creaseInk += smoothstep(0.012, 0.0, abs(s - sleeveEdge)) * 0.4;
     f0 = 0.04;
     rim = 0.4;
   } else if (part < 4.5) {
-    // dorsal plates: thick slate-like armour with cleavage terraces, cracks and chipped edges
+    // dorsal plates: thick slate-like armour with cleavage terraces, cracks and chipped edges.
+    // Every octave fades out before it gets smaller than a couple of pixels (no speckle at a
+    // distance), and every edge is antialiased by its own screen-space width.
     vec2 q = vP.xy / uLen;
-    float seed = floor(vP.w);
-    float kind = fract(vP.w) * 4.0;  // 0 top, 1 bevel, 2 foot
-    float n1 = fbm2(q * 32.0 + seed * 1.3);
-    // terraces: stepped layers of slate
-    float terr = floor(n1 * 6.0) / 6.0;
-    float stepEdge = smoothstep(0.06, 0.0, abs(fract(n1 * 6.0) - 0.5) - 0.44);
-    // big cracks
-    float w = worley2(q * 9.0 + seed * 2.1);
-    vec2 wc = q * 9.0 + seed * 2.1;
-    float cw = 0.012 + 0.04 * vnoise(wc * 2.1 + 4.0);   // the crack swells and thins along its length
-    float crack = smoothstep(cw, 0.0, abs(w - 0.45 - 0.08 * vnoise(wc * 3.0) - 0.03 * vnoise(wc * 11.0)) - 0.01) * smoothstep(0.38, 0.52, vnoise(wc * 0.7 + seed));
+    float pxq = max(length(fwidth(q)), 1e-6);           // plate units per pixel
+    #define PFADE(F) (1.0 - smoothstep(0.12, 0.45, (F) * pxq))
+    // vP.w = plate seed (an integer) + ring kind * 0.25. The interpolated value can land a hair
+    // below the integer (36.99999 for 37): a plain floor() then flips the seed and reads the
+    // fraction as "foot" on random pixels, the source of the dark speckle on the plates
+    float seed = floor(vP.w + 0.1);
+    float kind = max(vP.w - seed, 0.0) * 4.0;  // 0 top, 1 bevel, 2 foot
+    // hand-drawn warp so the terraces and cracks never run ruler-straight
+    vec2 qw = q + (vec2(vnoise(q * 14.0 + seed), vnoise(q * 14.0 + seed + 5.1)) - 0.5) * 0.035;
+    float n1 = fbm2(qw * 32.0 + seed * 1.3);
+    // terraces: soft stepped layers of slate (smoothed risers instead of hard floor() steps)
+    float tf = n1 * 6.0;
+    float tw = clamp(fwidth(tf) * 1.5, 0.08, 0.5);
+    float terr = (floor(tf) + smoothstep(0.5 - tw, 0.5 + tw, fract(tf))) / 6.0;
+    float stepEdge = (1.0 - smoothstep(0.0, 0.06 + tw, abs(fract(tf) - 0.5))) * PFADE(32.0 * 6.0 * 0.35);
+    // big cracks: wavering, swelling and thinning, broken into strokes
+    vec2 wc = qw * 9.0 + seed * 2.1;
+    float w = worley2(wc);
+    float cw = 0.012 + 0.04 * vnoise(wc * 2.1 + 4.0);
+    float cd = abs(w - 0.45 - 0.08 * vnoise(wc * 3.0) - 0.03 * vnoise(wc * 11.0) * PFADE(99.0)) - 0.01;
+    float caa = fwidth(w) * 1.2;
+    float crack = smoothstep(cw + caa, -caa * 0.5, cd) * smoothstep(0.38, 0.52, vnoise(wc * 0.7 + seed));
+    crack *= mix(0.55, 1.0, PFADE(9.0 * 3.0));            // far away a crack is a soft dark seam
     float edge = smoothstep(0.82, 1.0, vP.z);
-    float hgt = terr * 0.6 + vnoise(q * 220.0) * 0.08 - crack * 0.8;
-    N = bumpN(N, vWorldPos, hgt * uLen * 0.0018, 1.0);
-    vec3 slate = uPlateCol * (0.8 + 0.3 * terr + 0.08 * fbm2(q * 90.0 + seed));
-    // laminations on the bevelled edge, pale streaks and lichen-like crust on top
+    float grit = vnoise(q * 220.0) * PFADE(220.0);
+    float hgt = terr * 0.6 + grit * 0.08 - crack * 0.8;
+    N = bumpN(N, vWorldPos, hgt * uLen * 0.0018, PFADE(40.0) * 0.8 + 0.2);
+    vec3 slate = uPlateCol * (0.8 + 0.3 * terr + 0.08 * (fbm2(q * 90.0 + seed) - 0.5) * PFADE(90.0) + 0.04);
+    // broad lichen-dark / weathered-pale blotches so a plate never reads flat from far away
+    float blotch = fbm2(q * 7.0 + seed * 0.7);
+    slate *= 0.86 + 0.28 * blotch;
+    // laminations on the bevelled edge, pale streaks and a worn crust on top
     // (stacked down the bevel in the plate's own frame, wavering like hand-drawn layers)
-    float lam = 0.5 + 0.5 * sin(kind * 19.0 + (fbm2(q * 60.0 + seed) - 0.5) * 3.2 + (vnoise(q * 320.0 + seed) - 0.5) * 0.9);
+    float lam = 0.5 + 0.5 * sin(kind * 19.0 + (fbm2(q * 60.0 + seed) - 0.5) * 3.2 + (vnoise(q * 320.0 + seed) - 0.5) * 0.9 * PFADE(320.0));
     slate = mix(slate, slate * (0.75 + 0.4 * lam), kind > 0.5 ? 0.8 : 0.0);
-    float streak = smoothstep(0.035, 0.0, abs(vnoise(q * vec2(30.0, 90.0) + seed) - 0.5)) * 0.5;
+    float sn = vnoise(q * vec2(30.0, 90.0) + seed);
+    float saa = fwidth(sn);
+    float streak = smoothstep(0.035 + saa, 0.0, abs(sn - 0.5)) * 0.5 * PFADE(90.0);
     slate = mix(slate, slate * 1.45 + 0.03, streak * 0.5 + stepEdge * 0.25);
-    slate = mix(slate, slate * 1.3 + 0.05, edge * 0.5 * (0.5 + 0.5 * vnoise(q * 200.0)));
+    slate = mix(slate, slate * 1.3 + 0.05, edge * 0.5 * (0.5 + 0.5 * mix(0.5, vnoise(q * 200.0), PFADE(200.0))));
     slate *= 1.0 - crack * 0.65;
     albedo = slate;
     creaseInk += crack * 0.45 + stepEdge * 0.12 + step(1.5, kind) * 0.3;
     ao *= (1.0 - crack * 0.5) * mix(1.0, 0.55, step(1.5, kind)) * mix(1.0, 0.8, step(0.5, kind));
     rough = 0.62 - stepEdge * 0.1;
     rim = 0.35;
+    #undef PFADE
   } else if (part > 5.5 && part < 6.5) {
     // keratin bands of the sonic dome: dark, finely ridged, a little glossy
     // keratin scutes of the sonic dome: concentric growth rings like a turtle's, a worn crown
@@ -459,7 +507,15 @@ void main() {
 
   rough = mix(rough, rough * 0.55, wet);
   Surface s = makeSurface(albedo, N, vWorldPos);
-  s.shadow = sampleShadow(vWorldPos, N);
+  // the shadow lookup follows the true surface (a bumped normal would scatter the offset and
+  // speckle the soft penumbra), pushed a little further out on big bodies against acne
+  s.shadow = bodyShadow(vWorldPos, Ng);
+  if (uDbg > 0.5) {
+    // 1 shadow, 2 bumped normal, 3 albedo, 4 ao, 5 crease ink
+    vec3 dv = uDbg < 1.5 ? vec3(s.shadow) : uDbg < 2.5 ? N * 0.5 + 0.5 : uDbg < 3.5 ? albedo : uDbg < 4.5 ? vec3(ao) : vec3(creaseInk);
+    gl_FragColor = vec4(dv, 1.0);
+    return;
+  }
   s.ao = ao * mix(0.72, 1.0, smoothstep(-1.0, 0.3, N.y));
   s.spec = 0.0;
   s.trans = trans;
@@ -535,6 +591,7 @@ ${SHADOW}
 ${LIGHTING}
 ${SEA}
 ${WET}
+${WSHADOW}
 ${PAINT}
 uniform vec3 uBack;
 uniform vec3 uBelly;
@@ -542,6 +599,7 @@ uniform vec3 uMembrane;
 uniform vec3 uFinTip;
 uniform vec3 uFinMark;
 uniform float uFinMarkAmt;
+uniform float uFinBarn;   // barnacle load on the leading edges and fluke tips (old whales)
 uniform vec4 uTear;
 uniform float uSeed;
 uniform float uLen;
@@ -609,6 +667,33 @@ void main() {
   skin = mix(skin, skin * 1.25 + 0.02, tub * 0.4);
   float wr = sin(m.x / (uLen * 0.0045) + vnoise(m * 2.0) * 3.0) * arm;
   float hgt = wr * 0.3 + tub * 1.0 + ray * 0.4;
+  // barnacle clusters on the knobs of the leading edge and the fluke tips (humpback-like),
+  // pale volcano shells with dark openings, crowded where the edge meets the water first
+  float barn = 0.0;
+  float pxM = length(fwidth(m));   // metres per pixel (outside the branch: derivatives stay defined)
+  float zone = (1.0 - smoothstep(0.04, 0.2, uv.y)) * smoothstep(0.1, 0.25, uv.x) * mix(0.6, 1.0, tub);
+  zone = max(zone, step(3.5, id) * smoothstep(0.55, 0.85, uv.x) * (1.0 - smoothstep(0.1, 0.35, uv.y))) * uFinBarn;
+  if (zone > 0.01) {
+    zone *= smoothstep(0.35, 0.6, fbm2(m * 0.6 + uSeed * 1.3));
+    float cellM = uLen * 0.0042;
+    vec2 cp = m / cellM;
+    vec2 ci = floor(cp), cf = fract(cp);
+    float best = 9.0, bsz = 1.0;
+    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+      vec2 g = vec2(float(x), float(y));
+      vec2 o = hash22(ci + g + id * 13.0) * 0.7 + 0.15;
+      float sz = 0.5 + 0.5 * hash12(ci + g + 7.7);
+      float dd = length(g + o - cf) / (0.48 * sz);
+      if (hash12(ci + g + 3.1) < zone * 1.3 && dd < best) { best = dd; bsz = sz; }
+    }
+    float aaB = pxM / (cellM * 0.48 * bsz) + 1e-4;
+    barn = 1.0 - smoothstep(1.0 - aaB, 1.0 + aaB, best);
+    float open = 1.0 - smoothstep(0.24, 0.34 + aaB, best);
+    vec3 shell = mix(vec3(0.8, 0.78, 0.72), vec3(0.6, 0.6, 0.55), bsz) * (0.85 + 0.15 * (1.0 - best));
+    shell = mix(shell, vec3(0.05, 0.045, 0.04), open);
+    skin = mix(skin, shell, barn * 0.95);
+    hgt += barn * (1.0 - best) * 2.2 - open * 0.8;
+  }
   // membrane: thin dark skin with veins following the rays, lighter toward the trailing edge
   // the membrane is thin dorsal skin: the back's colour, a little warmer and lighter toward the edge
   vec3 memBase = mix(uBack * 1.15, uMembrane, 0.32);
@@ -624,7 +709,7 @@ void main() {
   float stM = brush(vec2(m.x, m.y * 2.0) / (uLen * 0.012) + uSeed * 5.0 + id * 11.0);
   memCol = mix(memCol, memCol * vec3(1.18, 1.06, 1.02) + vec3(0.03, 0.016, 0.02), between * smoothstep(0.25, 1.0, uv.y) * (0.45 + 0.4 * stM));
   memCol *= 0.9 + 0.2 * stM;
-  vec3 albedo = mix(memCol, skin, max(arm, ray * 0.85));
+  vec3 albedo = mix(memCol, skin, max(max(arm, ray * 0.85), barn));
   float finInk = smoothstep(0.35, 0.9, ray) * mem * 0.3 + tub * 0.18 * (1.0 - tub) * 4.0 * 0.3;
   // the trailing edge darkens into a soft drawn hem
   finInk += smoothstep(0.9, 1.0, uv.y) * mem * 0.4;
@@ -633,7 +718,9 @@ void main() {
   N = bumpN(N, vWorldPos, hgt * uLen * 0.0006, 1.0);
   float wet = clamp(uWet + uWetSelf + uUnderwater, 0.0, 1.0);
   Surface s = makeSurface(albedo, N, vWorldPos);
-  s.shadow = sampleShadow(vWorldPos, N);
+  // the shadow lookup follows the true surface (a bumped normal would scatter the offset and
+  // speckle the soft penumbra), pushed a little further out on big bodies against acne
+  s.shadow = bodyShadow(vWorldPos, Ng);
   s.rim = 0.6;
   s.spec = 0.0;
   // thin membrane glows warm when backlit; the arm and rays stay dark against the sun
@@ -737,14 +824,23 @@ void main() {
   vec2 ip = vec2(dot(ni, tx), dot(ni, ty));
   float rad = atan(ip.y, ip.x);
   float rn = ang / uIrisR;                     // 0 centre .. 1 iris edge
-  // golden-amber iris: radial fibres, crypts, a dark limbal ring, a darker collarette
-  float fib = vnoise(vec2(rad * 18.0, rn * 4.0)) * 0.6 + vnoise(vec2(rad * 46.0, rn * 9.0)) * 0.4;
-  float crypt = smoothstep(0.55, 0.75, vnoise(vec2(rad * 7.0, rn * 6.0) + 3.0)) * smoothstep(0.25, 0.5, rn) * (1.0 - smoothstep(0.75, 0.9, rn));
-  vec3 iris = mix(uIris * 0.9, uIris2, smoothstep(0.25, 1.0, rn) * 0.9);
-  iris *= 0.6 + 0.55 * fib;
+  // golden-amber iris: a bright sunburst of radial fibres around the pupil, crypts, a wavering
+  // darker collarette, gold flecks, concentric contraction furrows and a dark limbal ring
+  // (wrapped angle so the pattern has no seam)
+  vec2 rc = vec2(cos(rad), sin(rad));
+  float fib = vnoise(rc * 3.0 + vec2(rn * 4.0, 0.0)) * 0.35 + vnoise(rc * 8.0 + vec2(0.0, rn * 9.0)) * 0.4 + vnoise(rc * 19.0 + rn * 3.0) * 0.25;
+  float crypt = smoothstep(0.58, 0.78, vnoise(rc * 3.5 + rn * 6.0 + 3.0)) * smoothstep(0.25, 0.5, rn) * (1.0 - smoothstep(0.75, 0.9, rn));
+  vec3 iris = mix(uIris * 1.15 + vec3(0.06, 0.04, 0.0), uIris * 0.8, smoothstep(0.2, 0.55, rn));
+  iris = mix(iris, mix(uIris, uIris2, 0.55), smoothstep(0.55, 1.0, rn) * 0.8);
+  iris *= 0.62 + 0.55 * fib;
   iris = mix(iris, uIris2 * 0.6, crypt * 0.5);
-  iris = mix(iris, uIris2 * 0.35, smoothstep(0.28, 0.36, rn) * smoothstep(0.44, 0.36, rn) * 0.5);
-  iris = mix(iris, uIris2 * 0.15, smoothstep(0.82, 1.0, rn));
+  float coll = 0.38 + 0.05 * (vnoise(rc * 4.0 + 11.0) - 0.5) * 2.0;
+  iris = mix(iris, uIris2 * 0.35, smoothstep(0.07, 0.0, abs(rn - coll)) * 0.55);
+  float furrow = smoothstep(0.8, 1.0, sin(rn * 31.0 + vnoise(rc * 5.0) * 2.0)) * smoothstep(0.55, 0.7, rn);
+  iris *= 1.0 - furrow * 0.25;
+  float fleck = smoothstep(0.82, 0.92, vnoise(rc * 12.0 + rn * 14.0 + uSide * 7.0)) * smoothstep(0.3, 0.5, rn) * (1.0 - smoothstep(0.8, 0.9, rn));
+  iris = mix(iris, vec3(1.0, 0.78, 0.32) * 1.2, fleck * 0.6);
+  iris = mix(iris, uIris2 * 0.12, smoothstep(0.8, 1.0, rn));
   // horizontal kidney-shaped pupil with a soft notch above (cetacean)
   vec2 pp = ip / max(uPupil, 1e-3);
   pp.x *= 0.52;
@@ -799,6 +895,14 @@ void main() {
   // a small catchlight from the sky so the eye reads alive even in shade
   vec3 R = reflect(-V, Nc);
   eyeLit += uSkyAmbient * 0.25 * smoothstep(0.85, 0.97, R.y) * uSparkle;
+  // painted glints: a crisp key glint where the sun (or the brightest sky above) would sit on the
+  // wet cornea, and a soft secondary one opposite, so a small eye always reads wet and alive
+  vec3 kDir = normalize(mix(vec3(0.0, 1.0, 0.0), uSunDir, 0.65) + V * 0.6);
+  float g1 = smoothstep(0.986, 0.996, dot(Nc, kDir));
+  vec3 kDir2 = normalize(V * 1.4 - kDir * 0.5);
+  float g2 = smoothstep(0.975, 0.99, dot(Nc, kDir2)) * 0.35;
+  float lidCover = 1.0 - smoothstep(up - 0.18, up - 0.02, el);   // the lid's shade hides it
+  eyeLit += (uSunColor * 0.6 + uSkyAmbient * 1.2 + 0.25) * (g1 + g2) * (0.55 + 0.45 * uSparkle) * lidCover * mix(0.5, 1.0, s.shadow) * (1.0 - uNight * 0.6);
   vec3 col = mix(eyeLit, lidLit, lidMask);
   float meniscus = smoothstep(0.025, 0.0, abs(el - lo - 0.015)) * (1.0 - lowerLid) * (1.0 - upperLid);
   col += meniscus * (skyEnv(R, 0.0) * 0.35 + uSunColor * 0.05) * s.shadow;
@@ -857,6 +961,7 @@ uniform vec3 uBack;
 uniform vec3 uBelly;
 uniform float uFurShade;
 uniform float uFurTip;
+uniform float uWetSelf;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec3 vComb;
@@ -866,14 +971,18 @@ varying float vLen;
 varying vec3 vAlb;
 varying float vShadow;
 varying float vReg;
+varying float vWet;
 void main() {
   float h = uShellH[gl_InstanceID];
   #include <skinbase_vertex>
   vec3 objectNormal = normal;
   #include <skinnormal_vertex>
   vec3 combS = vec4(skinMatrix * vec4(aComb, 0.0)).xyz;
-  float len = uFurLen * aFur.x * (1.0 - uWet * 0.5);
-  vec3 transformed = position + normal * (h * len) + aComb * (h * h) * len * 0.85;
+  // a wet coat (rain, or fresh from the sea) is shorter, slicked flat along the comb
+  float wetF = clamp(uWet + uWetSelf, 0.0, 1.0);
+  vWet = wetF;
+  float len = uFurLen * aFur.x * (1.0 - wetF * 0.45);
+  vec3 transformed = position + normal * (h * len) * (1.0 - wetF * 0.35) + aComb * (h * h) * len * (0.85 + wetF * 0.5);
   #include <skinning_vertex>
   vec4 wp = modelMatrix * vec4(transformed, 1.0);
   vec3 N = normalize(mat3(modelMatrix) * objectNormal);
@@ -882,7 +991,7 @@ void main() {
   float gust = 0.8 + 0.4 * sin(uTime * 2.3 + dot(wp.xyz, vec3(0.21, 0.13, 0.17))) + uGust;
   vec3 disp = uAirflow * 0.016 * flutter * gust - uInertia + vec3(0.0, -0.22, 0.0);
   disp += uJiggle.xyz * sin(uJiggle.w + dot(wp.xyz, vec3(0.7, 0.5, 0.9)) / uLen * 9.0);
-  disp *= 1.0 - uWet * 0.6;
+  disp *= 1.0 - wetF * 0.6;
   disp -= N * min(dot(disp, N), 0.0);
   wp.xyz += disp * h * h * len * 1.25;
   vWorldPos = wp.xyz;
@@ -924,6 +1033,7 @@ varying float vLen;
 varying vec3 vAlb;
 varying float vShadow;
 varying float vReg;
+varying float vWet;
 void main() {
   if (vLen < 0.03) discard;
   float h = vH;
@@ -953,11 +1063,12 @@ void main() {
   off.y *= 0.62;
   float r0 = length(off);
   // the lock's radius (clump units): full at the root, drawing to a point at the tip
-  float lockR = 0.72 * pow(max(0.0, 1.0 - hr), 0.7) + 0.04;
-  // fine strands break the lock's edge
-  vec2 sc = floor(fuv * 1.3);
-  float sr = hash12(sc + uSeed);
-  float edgeN = (sr - 0.5) * 0.22 + (vnoise(fuv * 2.1 + cph) - 0.5) * 0.12;
+  float lockR = (0.72 * pow(max(0.0, 1.0 - hr), 0.7) + 0.04) * (1.0 - vWet * 0.3);   // wet locks clump
+  // fine strands break the lock's edge: fibres drawn along the comb (stretched noise), so the
+  // edge frays into soft hairs instead of blocky cells
+  vec2 fq = fuv * vec2(3.2, 0.55) + vec2(cph * 3.0, 0.0);
+  float sr = vnoise(fq);
+  float edgeN = (sr - 0.5) * 0.3 + (vnoise(fuv * vec2(7.0, 1.1) + cph) - 0.5) * 0.14;
   float cov = smoothstep(lockR, lockR * 0.72, r0 + edgeN * (0.4 + hr));
   // dense undercoat close to the skin hides it
   cov = max(cov, smoothstep(0.3, 0.0, h) * smoothstep(0.03, 0.25, vLen));
@@ -980,7 +1091,12 @@ void main() {
   albedo *= 0.9 + 0.2 * crnd + (sr - 0.5) * 0.06;
   // depth: light reaches the inner coat poorly (self-shadowing of the fur)
   float depthAO = mix(0.55, 1.0, smoothstep(0.0, 0.8, h)) * mix(0.9, 1.0, dome);
+  albedo *= mix(1.0, 0.6, vWet);   // wet hair darkens
   vec3 col = hairLight(albedo, T, Nl, V, vWorldPos, vShadow * mix(0.65, 1.0, h), depthAO, h, 0.9 * hr);
+  // wet: a glossy sheen runs along each slicked lock
+  vec3 Hh = normalize(uSunDir + V);
+  float tH = dot(T, Hh);
+  col += uSunColor * pow(sqrt(max(0.0, 1.0 - tH * tH)), 90.0) * 0.35 * vWet * vShadow;
   col = paintFinish(col, Nl, N, V, vShadow, crnd * 0.6 + sr * 0.15 + 0.12, 0.0, 0.7, 0.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
@@ -1007,6 +1123,7 @@ uniform float uBaked;
 uniform vec3 uBack;
 uniform vec3 uBelly;
 uniform float uLockGrow;
+uniform float uWetSelf;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying vec3 vTan;
@@ -1014,12 +1131,16 @@ varying vec2 vCard;
 varying vec3 vAlb;
 varying float vSeed;
 varying float vShadow;
+varying float vWet;
 void main() {
   float a = position.y, side = position.x;
-  float len = aRoot.w * (1.0 - uWet * 0.3) * uLockGrow;
+  // wet locks (rain, or fresh from the sea) cling: shorter, flatter, heavier, thinner
+  float wetF = clamp(uWet + uWetSelf, 0.0, 1.0);
+  vWet = wetF;
+  float len = aRoot.w * (1.0 - wetF * 0.3) * uLockGrow;
   vec3 n = aNrm, d = aDir;
   vec3 b = normalize(cross(n, d));
-  float lift = aShape.y, droop = aShape.z;
+  float lift = aShape.y * (1.0 - wetF * 0.6), droop = aShape.z + wetF * 0.4;
   float curl = mod(aShape.w, 10.0);
   float seed = floor(aShape.w / 10.0) * 0.1;
   // centreline: rises off the skin, flows along the comb, a loose helix (curl)
@@ -1042,14 +1163,14 @@ void main() {
   float gust = 0.75 + 0.45 * sin(uTime * 1.9 + dot(wp.xyz, vec3(0.17, 0.11, 0.19))) + uGust;
   vec3 disp = vec3(0.0, -1.0, 0.0) * droop * 0.45 + uAirflow * 0.014 * flutter * gust - uInertia * 1.3;
   disp += uJiggle.xyz * 1.5 * sin(uJiggle.w + seed * 4.0);
-  disp *= 1.0 - uWet * 0.5;
+  disp *= 1.0 - wetF * 0.5;
   disp -= N * min(dot(disp, N), 0.0) * 0.8;
   wp.xyz += disp * len * a * a;
   T = normalize(T + disp * 2.0 * a);
   // face the camera around the strand axis
   vec3 V = normalize(uCamPos - wp.xyz);
   vec3 W = normalize(cross(T, V) + 1e-5);
-  float wid = aShape.x * uLockGrow * (1.0 - pow(a, 1.5) * 0.7) * (0.45 + 0.55 * smoothstep(0.0, 0.12, a));
+  float wid = aShape.x * uLockGrow * (1.0 - pow(a, 1.5) * 0.7) * (0.45 + 0.55 * smoothstep(0.0, 0.12, a)) * (1.0 - wetF * 0.4);
   wp.xyz += W * side * wid;
   vWorldPos = wp.xyz;
   vNormal = normalize(mix(N, -V, 0.3));
@@ -1079,6 +1200,7 @@ varying vec2 vCard;
 varying vec3 vAlb;
 varying float vSeed;
 varying float vShadow;
+varying float vWet;
 void main() {
   float a = vCard.y, x = vCard.x;
   // a lock is a loose bundle of strands: they gather at the root, splay and thin toward the tip,
@@ -1112,7 +1234,11 @@ void main() {
   vec3 Nn = normalize(vNormal);
   if (!gl_FrontFacing) Nn = -Nn;
   vec3 V = normalize(uCamPos - vWorldPos);
+  albedo *= mix(1.0, 0.6, vWet);
   vec3 col = hairLight(albedo, normalize(vTan), Nn, V, vWorldPos, vShadow, mix(0.6, 1.0, a) * mix(0.85, 1.0, rnd), a, 1.1 * a);
+  vec3 Hh = normalize(uSunDir + V);
+  float tH = dot(normalize(vTan), Hh);
+  col += uSunColor * pow(sqrt(max(0.0, 1.0 - tH * tH)), 90.0) * 0.35 * vWet * vShadow;
   col = paintFinish(col, Nn, Nn, V, vShadow, vSeed * 0.5 + hs * 0.3 + 0.1, 0.0, 0.7, 0.0);
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, cov);
@@ -1120,8 +1246,10 @@ void main() {
 `;
 
 // ---------------------------------------------------------------------------------------------
-// Barbels (sensor whips) under the mouth. The centreline is evaluated in world space so gravity,
-// the relative wind and inertia act in the world; the tube is rebuilt around it per vertex.
+// Barbels (sensor whips) under the mouth. The centreline is integrated in world space as a
+// flexible rod: each step keeps its length, turns toward the load (gravity, the relative wind,
+// inertia) more freely toward the tip, curls about the whip's own axis and carries a slow
+// travelling sway, so the whips drape in soft curves even when nothing moves.
 export const BARBEL_VERT = /* glsl */ `
 ${UNIFORMS}
 ${NOISE}
@@ -1131,29 +1259,54 @@ attribute vec3 aDir;
 uniform vec3 uInertia;
 uniform vec3 uAirflow;
 uniform float uWhip;     // extra activity (excitement, feeding)
+uniform float uWetSelf;
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 varying float vA;
-vec3 centre(float a, float len, vec3 rootW, vec3 dirW, float idx) {
-  // rest curve: out along the rest direction, curling back under gravity
-  vec3 p = rootW + dirW * len * a;
-  float a2 = a * a;
-  vec3 g = vec3(0.0, -1.0, 0.0) * 0.35 + uAirflow * 0.03 - uInertia * 1.4;
-  p += g * len * a2;
-  // slow travelling wave, faster when excited
-  float ph = uTime * (1.6 + uWhip * 3.0) - a * 5.0 + idx * 1.7;
-  vec3 side = normalize(cross(dirW, vec3(0.0, 1.0, 0.0)) + 1e-4);
-  p += (side * sin(ph) + vec3(0.0, 1.0, 0.0) * cos(ph * 0.8) * 0.5) * len * 0.07 * a2 * (1.0 + uWhip);
+#define WSTEPS 14
+// position and tangent of the whip at a (0 root .. 1 tip)
+vec3 whip(float a, float len, vec3 rootW, vec3 dirW, float idx, out vec3 T) {
+  float hk = hash11(idx * 3.17 + 0.5);
+  vec3 load = vec3(0.0, -1.0, 0.0) + uAirflow * 0.035 - uInertia * 1.6;
+  float lw = length(load);
+  load = lw > 1e-4 ? load / lw : vec3(0.0, -1.0, 0.0);
+  float lk = min(lw, 2.5);
+  // the whip's own curl: about an axis across it, so the tip hooks back and in like a whisker
+  vec3 sideW = normalize(cross(dirW, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
+  vec3 curlAx = normalize(sideW + vec3(0.0, 0.35 * (hk - 0.5), 0.0));
+  float curl = (1.1 + 1.0 * hk) * (hk > 0.5 ? 1.0 : -0.8) * (1.0 - uWetSelf * 0.5);
+  float ph0 = uTime * (0.9 + 0.35 * hk + uWhip * 3.0) + idx * 1.7;
+  float amp = (0.35 + uWhip * 1.2) * (1.0 + 0.4 * sin(uTime * 0.37 + idx));
+  vec3 p = rootW;
+  vec3 d = dirW;
+  float n = a * float(WSTEPS);
+  float stepL = len / float(WSTEPS);
+  for (int i = 0; i < WSTEPS; i++) {
+    float fi = float(i);
+    if (fi >= n) break;
+    float st = min(1.0, n - fi);
+    float u = (fi + 0.5) / float(WSTEPS);
+    // limp toward the tip: turns toward the load (wet whips hang heavier)
+    // springy, like a cat's whisker: it holds its curve and only the tip gives to the load
+    float flex = mix(0.008, 0.1, u * u) * lk * (1.0 + uWetSelf * 1.5);
+    d = normalize(d + (load - d * dot(load, d)) * flex * st);
+    // natural curvature, strongest in the outer half
+    d = normalize(d + cross(curlAx, d) * curl * smoothstep(0.25, 1.0, u) / float(WSTEPS) * 2.0 * st);
+    // slow travelling sway (side to side and up and down), growing toward the tip
+    float ph = ph0 - u * 5.5;
+    vec3 sw = sideW * sin(ph) + vec3(0.0, 1.0, 0.0) * cos(ph * 0.8 + hk * 3.0) * 0.6;
+    d = normalize(d + (sw - d * dot(sw, d)) * amp * u * 0.16 * st);
+    p += d * stepL * st;
+  }
+  T = d;
   return p;
 }
 void main() {
   float a = aB.y, ang = aB.z, rad = aB.w, len = aRoot.w;
   vec3 rootW = (modelMatrix * vec4(aRoot.xyz, 1.0)).xyz;
   vec3 dirW = normalize(mat3(modelMatrix) * aDir);
-  vec3 c0 = centre(a, len, rootW, dirW, aB.x);
-  vec3 c1 = centre(min(a + 0.03, 1.0), len, rootW, dirW, aB.x);
-  vec3 cm = centre(max(a - 0.03, 0.0), len, rootW, dirW, aB.x);
-  vec3 T = normalize(c1 - cm);
+  vec3 T;
+  vec3 c0 = whip(a, len, rootW, dirW, aB.x, T);
   vec3 Nn = normalize(cross(T, vec3(0.31, 0.92, 0.23)));
   vec3 Bn = cross(T, Nn);
   vec3 off = Nn * cos(ang) + Bn * sin(ang);
@@ -1186,8 +1339,11 @@ void main() {
   vec3 N = normalize(vNormal);
   vec3 V = normalize(uCamPos - vWorldPos);
   // dark at the root, paler and more translucent toward the sensitive tip; fine rings
-  vec3 albedo = mix(uBack * 0.9, mix(uBelly, vec3(0.75, 0.55, 0.55), 0.35), smoothstep(0.2, 1.0, vA));
-  albedo *= 0.9 + 0.1 * sin(vA * 140.0);
+  vec3 albedo = mix(uBack * 0.85, mix(uBelly, vec3(0.78, 0.52, 0.52), 0.45), smoothstep(0.12, 0.95, vA));
+  // soft annular rings (wavering, never ruled) and a dark fleshy collar at the root
+  float ringPh = vA * 120.0 + sin(vA * 23.0) * 1.4;
+  albedo *= 0.88 + 0.12 * smoothstep(-0.3, 0.6, sin(ringPh));
+  albedo = mix(albedo, uBack * 0.5, smoothstep(0.08, 0.0, vA) * 0.7);
   float wet = clamp(uWet + uWetSelf + uUnderwater, 0.0, 1.0);
   Surface s = makeSurface(albedo, N, vWorldPos);
   s.shadow = sampleShadow(vWorldPos, N);

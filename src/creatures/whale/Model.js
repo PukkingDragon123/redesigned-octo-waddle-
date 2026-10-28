@@ -185,6 +185,7 @@ export class WhaleModel {
       uSkinA: { value: null },
       uSkinB: { value: null },
       uBaked: { value: 0 },
+      uDbg: { value: 0 },
       uSeed: { value: ((g.seed || 1) * 0.37) % 10 },
       uLen: { value: L },
       // drivers (WhaleAnimator)
@@ -271,6 +272,7 @@ export class WhaleModel {
       uFinTip: { value: new Color(g.finTip || g.membrane || '#6d5f68') },
       uFinMark: { value: new Color(g.finMark || '#e8e4dc') },
       uFinMarkAmt: { value: g.finMarkAmt ?? 0.15 },
+      uFinBarn: { value: this.calf ? 0 : Math.min(1, (g.barnacles ?? 0) * 1.1) },
     };
     const mat = new ShaderMaterial({
       vertexShader: FIN_VERT,

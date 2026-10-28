@@ -154,8 +154,10 @@ void main() {
     float edge = sqrt(f2) - sqrt(f1);
     float aaw = max(fwidth(edge), 1e-4);
     float lw = 0.055 * (0.4 + 1.2 * vnoise(sp * 0.7 + 5.3));
-    lw = max(lw, aaw * 0.85);
-    float line = 1.0 - smoothstep(lw * 0.45, lw + aaw, edge);
+    // at least ~1.5 texels wide with a soft two-texel shoulder: magnified in a macro close-up it
+    // stays a soft painted line (no stair-steps), minified it fades evenly through the mips
+    lw = max(lw, aaw * 1.5);
+    float line = 1.0 - smoothstep(lw * 0.35, lw + aaw * 1.5, edge);
     // strokes: long runs, broken only where a slow noise dips; whole regions stay plain
     float runs = smoothstep(0.26, 0.5, vnoise(sp * vec2(0.42, 0.26) + 2.2));
     float region = smoothstep(0.4, 0.66, fbm3(q * 6.0 + 7.0));
@@ -172,8 +174,8 @@ void main() {
     }
     float e2 = sqrt(g2) - sqrt(g1);
     float aa2 = max(fwidth(e2), 1e-4);
-    float lw2 = max(0.04 * (0.3 + vnoise(sp2 * 0.6)), aa2 * 0.8);
-    float vein = (1.0 - smoothstep(lw2 * 0.4, lw2 + aa2, e2)) * smoothstep(0.45, 0.7, vnoise(sp2 * 0.35 + 6.0)) * region;
+    float lw2 = max(0.04 * (0.3 + vnoise(sp2 * 0.6)), aa2 * 1.3);
+    float vein = (1.0 - smoothstep(lw2 * 0.3, lw2 + aa2 * 1.5, e2)) * smoothstep(0.45, 0.7, vnoise(sp2 * 0.35 + 6.0)) * region;
     float net = max(line, vein * 0.45);
     col = mix(col, mix(col, uMark2, 0.5), net * cs * uAmt.y * 0.75);
     h += net * cs * uAmt.y * L * 0.00008;

@@ -242,7 +242,8 @@ export class ReefLife {
       const y = this.floorAt(p.x, p.z);
       const depth = sea - y;
       if (depth < 1.0 || depth > 28) continue;
-      if (gardenDensity(p.x, p.z) < 0.3 && Math.random() < 0.6) continue;
+      // crabs keep to the reef gardens and the kelp floor (never bare open sand)
+      if (gardenDensity(p.x, p.z) < 0.34 && kelpDensity(p.x, p.z) < 0.5) continue;
       const v = Math.random();
       const vr = v < 0.42 ? 0 : v < 0.72 ? 1 : 2;
       C.alive[i] = 1;
@@ -267,7 +268,8 @@ export class ReefLife {
       let p;
       if (near) p = _v.set(near.x + (Math.random() - 0.5) * 22, 0, near.z + (Math.random() - 0.5) * 22);
       else p = this._ring(rMin, rMax);
-      if (!near && bloomDensity(p.x, p.z) < 0.5) continue;
+      // blooms: dense at night (they rise to feed), only the thickest patches by day
+      if (!near && bloomDensity(p.x, p.z) < 0.5 + 0.2 * (1 - Math.min(1, G.uNight.value * 1.6))) continue;
       const y = this.floorAt(p.x, p.z);
       const depth = sea - y;
       if (depth < 5) continue;
@@ -294,7 +296,8 @@ export class ReefLife {
       const p = this._ring(rMin, rMax);
       const y = this.floorAt(p.x, p.z);
       const depth = sea - y;
-      if (depth < 5) continue;
+      // rays glide over shelves, sandbanks and lagoons, not the blue abyss
+      if (depth < 5 || depth > 40) continue;
       const yy = sea - Math.min(3 + Math.random() * 8, depth * 0.6);
       Rr.alive[i] = 1;
       Rr.P[i * 3] = p.x; Rr.P[i * 3 + 1] = yy; Rr.P[i * 3 + 2] = p.z;
@@ -320,6 +323,8 @@ export class ReefLife {
       const y = this.floorAt(p.x, p.z);
       const depth = sea - y;
       if (depth < 2.5 || depth > 30) continue;
+      // puffers hover by their coral heads
+      if (gardenDensity(p.x, p.z) < 0.32) continue;
       const yy = y + 1 + Math.random() * Math.min(4, depth - 1.8);
       Pf.alive[i] = 1;
       Pf.P[i * 3] = p.x; Pf.P[i * 3 + 1] = yy; Pf.P[i * 3 + 2] = p.z;

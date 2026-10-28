@@ -448,7 +448,9 @@ void main() {
     // wing membrane: warm translucent skin, darker toward the trailing edge, actinofibrils
     // running from the leading edge to the trailing edge, a vein net, the arm furred
     float arm = smoothstep(0.22, 0.05, v);
-    float fib = smoothstep(0.55, 1.0, sin((u * 160.0 + v * 22.0)));
+    // actinofibrils drawn by hand: they wander, swell and fade instead of ruling the wing
+    float fw = vnoise(vec2(u * 7.0, v * 3.0) + seed * 3.0);
+    float fib = smoothstep(0.55, 1.0, sin(u * 160.0 + v * 22.0 + fw * 3.0 + sin(v * 7.0 + u * 13.0) * 1.2)) * (0.45 + 0.55 * vnoise(vec2(u * 25.0, v * 4.0) - seed));
     float veins = smoothstep(0.12, 0.0, abs(sin(u * 30.0 + v * 6.0 + vnoise(vec2(u, v) * 18.0) * 2.0)) - 0.0) * 0.4;
     vec3 mem = mix(pC, pA, 0.35) * 0.62 * (0.8 + 0.2 * vnoise(vec2(u * 9.0, v * 5.0) + seed));
     mem = mix(mem, mem * 0.55, smoothstep(0.55, 1.0, v));
@@ -460,7 +462,7 @@ void main() {
     rim = 0.5;
     wrap = 0.45;
     // ragged trailing edge
-    float edge = 0.97 + 0.03 * sin(u * 90.0 + seed * 10.0);
+    float edge = 0.965 + 0.025 * sin(u * 90.0 + seed * 10.0 + sin(u * 23.0) * 1.5) + 0.02 * (vnoise(vec2(u * 40.0, seed * 7.0)) - 0.5);
     alpha = 1.0 - smoothstep(edge - 0.02, edge + 0.01, v);
   } else if (part < 10.5) {
     albedo = mix(pA * 0.7, vec3(0.12, 0.1, 0.09), smoothstep(0.6, 1.0, u));
@@ -509,7 +511,7 @@ void main() {
   } else if (part < 6.5) {
     // tail: scaled at the base, feathered (banded) toward the tip
     albedo = mix(pA, pB, smoothstep(-0.2, -0.6, N.y) * 0.5);
-    float bands = smoothstep(0.2, 0.0, abs(fract(u * 9.0) - 0.5) - 0.3) * smoothstep(0.25, 0.4, u);
+    float bands = smoothstep(0.2, 0.0, abs(fract(u * 9.0 + 0.12 * sin(N.x * 4.0 + u * 31.0)) - 0.5) - 0.3) * smoothstep(0.25, 0.4, u);
     albedo = mix(albedo, pD * 0.9, bands * 0.55);
     sheen = 0.3; sheenCol = pC;
   } else if (part < 7.5) {
@@ -525,14 +527,16 @@ void main() {
     // and dark tips; the hand's primaries separate into slotted 'fingers'
     float hind = part > 8.5 ? 1.0 : 0.0;
     float nF = hind > 0.5 ? 9.0 : 15.0;
-    float f = u * nF;
+    // feather boundaries curve and wander a little (hand-drawn, never ruled)
+    float f = u * nF + 0.18 * sin(v * 4.5 + u * 9.0 + seed) + (vnoise(vec2(u * 30.0, v * 2.0) + seed) - 0.5) * 0.18;
     float fi = fract(f);
+    float vw = v + 0.02 * sin(u * 37.0 + seed * 3.0);
     float covert = smoothstep(0.42, 0.25, v);
     float rachis = smoothstep(0.06, 0.0, abs(fi - 0.5 + (v - 0.5) * 0.2)) * (1.0 - covert);
     float tipD = smoothstep(0.78, 0.95, v);
     albedo = mix(pA * 1.1, pA * 0.7, v);
     // one coloured bar across the coverts, and a thin pale fringe on each feather
-    float bar = smoothstep(0.2, 0.3, v) * smoothstep(0.42, 0.32, v);
+    float bar = smoothstep(0.2, 0.3, vw) * smoothstep(0.42, 0.32, vw);
     albedo = mix(albedo, pD * 0.85, bar * 0.8 * (1.0 - hind * 0.5));
     float fringe = smoothstep(0.035, 0.0, abs(abs(fi - 0.5) - 0.47)) * (1.0 - covert);
     albedo = mix(albedo, pB * 0.6, fringe * 0.35);

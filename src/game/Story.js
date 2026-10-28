@@ -15,7 +15,9 @@ import { Script, until } from './Script.js';
 import { SongGame } from './SongGame.js';
 import { Cinematics } from './Cinematics.js';
 import { LifeCycle } from './life/LifeCycle.js';
-import { ACTS, CHAPTER_LINES, SKIPS, MOMENTS } from './life/text.js';
+import { ACTS, CHAPTER_DATES, SKIPS, MOMENTS } from './life/text.js';
+import { hatching, restoreHatching } from './life/Hatching.js';
+import { SPECIES, PLACES, NARRATION, CHAPTER_NOTES } from './life/doc.js';
 import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
 import { ADULTS, CALVES } from '../creatures/WhaleTypes.js';
@@ -23,6 +25,8 @@ import { G } from '../render/Globals.js';
 import { clamp, damp, lerp, smoothstep, rng, TAU, dirFromYawPitch, easeInOut } from '../core/math.js';
 
 const _mOff = new Vector3();
+// the voice-over line that opens each chapter (life/doc.js NARRATION keys)
+const VOICE_OF = { cradle: 'lagoon', valleys: 'reach', krill: 'shoals' };
 const OPTIONAL = import.meta.glob(['../audio/AudioSystem.js', '../creatures/Ecosystem.js', '../creatures/Falcon.js', './Activities.js']);
 const SAVE_KEY = 'skysong.save';
 
@@ -169,6 +173,14 @@ export class Story {
       // debug: jump straight into a chapter
       await this.waitWorld();
       this.startChapter(+p.get('chapter'), { skipIntro: true });
+    } else if (g.debug && p.has('hatch')) {
+      // debug: straight into the hatching opening (?hatch, or ?hatch=push for the push beat)
+      await this.waitWorld();
+      this.enterMenu();
+      this.menu.dissolveAll();
+      this.state = 'intro';
+      g.engine.setLook?.('cinematic', { focusOn: this.herd.calf.pos, ease: 0 });
+      this.script.run(this.intro({ from: p.get('hatch'), snap: true }), 'intro');
     } else if (g.debug && p.has('intro')) {
       this.enterMenu();
       this.onMenu('new');
@@ -284,9 +296,13 @@ export class Story {
     const g = this.game, herd = this.herd;
     if (this.cine?.active) this.cine.end({ release: false });
     this.cine?.hideCard(true);
+    this.cine?.clearText();
     this.script.cancel('moment');
     this.script.cancel('card');
+    this.script.cancel('opening');
     this._lungeShown = false;
+    this.life?.nursery?.close();
+    if (this.life) restoreHatching(this);
     herd.motherScript = null;
     herd.songCenter = null;
     herd.protectCenter = null;
@@ -399,6 +415,7 @@ export class Story {
       this.audio.start?.().then(() => this.applyVolumes());
       this.menu.dissolveAll();
       this.state = 'intro';
+      this.cine.seen.clear();
       g.engine.setLook?.('cinematic', { focusOn: this.herd.calf.pos, ease: 2 });
       this.script.run(this.intro(), 'intro');
       return;
@@ -452,6 +469,7 @@ export class Story {
     this.game.input.setGameplayMode(false);
     document.body.classList.remove('playing');
     this.cine?.hideCard(true);
+    this.cine?.clearText();
     this.menu.returnPage = 'pause';
     this.menu.dissolving = false;
     for (const it of [this.menu.title, this.menu.subtitle]) it.dissolve = 0;
@@ -474,101 +492,17 @@ export class Story {
   }
 
   // ---- the opening ----------------------------------------------------------------------
-  *intro() {
-    const g = this.game, herd = this.herd, calf = herd.calf, mom = herd.mother;
+  /**
+   * ACT I opens with the player's hatching in the Spiral Maelstrom, filmed like a nature
+   * documentary (src/game/life/Hatching.js); it hands over to the Dawn Lagoon chapter itself.
+   */
+  *intro(opts = {}) {
+    const g = this.game;
     this.menu.dissolveAll();
+    this.act = 1;
     g.atmosphere.transition('dawn', 14);
     this.audio.setMood?.('dawn', { fade: 6 });
-    // ---- Vur Sok at sunrise: the herd gathers in the Dawn Lagoon, this season's migration begins
-    const C = this.cine;
-    this.act = 1;
-    C.begin({ hold: false, focus: herd.elder, rate: 0.3 });
-    yield* C.wait(1.0);
-    const lagoon = this.path.pointAt(60);
-    C.card({ kicker: ACTS[1].kicker, title: this.path.chapters[0].name, line: CHAPTER_LINES.cradle });
-    yield* C.play(C.aerial({ center: lagoon, dist: [640, 380], height: [240, 100], angle: [2.0, 2.45], fov: 50 }), 8.5);
-    C.hideCard();
-    yield* C.play(C.orbit({ center: mom, radius: [150, 64], height: [60, 10], angle: [2.45, 3.1], fov: [48, 42], look: mom }), 6.5);
-    // the elder's call wakes the lagoon; one voice after another answers
-    C.setFocus(herd.elder);
-    herd.elder.drive.sleep = 0;
-    this.voiceCall(herd.elder, 'answer');
-    const answerers = herd.adults.filter((w) => w !== mom && w !== herd.elder).slice(0, 3);
-    let ai = 0;
-    yield* C.play(C.rel({ subject: herd.elder, side: [-30, -22], up: [3, 6], back: [-30, -22], fov: 38, worldUp: true }), 4.5, {
-      onFrame: (k, t) => { if (ai < answerers.length && t > 1.4 + ai * 0.7) this.voiceCall(answerers[ai++], 'answer'); },
-    });
-    C.setFocus(calf);
-    // glide from the wide drift down to the sleeping calf, nestled by its mother
-    const from = this.shot.pos.clone(), fromLook = this.shot.look.clone();
-    const close = new Vector3(), focus = new Vector3();
-    const frameCalf = (k) => {
-      // the calf's face from the side away from its mother, her furry flank behind it
-      const side = mom.pos.clone().sub(calf.pos).dot(calf.right) > 0 ? -1 : 1;
-      close.copy(calf.pos).addScaledVector(calf.right, side * 7.2).addScaledVector(calf.fwd, 5.4).add(new Vector3(0, 1.5, 0));
-      focus.copy(calf.pos).addScaledVector(calf.fwd, 0.8).add(new Vector3(0, 0.4, 0)).lerp(mom.pos, 0.1);
-      this.shot.pos.copy(from).lerp(close, k);
-      this.shot.look.copy(fromLook).lerp(focus, k);
-      this.shot.fov = lerp(46, 40, k);
-    };
-    let t = 0;
-    const T = C.skipped ? 2.5 : 8;
-    while (t < T) {
-      frameCalf(easeInOut(clamp(t / T, 0, 1)));
-      t += yield 0;
-    }
-    // the waking is the player's: the bars slide away
-    C.letterbox(false);
-    C.skippable = false;
-    // hold the framing on the calf, which bobs with its mother's breathing, until hand-over
-    this.script.run((function* () { for (;;) { frameCalf(1); yield 0; } })(), 'introCam');
-    this.menu.hide();
-    // the mother hums the calf awake
-    this.voiceCall(mom, 'answer');
-    mom.drive.happy = 0.6;
-    yield 2.5;
-    // waits for the player: any key, click or stick (or it wakes on its own)
-    let waited = 0;
-    let nudged = 0;
-    while (waited < 10) {
-      if (g.input.anyPressed || g.input.mouseMovedThisFrame && waited > 1.5) break;
-      if (waited > 4 + nudged * 4) {
-        // a gentle nudge from the mother
-        nudged++;
-        mom.anim.sHeadPitch.impulse(2);
-        calf.anim.flinch(0.3);
-        this.voiceCall(mom, 'coo');
-      }
-      waited += yield 0;
-    }
-    // waking: eyes flutter, a yawn, a stretch, a look up at mother
-    calf.drive.sleep = 0;
-    calf.anim.blinkT = 0.2;
-    yield 0.8;
-    calf.drive.mouth = 1;
-    this.voiceCall(calf, 'yawn');
-    calf.anim.sFinFlare.impulse(6);
-    yield 1.3;
-    calf.drive.mouth = 0;
-    calf.drive.lookAt = mom.pos;
-    yield 0.6;
-    calf.drive.happy = 1;
-    this.voiceCall(calf, 'chirp');
-    mom.drive.happy = 1;
-    mom.drive.sleep = 0;
-    yield 1.4;
-    // hand over to the player without a cut
-    this.script.cancel('introCam');
-    this.state = 'play';
-    C.end({ rate: 0.22 });
-    this.player.enabled = true;
-    this.player.syncAim();
-    g.input.setGameplayMode(true);
-    document.body.classList.add('playing');
-    g.cameraRig.initialized = false;
-    g.cameraRig.setCinematic(this.shot, 0.22);
-    g.cameraRig.cineTarget = 0;
-    this.startChapter(0, { fromIntro: true });
+    yield* hatching(this, opts);
   }
 
   // ---- chapters ----------------------------------------------------------------------------
@@ -613,9 +547,79 @@ export class Story {
     const gen = this['chapter_' + ch.id];
     if (gen) this.script.run(gen.call(this), 'chapter');
     this.chapterStartT = g.time;
-    // the chapter's title card (the opening shows the first one itself)
-    if (this.act === 1 && !(i === 0 && this.state === 'play' && !instant)) {
-      this.cine?.flashCard({ kicker: ACTS[1].kicker, title: ch.name, line: CHAPTER_LINES[ch.id] }, 5);
+    // the chapter's opening: a brief establishing shot with the journal's label and a line of
+    // voice-over (the hatching opens the first one itself; the Oasis reveals itself)
+    if (this.act === 1 && !(i === 0 && this.state === 'play' && !instant) && ch.id !== 'oasis') {
+      this.script.cancel('opening');
+      this.script.run(this.chapterOpening(i), 'opening');
+    }
+  }
+
+  /** A chapter's establishing shot: a drone or long-lens view of the herd, a label, a line. */
+  *chapterOpening(i) {
+    const ch = this.path.chapters[i], C = this.cine, herd = this.herd;
+    // after a travel cut or another moment has finished, never over one
+    let w = 0;
+    while ((C.active || this.state !== 'play') && w < 10) w += yield 0;
+    if (C.active || this.state !== 'play' || this.chapterIndex !== i) return;
+    yield* this.moment(function* (C) {
+      C.lower({ place: CHAPTER_DATES[ch.id] || '', name: ch.name, sci: CHAPTER_NOTES[ch.id] || '' }, 6.5);
+      const mom = herd.mother;
+      const a0 = Math.atan2(-mom.fwd.z, -mom.fwd.x) + (i % 2 ? 1.5 : -0.9);
+      const shot = i % 2
+        ? C.longLens({ subject: mom, dist: 320, angle: [a0, a0 + 0.08], height: ch.id === 'storm' ? 14 : 5, fov: [15, 12] })
+        : C.drone({ center: mom, radius: [280, 220], height: [150, 110], angle: [a0, a0 + 0.35], fov: 44 });
+      yield* C.wait(1.0);
+      C.say(NARRATION[VOICE_OF[ch.id] || ch.id], 5);
+      yield* C.play(shot, 5.5);
+    }, { focus: herd.mother, rate: 0.8 });
+  }
+
+  /**
+   * The first sight of a species (the documentary's reveal): a short long-lens shot of it with its
+   * label and a line of voice-over. Each species once per game.
+   */
+  *revealSpecies(key, where) {
+    const C = this.cine;
+    if (!C || C.active || this.state !== 'play' || C.seen.has(key)) return;
+    C.seen.add(key);
+    const calf = this.herd.calf;
+    const at = where.clone ? where.clone() : new Vector3().copy(where);
+    yield* this.moment(function* (C) {
+      C.lower(SPECIES[key], 5.5);
+      if (NARRATION[key]) C.say(NARRATION[key], 5);
+      const a = Math.atan2(calf.pos.z - at.z, calf.pos.x - at.x) + 0.5;
+      // fish from beneath the surface, bird-reptiles from the air
+      const fish = key === 'glintfin' || key === 'spiralback' || key === 'lanternjack';
+      const lens = fish
+        ? C.longLens({ subject: at, dist: [36, 30], angle: [a, a + 0.12], height: -3.5, fov: [32, 26], sea: true })
+        : C.longLens({ subject: at, dist: [85, 72], angle: [a, a + 0.1], height: 12, fov: [24, 19], sea: true });
+      yield* C.play(lens, 4.8);
+    }, { focus: at, rate: 1 });
+  }
+
+  /** Watches for first sightings (throttled; species reveals only during Act I's chapters). */
+  docWatch(dt) {
+    if (this.act !== 1 || this.state !== 'play' || !this.eco || this.cine.active) return;
+    if ((this._docT = (this._docT || 0) + dt) < 0.6) return;
+    this._docT = 0;
+    const calf = this.herd.calf, ci = this.chapterIndex, seen = this.cine.seen;
+    if (ci >= 1 && !seen.has('glintfin')) {
+      const n = this.eco.nearestSwarm?.(calf.pos, 'glintfin');
+      if (n && n.dist < 70) { this.script.run(this.revealSpecies('glintfin', n.pos), 'moment'); return; }
+    }
+    if (ci >= 1 && !seen.has('spiralback')) {
+      const n = this.eco.nearestSwarm?.(calf.pos, 'spiralback');
+      if (n && n.dist < 60) { this.script.run(this.revealSpecies('spiralback', n.pos), 'moment'); return; }
+    }
+    for (const sp of ['coilwing', 'skimmer']) {
+      if (ci < 1 || seen.has(sp)) continue;
+      const fl = this.eco.reptiles?.flocks;
+      if (!fl) break;
+      for (const f of fl) {
+        if (f.species !== sp || !f.centroid) continue;
+        if (f.centroid.distanceTo(calf.pos) < 140) { this.script.run(this.revealSpecies(sp, f.centroid), 'moment'); return; }
+      }
     }
   }
 
@@ -640,12 +644,12 @@ export class Story {
     herd.targetSpeed = 0;
     // the mother shows the way: a short swim, then she turns and calls
     let phase = 0;
-    const spot = this.path.offsetAt(130, -6, 6);
+    const spot = this.path.offsetAt(Math.max(130, herd.s + 70), -6, 6);
     herd.motherScript = (m) => {
       if (phase === 0) return { target: spot, speed: 5, arrive: 10, lookAt: calf.pos };
       return { target: spot, speed: 3, arrive: 12, lookAt: calf.pos, face: calf.pos };
     };
-    yield 6;
+    yield 4;
     phase = 1;
     this.voiceCall(mom, 'answer');
     yield* until(() => calf.pos.distanceTo(mom.pos) < 22, 30);
@@ -660,6 +664,7 @@ export class Story {
     this.voiceCall(herd.elder, 'answer');
     yield 2;
     yield* this.moment(function* (C) {
+      C.say(NARRATION.lagoon, 5);
       yield* C.play(C.track({ subject: mom, side: [-46, -30], up: [3, 10], ahead: [10, 30], fov: 44 }), 5);
       C.setFocus(herd.elder);
       yield* C.play(C.low({ subject: herd.elder, side: 34, back: [-70, -36], height: 1.4, fov: 48, lookUp: 6 }), 4.5);
@@ -675,7 +680,8 @@ export class Story {
     if (!C || C.active || (this.state !== 'play' && this.state !== 'paused')) return;
     C.begin(Object.assign({ focus: this.herd.mother, rate: 0.7 }, opts));
     yield* body.call(this, C);
-    C.end();
+    // the label and the voice-over finish on their own over the first seconds of play
+    C.end({ keepText: !C.skipped });
   }
 
   /**
@@ -706,6 +712,7 @@ export class Story {
     const g = this.game, C = this.cine;
     if (!C || C.active || this.state !== 'play') return;
     C.begin({ focus: m, rate: 1.2 });
+    C.say(NARRATION.net, 4.5);
     const shot = C.low({ subject: m, side: [24, 16], back: [-30, -12], height: [0.9, 1.8], fov: [46, 36], lookUp: 2 });
     let t = 0, slowT = 0, slow = false;
     while (t < 9 && !C.skipped) {
@@ -715,6 +722,7 @@ export class Story {
       if (!slow && m.pos.y > seaHeight(g, m.pos.x, m.pos.z) - m.radius * 0.5) {
         slow = true;
         C.slowmo(0.3);
+        C.say(NARRATION.lunge, 4);
         this.audio.stinger?.('discover');
         g.cameraRig.addShake(0.2);
       }
@@ -902,6 +910,8 @@ export class Story {
     yield 6;
     // the herd under the spiral galaxy, plankton glowing in its wakes
     yield* this.moment(function* (C) {
+      C.lower(SPECIES.plankton, 5.5);
+      C.say(NARRATION.plankton, 5);
       yield* C.play(C.track({ subject: mom, side: [-60, -40], up: [3, 26], ahead: [0, 30], fov: [50, 56] }), 6);
     });
     yield () => herd.s > this.path.chapters[6].start;
@@ -928,6 +938,7 @@ export class Story {
     this.voiceCall(calf, 'coo');
     yield* this.moment(function* (C) {
       C.slowmo(0.35);
+      C.say(NARRATION.storm2, 4);
       yield* C.play(C.rel({ subject: calf, side: [10, 7], up: [-3, -1], back: [-8, -5], ahead: 0, lookUp: [3, 0], fov: [40, 48], worldUp: true }), 1.3);
       this.weather.strike(calf.pos.clone().add(new Vector3(-80, 160, -120)));
     }, { focus: calf, rate: 2, hold: false });
@@ -1001,6 +1012,8 @@ export class Story {
       if (this.eco) this.eco.threat = F.pos;
       // the reveal: looking up past the calf at the hunter wheeling against the clouds
       yield* this.moment(function* (C) {
+        C.lower(SPECIES.falcon, 5);
+        C.say(NARRATION.falcon2, 4.5);
         yield* C.play((k, t, s) => {
           s.pos.copy(calf.pos).addScaledVector(calf.fwd, -12).addScaledVector(calf.right, 5).y -= 3;
           s.look.copy(F.pos);
@@ -1209,6 +1222,8 @@ export class Story {
     const t0 = g.time;
     const mt = this.world.motherTree || this.path.pointAt(11150);
     yield* this.moment(function* (C) {
+      C.lower(PLACES.oasis, 6.5);
+      C.say(NARRATION.oasis, 5.5);
       yield* C.play((k, t, s) => {
         s.pos.copy(calf.pos).addScaledVector(calf.fwd, -20 - k * 30).addScaledVector(calf.right, 14);
         s.pos.y += 8 + k * 34;
@@ -1218,6 +1233,8 @@ export class Story {
         s.roll = 0;
       }, 9);
       C.setFocus(mt);
+      C.lower(SPECIES.tree, 5);
+      C.say(NARRATION.tree, 4.5);
       yield* C.play(C.orbit({ center: mt, radius: [900, 760], height: [260, 200], angle: [-1.2, -0.9], fov: 46, lookUp: 120 }), 5);
     }, { focus: calf, rate: 0.35 });
     // free to explore; the herd drifts toward the Mother Tree
@@ -1373,7 +1390,7 @@ export class Story {
       this.shot.fov = lerp(45, 55, k);
       if (k > 0.55 && !this.endTitle) {
         this.endTitle = true;
-        this.cine.card({ kicker: ACTS[1].kicker, title: 'Home', line: 'The calf has crossed the sea. Its life has only begun.' });
+        this.cine.card(MOMENTS.home);
       }
       yield 0;
     }
@@ -1448,6 +1465,7 @@ export class Story {
     }
     this.updateCalf(dt);
     this.life.update(dt);
+    this.docWatch(dt);
     this.activities?.update?.(dt);
     this.herd.update(dt);
     for (const w of this.herd.whales) if (w !== this.herd.calf) waterStep(w, dt, g, { onSplash: this._onSplash });
@@ -1628,6 +1646,9 @@ export class Story {
       const fv = this.falcon && this.falcon.mode !== 'hidden' && this.falcon.group?.visible;
       if (herd.mode === 'protect' && fv) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.2; opts.lookBiasMax = 6; opts.extraDist = 3; opts.busy = true; }
       if (fv && this.lookUpUntil && g.time < this.lookUpUntil) { opts.lookBias = this.falcon.pos; opts.lookBiasW = 0.3; opts.lookBiasMax = 6; opts.busy = true; }
+      // guarding the egg: the view leans toward the nearest predator closing in
+      const th = this.life.nursery.threats.length ? this.life.nursery.nearestThreat(calf.pos) : null;
+      if (th && !opts.lookBias) { opts.lookBias = th.pos; opts.lookBiasW = 0.18; opts.lookBiasMax = 6; opts.busy = true; }
       opts.surfaceY = seaHeight(g, g.cameraRig.gPos.x, g.cameraRig.gPos.z);
       if (this.calfWater && this.calfWater.depth > 0) { opts.distance = 7; opts.busy = true; }
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);

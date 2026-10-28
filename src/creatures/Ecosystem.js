@@ -62,6 +62,9 @@ export class Ecosystem {
     /** Emit bubble curtains for nets the herd blows (set false if the herd draws its own). */
     this.netBubbles = opts.netBubbles ?? true;
     this.enabled = true;
+    /** Move world spawns to their species' habitat (banks, reef edges, ledges, spires). */
+    this.habitats = opts.habitats ?? true;
+    this.habitatStats = { placed: 0, dropped: 0 };
     this._ocean = undefined;
 
     this.fish = new FishSystem(this);
@@ -204,6 +207,14 @@ export class Ecosystem {
    * opts: { radius, palette 0-3, seed, depth (m below the surface), leash, anchor (Vector3 to follow) }
    */
   addFishSchool(pos, species = 'glintfin', count = 600, opts = {}) {
+    // world spawns are moved to where the species would really live (explicit calls stay put)
+    if (this.habitats && opts.habitat !== false && (opts.habitat || this._fromWorld(pos, 'fish'))) {
+      const h = this._fishHabitat(pos, species, count);
+      if (!h) { this.habitatStats.dropped++; return null; }
+      this.habitatStats.placed++;
+      pos = h.pos; count = h.count;
+      if (h.depth !== undefined && opts.depth === undefined) opts = Object.assign({ depth: h.depth }, opts);
+    }
     return this.fish.addSchool(pos, species, count, opts);
   }
 
@@ -213,7 +224,144 @@ export class Ecosystem {
    * opts: { palette, seed, anchor, leash, roost (land on whales), perch (land on perches) }
    */
   addReptileFlock(pos, species = 'coilwing', count = 60, opts = {}) {
+    if (this.habitats && opts.habitat !== false && (opts.habitat || this._fromWorld(pos, 'reptiles'))) {
+      const h = this._birdHabitat(pos, species, count);
+      if (!h) { this.habitatStats.dropped++; return null; }
+      this.habitatStats.placed++;
+      pos = h.pos; count = h.count;
+    }
     return this.reptiles.addFlock(pos, species, count, opts);
+  }
+
+  // ---- habitats: creatures live where they would, in believable numbers ---------------------
+  // A spawn list sprinkles schools and flocks along the route; a real sea is patchy. Fish gather
+  // over shoals, reef drop-offs and atoll slopes (where currents upwell food), never mid-ocean;
+  // lanternjacks hunt only beneath bait balls; skimmers nest on cliff ledges and fish near them;
+  // coilwings live round spires and trees. Groups too close to one of their kind merge into one
+  // bigger moment. Only world spawns are moved: explicit calls (dev scenes, story moments) stay.
+  _fromWorld(pos, list) {
+    const sp = this.game.story?.world?.spawns?.[list];
+    if (!sp) return false;
+    for (const k of sp) if (k.pos === pos) return true;
+    return false;
+  }
+
+  _floor(x, z) {
+    const w = this.game.story?.world;
+    if (this.seabedAt) return this.seabedAt(x, z);
+    return w?.seabedAt ? w.seabedAt(x, z) : -80;
+  }
+
+  /** Walk from p toward the nearest sea-floor feature until the floor rises to a fishy depth. */
+  _toBank(p, minD, maxD, search = 420) {
+    const sea = this.seaHeight(p.x, p.z);
+    const d0 = sea - this._floor(p.x, p.z);
+    if (d0 >= minD && d0 <= maxD) return _v.copy(p);
+    const feats = this.game.story?.world?.seabed?.features || [];
+    let best = null, bd = Infinity;
+    for (const f of feats) {
+      const d = Math.hypot(f.x - p.x, f.z - p.z) - f.R * 0.5;
+      if (d < bd && d < search) { bd = d; best = f; }
+    }
+    if (!best) return null;
+    // march toward the feature's crown; the first spot in the depth band is the bank's edge
+    const dx = best.x - p.x, dz = best.z - p.z, L = Math.hypot(dx, dz) || 1;
+    for (let s = 0; s <= L; s += 6) {
+      const x = p.x + dx / L * s, z = p.z + dz / L * s;
+      const d = sea - this._floor(x, z);
+      if (d >= minD && d <= maxD) return _v.set(x, p.y, z);
+    }
+    return null;
+  }
+
+  _fishHabitat(pos, species, count) {
+    const out = this._habOut || (this._habOut = { pos: new Vector3(), count: 0, depth: undefined });
+    out.depth = undefined;
+    const schools = this.fish.schools;
+    if (species === 'lanternjack') {
+      // predators patrol below a bait ball; one hunting pair per ball
+      let ball = null, bd = 360;
+      for (const sc of schools) {
+        if (sc.species !== 'glintfin') continue;
+        const d = Math.hypot(sc.home.x - pos.x, sc.home.z - pos.z);
+        if (d < bd) { bd = d; ball = sc; }
+      }
+      if (!ball) return null;
+      for (const sc of schools) if (sc.species === 'lanternjack' && sc.home.distanceTo(ball.home) < 60) return null;
+      // over a shallow bank there is no room beneath the ball: they hold off its deeper edge
+      out.pos.copy(ball.home);
+      let fl = this._floor(ball.home.x, ball.home.z);
+      for (let k = 0; k < 8 && fl > ball.home.y - ball.R - 12; k++) {
+        const a = k * 0.785, x = ball.home.x + Math.cos(a) * 45, z = ball.home.z + Math.sin(a) * 45;
+        const f = this._floor(x, z);
+        if (f < fl) { fl = f; out.pos.x = x; out.pos.z = z; }
+      }
+      out.pos.y = Math.max(ball.home.y - ball.R - 8, fl + 4);
+      out.count = Math.min(count, 2);
+      return out;
+    }
+    // bait balls over banks and reef edges; spiral columns on the drop-offs
+    const p = species === 'spiralback' ? this._toBank(pos, 9, 60) : this._toBank(pos, 5, 42);
+    if (!p) return null;
+    out.pos.copy(p);
+    const sea = this.seaHeight(p.x, p.z), floor = this._floor(p.x, p.z);
+    const want = sea - pos.y;
+    out.pos.y = Math.min(sea - 1.5, Math.max(floor + 3, sea - want));
+    // one of a kind nearby already: the two are one shoal (fewer, bigger moments)
+    const merge = species === 'glintfin' ? 70 : 90;
+    for (const sc of schools) {
+      if (sc.species !== species) continue;
+      if (Math.hypot(sc.home.x - out.pos.x, sc.home.z - out.pos.z) < merge) return null;
+    }
+    out.count = species === 'glintfin' ? Math.min(Math.round(count * 1.15), 1800) : Math.min(count, 320);
+    return out;
+  }
+
+  _birdHabitat(pos, species, count) {
+    const out = this._habOut || (this._habOut = { pos: new Vector3(), count: 0, depth: undefined });
+    const P = this.perches || this.game.story?.world?.perches || NO_PERCHES;
+    const flocks = this.reptiles.flocks;
+    if (species === 'skimmer') {
+      // a rookery: the nearest cliff ledge (or high bare rock) within commuting range
+      let best = null, bd = 520;
+      for (const pe of P) {
+        if (!pe?.p || pe.tree || !(pe.ledge || pe.p.y > 14)) continue;
+        const d = Math.hypot(pe.p.x - pos.x, pe.p.z - pos.z);
+        if (d < bd) { bd = d; best = pe; }
+      }
+      if (best) {
+        out.pos.copy(best.p);
+        out.pos.y += 8;
+        for (const f of flocks) if (f.species === 'skimmer' && f.home.distanceTo(out.pos) < 80) return null;
+        out.count = Math.min(count, 16);
+        return out;
+      }
+      // no cliffs near: a small foraging party over a bait ball, or nobody
+      let ball = null, sd = 380;
+      for (const sc of this.fish.schools) {
+        if (sc.species !== 'glintfin') continue;
+        const d = Math.hypot(sc.home.x - pos.x, sc.home.z - pos.z);
+        if (d < sd) { sd = d; ball = sc; }
+      }
+      if (!ball) return null;
+      for (const f of flocks) if (f.species === 'skimmer' && f.home.distanceTo(ball.home) < 120) return null;
+      out.pos.set(ball.home.x, this.seaHeight(ball.home.x, ball.home.z) + 22, ball.home.z);
+      out.count = Math.min(count, 6);
+      return out;
+    }
+    // coilwings: round spires, stacks and trees; never over the empty sea
+    let best = null, bd = 480;
+    for (const pe of P) {
+      if (!pe?.p || pe.p.y < 12) continue;
+      const d = Math.hypot(pe.p.x - pos.x, pe.p.z - pos.z);
+      if (d < bd) { bd = d; best = pe; }
+    }
+    if (!best) return null;
+    out.pos.copy(best.p);
+    out.pos.y += 14;
+    for (const f of flocks) if (f.species === 'coilwing' && f.home.distanceTo(out.pos) < 120) return null;
+    out.count = Math.min(count, 110);
+    return out;
   }
 
   /** A bloom of bioluminescent plankton (world spawns.plankton): it glows where stirred at night. */
@@ -473,6 +621,7 @@ export class Ecosystem {
     s.birds = this.reptiles.birds.length;
     s.bubbles = this.bubbles.live.length;
     s.reef = this.reef.stats;
+    s.habitat = this.habitatStats;
   }
 
   // ---- internals ------------------------------------------------------------------------

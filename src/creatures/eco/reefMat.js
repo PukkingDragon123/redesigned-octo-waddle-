@@ -160,7 +160,10 @@ void main() {
     if (glass) rel *= vec3(1.5, 2.2, 1.5);
     if (plate) rel *= vec3(1.15, 1.0, 1.1);
     float legPh = walkPh + aP.z * 2.1 + (side > 0.0 ? 3.14159 : 0.0);
-    rel = rotY(sin(legPh) * 0.4 * walk) * rel;
+    // a sideways gait: each leg reaches out and pulls in across the body (alternating tetrapod,
+    // the leading side pulls while the trailing side pushes), with a little fore-aft swing
+    rel = rotY(sin(legPh) * 0.16 * walk) * rel;
+    rel = rotZ(side * (sin(legPh) * 0.24 - 0.04) * walk) * rel;
     rel.y += max(0.0, cos(legPh)) * 0.07 * walk * (part > 14.5 ? 0.5 : aP.y);
     // hiding: legs fold up under the body
     vec3 tuck = vec3(rel.x * 0.35, -0.04 * aP.y, rel.z * 0.6);
@@ -232,6 +235,8 @@ void main() {
     float u = abs(aP.z), v = aP.y;
     p.y += sin(flap - u * 1.9) * pow(u, 1.5) * 0.55 * amp;
     p.y += sin(flap * 0.5 - v * 3.0) * 0.04 * amp;
+    // the wing margin ripples: a wave running nose to tail along the edge (rajiform undulation)
+    p.y += sin(uTime * 2.6 + seed * 9.0 - v * 7.5) * smoothstep(0.55, 1.0, u) * 0.05 * (0.5 + amp);
     // wing tips curl a little on the downstroke
     p.x *= 1.0 - 0.06 * u * max(-sin(flap - u * 1.9), 0.0) * amp;
   } else if (part < 31.5) {
@@ -383,9 +388,12 @@ void main() {
   float a = (uv.x - 0.5) * 2.2;
   float r = uv.y;
   vec2 fw = vec2(vnoise(uv * 9.0 + hs * 7.0), vnoise(uv * 8.0 + 4.0)) - 0.5;
-  float rays = abs(sin(a * 14.0 + sin(r * 6.0 + hs * 6.0) * 0.8 + fw.x * 2.2));
-  float rings = abs(sin(r * 26.0 + sin(a * 5.0) * 1.2 + fw.y * 3.0));
-  float vein = max(smoothstep(0.62, 0.86, 1.0 - rays), smoothstep(0.66, 0.9, 1.0 - rings) * step(0.15, r));
+  float rays = abs(sin(a * 14.0 + sin(r * 6.0 + hs * 6.0) * 0.8 + fw.x * 3.4));
+  float rings = abs(sin(r * 26.0 + sin(a * 5.0) * 1.2 + fw.y * 4.4));
+  // each strand swells and thins along its length, and some cross-links are broken (hand-drawn)
+  float wv = 0.12 * (vnoise(uv * 14.0 + 3.0 + hs) - 0.5);
+  float brk = smoothstep(0.22, 0.38, vnoise(uv * vec2(7.0, 11.0) + 9.0 + hs * 3.0));
+  float vein = max(smoothstep(0.62 + wv, 0.86 + wv, 1.0 - rays), smoothstep(0.66 - wv, 0.9 - wv, 1.0 - rings) * step(0.15, r) * brk);
   vein = max(vein, smoothstep(0.75, 0.25, abs(uv.x - 0.5) * 2.0) * smoothstep(0.35, 0.0, r));
   float edge = smoothstep(0.92, 1.0, r);
   if (max(vein, edge) < 0.5) discard;
@@ -484,8 +492,14 @@ void main() {
   vec3 col;
   if (part < 20.5) {
     float rimK = vP.y;
-    float ribs = smoothstep(0.6, 1.0, abs(sin(vP.z * 6.2831 * 8.0)));
-    col = c * (0.08 + fres * 0.7 + ribs * 0.12 * rimK + smoothstep(0.85, 1.0, rimK) * 0.6);
+    // radial canals drawn by hand (they wander and fade), four horseshoe gonads round the apex,
+    // and a wobbling ring canal just inside the scalloped margin
+    float az = vP.z * 6.2831;
+    float wa = az + 0.06 * sin(rimK * 9.0 + az * 3.0 + hs * 6.0);
+    float ribs = smoothstep(0.6, 1.0, abs(sin(wa * 8.0))) * smoothstep(0.1, 0.45, rimK);
+    float lobes = smoothstep(0.55, 0.95, cos(az * 4.0 + 0.4 + 0.2 * sin(rimK * 12.0))) * smoothstep(0.12, 0.28, rimK) * smoothstep(0.58, 0.36, rimK);
+    float ringC = smoothstep(0.035, 0.0, abs(rimK - 0.86 - 0.015 * sin(az * 11.0 + hs * 5.0)));
+    col = c * (0.08 + fres * 0.7 + ribs * 0.12 * rimK + smoothstep(0.85, 1.0, rimK) * 0.6 + lobes * 0.22 + ringC * 0.3);
     col += uSunColor * 0.06 * max(dot(N, uSunDir), 0.0);
   } else if (part < 21.5) {
     col = mix(c, vec3(1.0, 0.5, 0.8), 0.5) * (0.6 + 0.4 * pulse);

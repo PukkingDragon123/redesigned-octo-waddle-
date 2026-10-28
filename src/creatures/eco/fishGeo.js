@@ -281,14 +281,15 @@ export const LANTERN_LURES = 3; // whip lures on the first dorsal fin
 
 export function buildLanternjack(near = true) {
   const B = new Builder(FISH_ATTRS);
-  const nA = near ? 22 : 8;
-  const nS = near ? 24 : 8;
+  // the hero predator is seen up close: a smoother silhouette (a tight gill-cover curve, the brow)
+  const nA = near ? 30 : 8;
+  const nS = near ? 34 : 8;
   const zT = -0.29;
   body(B, LANTERN, nA, nS, zT, { ex: near ? 0.88 : 1, ey: near ? 0.92 : 1, eyb: 1.05, eye: near ? { ...LANTERN_EYE, bulge: 0.012 } : null });
   capTail(B, LANTERN, zT, nA);
   const tC = tOf(zT);
   // lunate caudal fin, big and stiff
-  medianFin(B, 1, near ? 11 : 3, near ? 4 : 1,
+  medianFin(B, 1, near ? 17 : 3, near ? 6 : 1,
     (u) => [0.02 - u * 0.04, zT + 0.006],
     (u) => {
       const a = (u - 0.5) * 2, fa = Math.abs(a);

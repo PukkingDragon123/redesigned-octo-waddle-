@@ -307,9 +307,12 @@ void main() {
     }
 #endif
     // the head (in front of the gill cover) is scaleless and plated
-    float opz = OPER_Z + 0.016 * cos(phi * 1.15);
+    // the gill cover's edge: a curved brush stroke that wobbles, swells and tapers at both ends
+    float opz = OPER_Z + 0.016 * cos(phi * 1.15) + 0.0028 * sin(phi * 6.3 + seed * 5.0) + 0.0012 * sin(phi * 17.0 + seed * 2.0);
     float head = smoothstep(opz - 0.004, opz + 0.004, L.z);
-    float operLine = smoothstep(0.0045, 0.0, abs(L.z - opz)) * step(0.45, phi) * step(phi, 2.8);
+    float operTaper = smoothstep(0.45, 0.8, phi) * smoothstep(2.8, 2.35, phi);
+    float operW = 0.0045 * (0.55 + 0.45 * sin(phi * 2.2 + 0.8 + seed)) * (0.35 + 0.65 * operTaper);
+    float operLine = smoothstep(operW, operW * 0.25, abs(L.z - opz)) * operTaper;
 #if SPECIES == 0
     // ---- glintfin: blue-green back, gold band, mirror-silver flanks, keeled white belly
     vec3 back = pA * (0.7 + 0.3 * tint);
@@ -342,7 +345,8 @@ void main() {
     float keel = smoothstep(2.85, 3.05, phi) * (0.5 + 0.5 * sin(t * 140.0));
     albedo *= 1.0 - keel * 0.25;
     // mouth: a thin dark gape line along the snout
-    float mouth = smoothstep(0.0035, 0.0, abs(L.y - (-0.006 + (L.z - 0.5) * 0.05))) * smoothstep(0.455, 0.47, L.z);
+    float gz = L.z - 0.5;
+    float mouth = smoothstep(0.0035, 0.0, abs(L.y - (-0.006 + gz * 0.05 - gz * gz * 2.2 + 0.0006 * sin(L.z * 900.0)))) * smoothstep(0.455, 0.47, L.z);
     albedo = mix(albedo, vec3(0.03), mouth * 0.9);
     mirror *= 1.0 - mouth;
     // eye
@@ -354,7 +358,7 @@ void main() {
 #elif SPECIES == 1
     // ---- spiralback: teal back with dark helical bands, silver-bronze flanks, white belly
     vec3 back = pA * (0.85 + 0.3 * tint);
-    float helix = t * 15.0 + phi * 1.6 * side + sin(t * 30.0 + phi * 3.0) * 0.12;
+    float helix = t * 15.0 + phi * 1.6 * side + sin(t * 30.0 + phi * 3.0) * 0.12 + (vnoise(vec2(t * 40.0 + seed * 11.0, phi * 4.0)) - 0.5) * 0.35;
     float bandsK = smoothstep(0.15, 0.0, abs(fract(helix) - 0.5) - 0.17) * smoothstep(1.95, 0.9, phi);
     bandsK *= smoothstep(0.08, 0.2, t) * smoothstep(0.98, 0.84, t);
     vec3 flankC = vec3(0.66, 0.72, 0.7);
@@ -369,7 +373,8 @@ void main() {
     // keels on the peduncle
     float keelP = smoothstep(0.7, 0.78, t) * exp(-pow((phi - 1.57) * 6.0, 2.0));
     albedo = mix(albedo, pD * 0.6, keelP * 0.7);
-    float mouth = smoothstep(0.004, 0.0, abs(L.y - (-0.012 + (L.z - 0.5) * 0.06))) * smoothstep(0.445, 0.465, L.z);
+    float gz = L.z - 0.5;
+    float mouth = smoothstep(0.004, 0.0, abs(L.y - (-0.012 + gz * 0.06 - gz * gz * 2.0 + 0.0008 * sin(L.z * 700.0)))) * smoothstep(0.445, 0.465, L.z);
     albedo = mix(albedo, vec3(0.03), mouth * 0.9);
     mirror *= 1.0 - mouth;
     float irisK;
@@ -402,8 +407,11 @@ void main() {
     float pores = ll * smoothstep(0.7, 0.95, sin(t * 120.0)) * (1.0 - smoothstep(0.6, 0.7, t));
     emis += pC * pores * (0.04 + 0.5 * uNight + 0.6 * special) * 0.6;
     // scars: a few pale slashes
-    float sc1 = smoothstep(0.004, 0.0, abs(L.y - 0.03 - (L.z - 0.1) * 0.7 + 0.03 * sin(seed * 6.0))) * step(abs(L.z - 0.08 - seed * 0.05), 0.07) * step(0.4, fract(seed * 3.7));
-    float sc2 = smoothstep(0.003, 0.0, abs(L.y + 0.02 + (L.z + 0.05) * 1.1)) * step(abs(L.z + 0.04), 0.05) * step(0.5, fract(seed * 5.3));
+    float u1 = (L.z - 0.08 - seed * 0.05) / 0.07, u2 = (L.z + 0.04) / 0.05;
+    float w1 = 0.004 * max(1.0 - u1 * u1, 0.05) * (0.7 + 0.3 * sin(u1 * 9.0 + seed));
+    float w2 = 0.003 * max(1.0 - u2 * u2, 0.05) * (0.7 + 0.3 * sin(u2 * 7.0 - seed));
+    float sc1 = smoothstep(w1, w1 * 0.2, abs(L.y - 0.03 - (L.z - 0.1) * 0.7 + 0.03 * sin(seed * 6.0) + 0.004 * sin(u1 * 5.0 + seed * 3.0) + 0.006 * u1 * u1)) * step(abs(u1), 1.0) * step(0.4, fract(seed * 3.7));
+    float sc2 = smoothstep(w2, w2 * 0.2, abs(L.y + 0.02 + (L.z + 0.05) * 1.1 + 0.003 * sin(u2 * 6.0 + seed * 2.0) - 0.004 * u2 * u2)) * step(abs(u2), 1.0) * step(0.5, fract(seed * 5.3));
     albedo = mix(albedo, vec3(0.75, 0.68, 0.62), (sc1 + sc2) * 0.8);
     mirror *= 1.0 - (sc1 + sc2);
     // head plates: rough, darker, with sutures
@@ -414,7 +422,7 @@ void main() {
     float ospot = smoothstep(0.03, 0.015, length(vec2(L.z - (opz + 0.012), (phi - 0.75) * 0.08)));
     albedo = mix(albedo, vec3(0.02), ospot * 0.85);
     // gape: a deep, upturned mouth line with an underbite
-    float gy = -0.036 - (L.z - 0.5) * 0.3;
+    float gy = -0.036 - (L.z - 0.5) * 0.3 + (L.z - 0.43) * (L.z - 0.43) * 3.0 + 0.0012 * sin(L.z * 400.0);
     float mouth = smoothstep(0.005, 0.0, abs(L.y - gy)) * smoothstep(0.405, 0.43, L.z);
     albedo = mix(albedo, vec3(0.02, 0.01, 0.01), mouth);
     mirror *= 1.0 - mouth;

@@ -18,6 +18,7 @@ import { buildSkimmer, buildCoilwing, triCount } from './reptileGeo.js';
 import { reptileMaterial } from './reptileMat.js';
 import { rng, lerp, clamp, smoothstep } from '../../core/math.js';
 
+const smooth01 = (x, a, b) => { const k = Math.max(0, Math.min(1, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
 const TAU = Math.PI * 2;
 const STRIDE = 20;
 // 0-2 pos, 3 scale | 4-7 quat | 8 phase, 9 amp, 10 fold, 11 sweep | 12 head yaw, 13 head pitch,
@@ -25,7 +26,7 @@ const STRIDE = 20;
 
 const SPEC = {
   skimmer: { max: 192, nearMax: 72, span: [1.25, 1.75], nearPx: 70, minPx: 0.8, beat: 2.3 },
-  coilwing: { max: 2048, nearMax: 200, span: [0.27, 0.37], nearPx: 40, minPx: 0.7, beat: 7.5 },
+  coilwing: { max: 2048, nearMax: 120, span: [0.27, 0.37], nearPx: 40, minPx: 0.7, beat: 7.5 },
 };
 const ROOST_RANGE = 420;
 const PERCH_RANGE = 320;
@@ -230,6 +231,12 @@ export class ReptileSystem {
       return;
     }
     const roosts = ctx.roosts || [];
+    // the day's rhythm: coilwings murmurate at dusk and roost at night; everyone shelters in storms
+    const A = this.act || (this.act = { dusk: 0, night: 0, storm: 0, shelter: 0 });
+    A.night = G.uNight.value;
+    A.dusk = Math.max(0, Math.min(1, (0.3 - G.uSunDir.value.y) / 0.35)) * (1 - A.night);
+    A.storm = G.uStorm ? G.uStorm.value : 0;
+    A.shelter = Math.max(smooth01(A.storm, 0.35, 0.7), smooth01(A.night, 0.6, 0.9));
     for (const r of roosts) if (r && r.pos) this._roostFrame(r, dt, ctx.time).occ = 0;
     for (const b of this.birds) if (b.roost) { const info = this._roostInfo.get(b.roost); if (info) info.occ++; }
     for (let fi = 0; fi < this.flocks.length; fi++) {
@@ -493,7 +500,20 @@ export class ReptileSystem {
         fl.home.y + 4 + Math.sin(t * a[1]) * R * 0.25,
         fl.home.z + Math.sin(t * a[2] + a[4]) * R,
       );
+      // dusk: the murmuration, great folding loops round the home spire before roosting
+      const dk = this.act ? this.act.dusk : 0;
+      if (dk > 0.05) {
+        const ang = t * (0.32 + a[0]) + a[3];
+        const rr = R * (0.55 + 0.35 * Math.sin(t * a[2] * 1.7 + a[4]));
+        _v3.set(fl.home.x + Math.cos(ang) * rr, fl.home.y + 10 + Math.sin(t * 0.43 + a[3]) * R * 0.3, fl.home.z + Math.sin(ang * 1.3) * rr);
+        fl.target.lerp(_v3, dk);
+      }
     }
+    const shelter = this.act ? this.act.shelter : 0;
+    // by day they settle often; at dusk the flock keeps wheeling; at night and in storms it roosts
+    if (this.act && this.act.dusk > 0.4 && !shelter) fl.calmT = Math.min(fl.calmT, fl.restAfter * 0.5);
+    if (shelter > 0.5 && fl.mode === 'fly') fl.calmT = Math.max(fl.calmT, fl.restAfter);
+    if (shelter > 0.5 && fl.mode === 'settle') fl.perchT = Math.min(fl.perchT, fl.perchFor - 1);
     let nf = 0;
     _v.set(0, 0, 0);
     _v2.set(0, 0, 0);
@@ -806,6 +826,8 @@ export class ReptileSystem {
         b.crest += ((b.display > 0 ? 1 : 0.1) - b.crest) * (1 - Math.exp(-dt * 4));
         b.jaw += ((b.display > 0.6 && b.display < 1.6 ? 0.25 : 0) - b.jaw) * (1 - Math.exp(-dt * 10));
         b.sweep += (0 - b.sweep) * (1 - Math.exp(-dt * 4));
+        // storms and the night are sat out on the ledge
+        if (this.act && this.act.shelter > 0.5 && !song) b.t = Math.max(b.t, 2);
         if (b.t <= 0 || song) {
           this._release(b);
           b.mode = 'takeoff';
@@ -828,6 +850,8 @@ export class ReptileSystem {
         const alt = (song ? Math.max(song.y + 10, surf + 20) : surf + 26 + (b.seed % 4) * 6);
         tgt = _v.set(c.x + Math.cos(b.circleA) * rr, alt, c.z + Math.sin(b.circleA) * rr);
         speed = 9.5; flapK = 0.25; crestT = song ? 1 : 0.1;
+        // a storm or the night coming on: home to the ledge
+        if (!song && b.nest && this.act && this.act.shelter > 0.5) { b.mode = 'return'; b.t = 40; b.hunts = 0; break; }
         if (b.t <= 0 && !song) {
           b.prey = this._prey(b, fl);
           if (b.prey && b.hunts < 4) {

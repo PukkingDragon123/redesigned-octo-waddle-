@@ -252,37 +252,49 @@ export function buildFan() {
  */
 export function buildCrab() {
   const m = new Mk();
-  ellipsoid(m, [0, 0.16, 0], [0.22, 0.09, 0.17], 10, 5, (p) => [[10, 0, 0, 0], [0, 0, 0, 0]]);
+  ellipsoid(m, [0, 0.16, 0], [0.22, 0.09, 0.17], 20, 10, (p) => [[10, 0, 0, 0], [0, 0, 0, 0]]);
   for (let side = -1; side <= 1; side += 2) {
-    for (let k = 0; k < 3; k++) {
-      const z = 0.08 - k * 0.09;
+    // four jointed walking legs a side: coxa, a long merus up to the knee, carpus and propodus
+    // down, and a pointed dactyl; the front legs reach forward, the back ones trail
+    for (let k = 0; k < 4; k++) {
+      const z = 0.09 - k * 0.07;
+      const sw = (1.5 - k) * 0.05;
       const root = [side * 0.19, 0.15, z];
-      const knee = [side * 0.42, 0.3, z + (1 - k) * 0.06];
-      const foot = [side * 0.6, 0.0, z + (1 - k) * 0.12];
-      const pts = [root, [(root[0] + knee[0]) / 2, (root[1] + knee[1]) / 2 + 0.03, (root[2] + knee[2]) / 2], knee, [(knee[0] + foot[0]) / 2, (knee[1] + foot[1]) / 2, (knee[2] + foot[2]) / 2], foot];
-      tube(m, pts, [0.03, 0.028, 0.026, 0.02, 0.008], 4, (i, t) => [[11, t, k, side], [root[0], root[1], root[2], 0]], true);
-      ellipsoid(m, knee, [0.035, 0.035, 0.035], 4, 2, () => [[15, 0.5, k, side], [root[0], root[1], root[2], 0]]);
+      const coxa = [side * 0.25, 0.2, z + sw * 0.2];
+      const knee = [side * 0.41, 0.31, z + sw * 0.8];
+      const carp = [side * 0.5, 0.22, z + sw * 1.2];
+      const prop = [side * 0.56, 0.1, z + sw * 1.5];
+      const foot = [side * 0.6, 0.0, z + sw * 1.7];
+      const pts = [root, coxa, [(coxa[0] + knee[0]) / 2, (coxa[1] + knee[1]) / 2 + 0.025, (coxa[2] + knee[2]) / 2], knee, carp, prop, foot];
+      tube(m, pts, [0.032, 0.03, 0.031, 0.026, 0.023, 0.017, 0.004], 6, (i, t) => [[11, t, k * 0.75, side], [root[0], root[1], root[2], 0]], true);
+      // joint swellings at the knee and the wrist
+      ellipsoid(m, knee, [0.034, 0.03, 0.03], 6, 3, () => [[15, 0.5, k * 0.75, side], [root[0], root[1], root[2], 0]]);
+      ellipsoid(m, carp, [0.026, 0.024, 0.024], 5, 3, () => [[15, 0.7, k * 0.75, side], [root[0], root[1], root[2], 0]]);
     }
     // claw: arm then a big pincer
     const root = [side * 0.14, 0.17, 0.14];
     const elbow = [side * 0.28, 0.24, 0.3];
-    tube(m, [root, elbow, [side * 0.24, 0.22, 0.38]], [0.04, 0.035, 0.035], 5, (i, t) => [[12, t * 0.5, 0, side], [root[0], root[1], root[2], 0]], false);
-    ellipsoid(m, [side * 0.22, 0.22, 0.45], [0.07, 0.055, 0.11], 6, 3, () => [[12, 0.8, 1, side], [root[0], root[1], root[2], 0]]);
-    tube(m, [[side * 0.2, 0.19, 0.5], [side * 0.18, 0.18, 0.6], [side * 0.15, 0.2, 0.66]], [0.03, 0.022, 0.006], 4, () => [[12, 1, 2, side], [root[0], root[1], root[2], 0]], true);
+    tube(m, [root, elbow, [side * 0.24, 0.22, 0.38]], [0.04, 0.035, 0.035], 7, (i, t) => [[12, t * 0.5, 0, side], [root[0], root[1], root[2], 0]], false);
+    ellipsoid(m, [side * 0.22, 0.22, 0.45], [0.07, 0.055, 0.11], 12, 6, () => [[12, 0.8, 1, side], [root[0], root[1], root[2], 0]]);
+    // the fixed finger and the moving dactyl of the pincer, slightly gaping
+    tube(m, [[side * 0.2, 0.19, 0.5], [side * 0.18, 0.18, 0.6], [side * 0.15, 0.2, 0.66]], [0.03, 0.022, 0.006], 6, () => [[12, 1, 2, side], [root[0], root[1], root[2], 0]], true);
+    tube(m, [[side * 0.24, 0.25, 0.5], [side * 0.22, 0.27, 0.59], [side * 0.18, 0.24, 0.65]], [0.026, 0.019, 0.005], 6, () => [[12, 1, 2, side], [root[0], root[1], root[2], 0]], true);
     // eye stalk with a glowing eye
-    tube(m, [[side * 0.06, 0.22, 0.13], [side * 0.08, 0.32, 0.16]], [0.015, 0.012], 4, () => [[13, 0.5, 0, side], [0, 0, 0, 0]], false);
-    ellipsoid(m, [side * 0.08, 0.34, 0.165], [0.028, 0.028, 0.028], 5, 3, () => [[13, 1, 1, side], [0, 0, 0, 0]]);
+    tube(m, [[side * 0.06, 0.22, 0.13], [side * 0.08, 0.32, 0.16]], [0.015, 0.012], 6, () => [[13, 0.5, 0, side], [0, 0, 0, 0]], false);
+    ellipsoid(m, [side * 0.08, 0.34, 0.165], [0.028, 0.028, 0.028], 8, 5, () => [[13, 1, 1, side], [0, 0, 0, 0]]);
+    // antennae: two thin whips between the eyes
+    tube(m, [[side * 0.03, 0.2, 0.17], [side * 0.06, 0.3, 0.3], [side * 0.11, 0.33, 0.42]], [0.006, 0.004, 0.0015], 3, () => [[13, 0.5, 0, side], [0, 0, 0, 0]], true);
   }
   // hermit's spiral shell (hidden by the shader on other species)
   const pts = [], rad = [];
-  for (let i = 0; i < 18; i++) {
-    const t = i / 17;
+  for (let i = 0; i < 30; i++) {
+    const t = i / 29;
     const th = t * 2.6 * TAU;
     const R = 0.02 + 0.16 * t * t;
     pts.push([Math.cos(th) * R, 0.62 - t * 0.38, -0.08 + Math.sin(th) * R]);
     rad.push(0.015 + 0.18 * Math.pow(t, 1.5));
   }
-  tube(m, pts, rad, 7, (i, t) => [[14, t, 0, 0], [0, 0, 0, 0]], false);
+  tube(m, pts, rad, 12, (i, t) => [[14, t, 0, 0], [0, 0, 0, 0]], false);
   return m.build();
 }
 
@@ -292,19 +304,28 @@ export function buildCrab() {
  */
 export function buildJelly() {
   const m = new Mk();
-  ellipsoid(m, [0, 0, 0], [0.5, 0.42, 0.5], 12, 5, (p, n, u, v) => [[20, 1 - (v - 0.5) * 2, u, 0], [0, 0, 0, 0]], 0.5, 1);
-  ellipsoid(m, [0, 0.12, 0], [0.18, 0.14, 0.18], 8, 4, (p, n, u, v) => [[21, 0.5, u, v], [0, 0, 0, 0]]);
+  // the bell: an outer exumbrella and, a little inside it, the subumbrella (layered, translucent)
+  ellipsoid(m, [0, 0, 0], [0.5, 0.42, 0.5], 32, 12, (p, n, u, v) => [[20, 1 - (v - 0.5) * 2, u, 0], [0, 0, 0, 0]], 0.5, 1);
+  ellipsoid(m, [0, -0.02, 0], [0.44, 0.34, 0.44], 24, 8, (p, n, u, v) => [[20, (1 - (v - 0.5) * 2) * 0.92, u, 0], [0, 0, 0, 0]], 0.5, 1);
+  ellipsoid(m, [0, 0.12, 0], [0.18, 0.14, 0.18], 14, 7, (p, n, u, v) => [[21, 0.5, u, v], [0, 0, 0, 0]]);
+  // frilled oral arms: ruffled, twisting curtains
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + 0.4;
     const pts = [], rad = [];
-    for (let i = 0; i < 6; i++) { const t = i / 5; pts.push([Math.cos(a) * 0.08, -t * 1.0, Math.sin(a) * 0.08]); rad.push(0.06 * (1 - t * 0.6)); }
-    tube(m, pts, rad, 4, (i, t) => [[22, t, a, 0], [0, 0, 0, 0]], true, 0.35);
+    for (let i = 0; i < 12; i++) {
+      const t = i / 11, tw = a + t * 2.2;
+      pts.push([Math.cos(a) * 0.08 + Math.cos(tw) * 0.03 * t, -t * 1.1, Math.sin(a) * 0.08 + Math.sin(tw) * 0.03 * t]);
+      rad.push(0.065 * (1 - t * 0.6) * (1 + 0.25 * Math.sin(t * 19)));
+    }
+    tube(m, pts, rad, 6, (i, t) => [[22, t, a, 0], [0, 0, 0, 0]], true, 0.35);
   }
-  for (let k = 0; k < 10; k++) {
-    const a = (k / 10) * TAU;
+  // marginal tentacles: long and fine, two lengths alternating round the rim
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * TAU;
+    const L = k % 2 ? 2.0 : 2.8;
     const pts = [], rad = [];
-    for (let i = 0; i < 9; i++) { const t = i / 8; pts.push([Math.cos(a) * 0.45, -t * 2.6, Math.sin(a) * 0.45]); rad.push(0.012 * (1 - t * 0.6)); }
-    tube(m, pts, rad, 3, (i, t) => [[23, t, a, k], [0, 0, 0, 0]], true);
+    for (let i = 0; i < 14; i++) { const t = i / 13; pts.push([Math.cos(a) * 0.46, -t * L, Math.sin(a) * 0.46]); rad.push(0.011 * (1 - t * 0.7)); }
+    tube(m, pts, rad, 3, (i, t) => [[23, t, a, k * 10 / 16], [0, 0, 0, 0]], true);
   }
   return m.build();
 }
@@ -316,7 +337,8 @@ export function buildJelly() {
  */
 export function buildRay() {
   const m = new Mk();
-  const NU = 12, NV = 8;
+  // a fine grid so the wing margins can ripple
+  const NU = 26, NV = 16;
   for (let face = 1; face >= -1; face -= 2) {
     const base = m.count;
     for (let j = 0; j <= NV; j++) {
@@ -342,23 +364,23 @@ export function buildRay() {
     tube(m, [[side * 0.14, 0, 0.5], [side * 0.17, -0.02, 0.68], [side * 0.12, -0.06, 0.8]], [0.05, 0.04, 0.012], 4, (i, t) => [[31, t, side, 0], [0, 0, 0, 0]], true, 0.5);
   }
   const pts = [], rad = [];
-  for (let i = 0; i < 9; i++) { const t = i / 8; pts.push([0, 0, -0.5 - t * 1.6]); rad.push(0.04 * (1 - t * 0.85)); }
-  tube(m, pts, rad, 4, (i, t) => [[32, t, 0, 0], [0, 0, 0, 0]], true);
+  for (let i = 0; i < 16; i++) { const t = i / 15; pts.push([0, 0, -0.5 - t * 1.6]); rad.push(0.04 * (1 - t * 0.85)); }
+  tube(m, pts, rad, 5, (i, t) => [[32, t, 0, 0], [0, 0, 0, 0]], true);
   return m.build();
 }
 
 /** Lantern puffer: round body (40), lantern eyes (41), little fins and tail (42), spines (43). */
 export function buildPuffer() {
   const m = new Mk();
-  ellipsoid(m, [0, 0, 0], [0.2, 0.18, 0.26], 12, 7, (p, n, u, v) => [[40, (p[2] + 0.26) / 0.52, u, v], [0, 0, 0, 0]]);
+  ellipsoid(m, [0, 0, 0], [0.2, 0.18, 0.26], 22, 13, (p, n, u, v) => [[40, (p[2] + 0.26) / 0.52, u, v], [0, 0, 0, 0]]);
   for (let side = -1; side <= 1; side += 2) {
-    ellipsoid(m, [side * 0.13, 0.08, 0.14], [0.075, 0.075, 0.075], 6, 4, (p, n) => [[41, 0, side, n[2]], [0, 0, 0, 0]]);
-    tube(m, [[side * 0.17, -0.02, 0.02], [side * 0.27, -0.03, -0.04]], [0.05, 0.01], 3, () => [[42, 0.5, side, 1], [side * 0.17, -0.02, 0.02, 0]], true, 0.3);
+    ellipsoid(m, [side * 0.13, 0.08, 0.14], [0.075, 0.075, 0.075], 10, 7, (p, n) => [[41, 0, side, n[2]], [0, 0, 0, 0]]);
+    tube(m, [[side * 0.17, -0.02, 0.02], [side * 0.22, -0.025, -0.01], [side * 0.27, -0.03, -0.04]], [0.05, 0.035, 0.01], 5, () => [[42, 0.5, side, 1], [side * 0.17, -0.02, 0.02, 0]], true, 0.3);
   }
-  tube(m, [[0, 0, -0.24], [0, 0.0, -0.36], [0, 0.0, -0.42]], [0.04, 0.08, 0.09], 4, (i, t) => [[42, t, 0, 0], [0, 0, -0.24, 0]], false, 0.25);
+  tube(m, [[0, 0, -0.24], [0, 0.0, -0.3], [0, 0.0, -0.36], [0, 0.0, -0.42]], [0.04, 0.065, 0.08, 0.09], 6, (i, t) => [[42, t, 0, 0], [0, 0, -0.24, 0]], false, 0.25);
   // spines over the body (folded flat until the puffer inflates)
-  for (let k = 0; k < 26; k++) {
-    const y = 1 - (k + 0.5) / 26 * 2, r = Math.sqrt(1 - y * y), th = k * 2.39996;
+  for (let k = 0; k < 44; k++) {
+    const y = 1 - (k + 0.5) / 44 * 2, r = Math.sqrt(1 - y * y), th = k * 2.39996;
     const n = [Math.cos(th) * r, y, Math.sin(th) * r];
     const p = [n[0] * 0.19, n[1] * 0.17, n[2] * 0.25];
     tube(m, [p, [p[0] + n[0] * 0.09, p[1] + n[1] * 0.09, p[2] + n[2] * 0.09]], [0.012, 0.002], 3, (i, t) => [[43, t, 0, 0], [p[0], p[1], p[2], 0]], true);
@@ -369,10 +391,10 @@ export function buildPuffer() {
 /** Ribbon eel: a flat ribbon body (50, aP.y nose 0 .. tail 1) with a dorsal frill, 1 m long. */
 export function buildEel() {
   const m = new Mk();
-  const N = 22;
+  const N = 40;
   const pts = [], rad = [];
   for (let i = 0; i < N; i++) { const t = i / (N - 1); pts.push([0, 0, 0.5 - t]); rad.push(0.035 * Math.sin(Math.min(1, t * 1.2 + 0.15) * Math.PI) + 0.004); }
-  tube(m, pts, rad, 5, (i, t) => [[50, t, 0, 0], [0, 0, 0, 0]], true, 0.55);
+  tube(m, pts, rad, 8, (i, t) => [[50, t, 0, 0], [0, 0, 0, 0]], true, 0.55);
   // the frill: a ribbon along the back and belly
   for (let s = -1; s <= 1; s += 2) {
     const base = m.count;

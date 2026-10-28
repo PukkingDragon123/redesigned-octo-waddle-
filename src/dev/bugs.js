@@ -2,7 +2,8 @@
 // ?debug&test=bugs                          the calf flies an autopilot loop through swarms of all three
 //   &species=moth|gnat|skitter|all          which swarms (default all)      &ring  a race ring of moths
 //   &move=slap|spout|loop|dash|dive|breach|roll|bubbles|none   repeat one move every few seconds
-//   &cam=follow|side|swarm|wide             camera (default follow; swarm: close on the first swarm)
+//   &cam=follow|side|swarm|wide|macro       camera (default follow; swarm: close on the first swarm;
+//                                           macro: a lens on one bug, &bug=N &dist=k)
 //   &time=<preset> (night shows the moths' glow)   &state=<0..1> sea state   &play  steer it yourself
 // window.__bugs() -> stats (CPU ms, bugs drawn, caught, moves done).
 import { Vector3 } from 'three';
@@ -99,6 +100,13 @@ export default async function (game) {
       if (camMode === 'swarm') {
         wantL.copy(centers[0] || calf.pos);
         want.copy(wantL).add(_off.set(5, 1.5, 7));
+      } else if (camMode === 'macro') {
+        // a macro lens on one bug of the first swarm (&cam=macro&bug=N)
+        const S = bugs.swarms.find((q) => q.active) || null;
+        const i = S ? S.first + (+(p.get('bug') || 0) % Math.max(1, S.count)) : -1;
+        if (S) wantL.set(S.K.pos[i * 3], S.K.pos[i * 3 + 1], S.K.pos[i * 3 + 2]); else wantL.copy(calf.pos);
+        want.copy(wantL).add(_off.set(1.0, 0.35, 0.8).multiplyScalar(+(p.get('dist') || 1)));
+        camInit = false;
       } else if (camMode === 'wide') {
         wantL.copy(calf.pos);
         want.copy(calf.pos).add(_off.set(40, 25, 40));

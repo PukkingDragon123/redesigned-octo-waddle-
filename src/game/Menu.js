@@ -166,7 +166,7 @@ export class Menu {
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
     this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 400, spacing: 0.26, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
-    this.subtitle = new TextItem('a whole life across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
+    this.subtitle = new TextItem('field notes from Vur Sok, thirty-one years', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
   }

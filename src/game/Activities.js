@@ -155,10 +155,15 @@ export class Activities {
     const night = G.uNight?.value ?? 0;
     let spawned = 0;
     const empty = this.bugs.countActive('moth') + this.bugs.countActive('gnat') + this.bugs.countActive('skitter') === 0;
+    // the insects' day: lumen moths come out at dusk and night, gnats dance at dusk, skitterflies
+    // hunt the shallows by day; in a storm everyone shelters in the island lee
+    const dusk = clamp((0.3 - (G.uSunDir?.value.y ?? 0.5)) / 0.35, 0, 1) * (1 - night);
+    const eve = Math.max(dusk, night);
+    const tod = [0.25 + 0.75 * eve, 0.3 + 0.7 * dusk + 0.35 * night, 1 - 0.7 * night];
     for (let k = 0; k < 3; k++) {
       const kind = KINDS[k];
       let want = dens[k] + (k === 0 ? Math.round(night * 2) : 0);
-      want = Math.round(want * (1 - storm));
+      want = Math.round(want * tod[k] * (1 - storm));
       if (st.state === 'menu') want = Math.min(want, 2);
       const have = this.bugs.countActive(kind);
       if (have >= want) continue;
@@ -192,24 +197,57 @@ export class Activities {
           }
         }
       }
-      if (!placed) path.offsetAt(sA, side * lerp(25, 150, r()), lerp(-12, 14, r()), 0, c);
+      // no rock near: by the nearest island's shore, or not at all (no moths over the open sea)
+      if (!placed && !this._shore(sA, c, 18, 70)) return false;
       const sea = seaHeight(g, c.x, c.z);
       c.y = Math.max(c.y, sea + 7 + r() * 8);
       return this.bugs.spawn('moth', c, { count: 18 + Math.floor(r() * 12), radius: 7 + r() * 5 });
     }
     if (kind === 'gnat') {
-      path.offsetAt(sA, side * lerp(12, 110, r()), lerp(-8, 20, r()), 0, c);
+      // gnat clouds dance in the lee of islands, over meadows and in waterfall spray
+      if (!this._shore(sA, c, 4, 40, true)) return false;
       c.y = Math.max(c.y, seaHeight(g, c.x, c.z) + 6 + r() * 10);
       return this.bugs.spawn('gnat', c, { count: 60 + Math.floor(r() * 36), radius: 3.5 + r() * 2.5 });
     }
-    // skitterflies: ribbons skimming the sea, sliding along the swell
-    path.offsetAt(sA, side * lerp(15, 170, r()), 0, 0, c);
+    // skitterflies: ribbons skimming the shallows along a shore, sliding along the swell
+    const isl = this._shore(sA, c, 6, 45);
+    if (!isl) return false;
     const sea = seaHeight(g, c.x, c.z);
     c.y = sea;
-    path.tangentAt(sA, _tan);
-    const a = (r() - 0.5) * 1.6;
-    const dir = _v3.set(_tan.x * Math.cos(a) - _tan.z * Math.sin(a), 0, _tan.x * Math.sin(a) + _tan.z * Math.cos(a));
+    // drift along the shoreline (tangent to the island), a little in or out
+    const ox = c.x - isl.pos.x, oz = c.z - isl.pos.z, ol = Math.hypot(ox, oz) || 1;
+    const a = (r() - 0.5) * 0.7, sgn = side;
+    const tx = -oz / ol * sgn, tz = ox / ol * sgn;
+    const dir = _v3.set(tx * Math.cos(a) - tz * Math.sin(a), 0, tx * Math.sin(a) + tz * Math.cos(a));
     return this.bugs.spawn('skitter', c, { count: 26 + Math.floor(r() * 14), radius: 6 + r() * 4, dir, drift: 1.2 + r() * 1.5, seaY: sea });
+  }
+
+  /**
+   * A spot by the shore of the island nearest the route at sA (within ~460 m), `out` metres off
+   * its edge (lo..hi); `falls` prefers islands with waterfalls. Returns the island, or null.
+   */
+  _shore(sA, c, lo, hi, falls = false) {
+    const st = this.story, isl = st.world?.islands;
+    if (!isl || !isl.length) return null;
+    const pt = st.path.pointAt(sA, _v);
+    const calf = this.herd.calf;
+    let best = null, bd = 460;
+    for (const rec of isl) {
+      if (!rec?.pos) continue;
+      const R = rec.R || 40;
+      let d = Math.hypot(rec.pos.x - pt.x, rec.pos.z - pt.z) - R;
+      if (falls && rec.falls) d -= 120;
+      if (d < bd) { bd = d; best = rec; }
+    }
+    if (!best) return null;
+    const R = best.R || 40, r = Math.random;
+    // the side of the island that faces the route, spread along the shore
+    let ang = Math.atan2(pt.z - best.pos.z, pt.x - best.pos.x) + (r() - 0.5) * 1.6;
+    const rr = R * 0.92 + lerp(lo, hi, r());
+    c.set(best.pos.x + Math.cos(ang) * rr, 0, best.pos.z + Math.sin(ang) * rr);
+    if (c.distanceTo(calf.pos) < 30) { ang += 0.8; c.set(best.pos.x + Math.cos(ang) * rr, 0, best.pos.z + Math.sin(ang) * rr); }
+    c.y = seaHeight(this.game, c.x, c.z);
+    return best;
   }
 
   // ---- moves -> world reactions -----------------------------------------------------------------

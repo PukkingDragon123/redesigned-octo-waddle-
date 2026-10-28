@@ -9,6 +9,7 @@
 // Face: blinks, saccades, gaze, pupils, lids and brows over all four eyes.
 import { Vector3, Quaternion, Matrix4, Euler } from 'three';
 import { Spring, SpringVec3, clamp, lerp, smoothstep, damp, TAU, rng } from '../core/math.js';
+import { G as GLOBALS } from '../render/Globals.js';
 
 const CALF = {
   fMin: 0.95, fMax: 2.2, fGlide: 0.5, flapA: 0.6, glideA: 0.06, dihedral: 0.14,
@@ -71,6 +72,7 @@ export class WhaleAnimator {
     this.happy = 0;
     this.excite = 0;
     this.tired = 0;
+    this.wetK = 0; // 1 soaked (in the sea) .. 0 dry; drives the wet sheen and the wet coat
     this.surprise = 0;
     this.delight = 0;
 
@@ -451,6 +453,15 @@ export class WhaleAnimator {
     u.uFlush.value = damp(u.uFlush.value, clamp(this.charge * 0.85 + this.sing * 0.3 + this.tired * 0.2, 0, 1), 2, dt);
     u.uBlow.value = clamp(Math.max(this.blowK, (breath > 0.92 ? (breath - 0.92) * 4 : 0)), 0, 1);
     u.uWhip.value = clamp(this.excite * 0.6 + this.feed * 0.5 + this.happy * 0.2, 0, 1);
+    // wet sheen: soaked while the body is in the sea, glossy and dripping as it emerges, then
+    // drying over about half a minute in the air (s.wet, when given, overrides)
+    if (s.wet !== undefined) this.wetK = clamp(s.wet, 0, 1);
+    else if (s.worldPos) {
+      const seaY = GLOBALS.uSeaLevel ? GLOBALS.uSeaLevel.value : 0;
+      if (s.worldPos.y < seaY + m.L * 0.07) this.wetK = 1;
+      else this.wetK = Math.max(0, this.wetK - dt / (this.calf ? 34 : 26));
+    }
+    u.uWetSelf.value = this.wetK > 0 ? Math.pow(this.wetK, 0.6) * 0.9 : 0;
 
     // fur and hair dynamics: wind relative to the body, lag behind acceleration, a bump's ripple
     const air = _v.copy(s.wind || ZERO).sub(s.vel);

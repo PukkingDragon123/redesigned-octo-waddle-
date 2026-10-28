@@ -1,33 +1,43 @@
 // Dev scene: static inspection of every whale variant, organ states and close-ups.
-// ?debug&test=whale&who=calf|mother|elder|alpha|a1..a5|pip|moss|ember|lineup&view=<view>&time=<preset>
+// ?debug&test=whale&who=calf|mother|elder|alpha|a1..a5|pip|moss|ember|young|mate|newborn|elderself|lineup|life
+//   &view=<view>&time=<preset>   (life: the life-cycle genomes side by side)
 //   views: side | q (three-quarter front) | front | back | top | under | face | eye | eye2 | organs |
 //          crest | horn | throat | wing | wingup | wingL | wingLup | fluke | plates | mane | skin | belly | far
 //   organ states: &sing=0..1 &hum=0..1 &charge=0..1 &blow=0..1 &mouth=0..1 &throat=0..1
 //                 &crest=raise,flare &vent=0..1 &flush=0..1
 //   &sea          the real Ocean under the whales (slow headless)    &alt=<m> altitude (default 26)
-//   &lod=0|1|2    force a level of detail                             &shells=N fur shells
+//   &lod=0|1|2    force a level of detail                             &shells=N fur shells  &locks=<0..1>
 //   &yaw=<deg>    turn the subject       &cam=x,y,z&look=x,y,z (relative to the subject)   &fov=<deg>
 //   &orbit=<deg/s> orbit the camera      &dist=<k> scale the view distance
 //   &anim         drive the models with WhaleAnimator (hovering in place)
 //   &gesture=<name>&gt=<0..1>  hold a gesture at that phase (with &anim)   &flap=<0..1> hold a wingbeat phase
 //   &effort=<0..1> wingbeat effort   &bumpdir=x,y,z  a bump every 3 s
+//   &wet=<0..1>   the wet sheen of a whale fresh from the sea (skin, eyes, coat, whips)
+//   &noao         no screen-space AO      &paint=plain   no painterly strokes
 import { Vector3, Euler } from 'three';
 import { WhaleModel, BAKE } from '../creatures/whale/Model.js';
 import { WhaleAnimator, GESTURES } from '../creatures/WhaleAnimator.js';
 import { Quaternion } from 'three';
-import { CALF, MOTHER, ELDER, ADULTS, CALVES } from '../creatures/WhaleTypes.js';
+import * as TYPES from '../creatures/WhaleTypes.js';
+const { CALF, MOTHER, ELDER, ADULTS, CALVES } = TYPES;
 import { G } from '../render/Globals.js';
 
 const GENOMES = () => ({
   calf: CALF, mother: MOTHER, elder: ELDER, alpha: ADULTS[0],
   a1: ADULTS[1], a2: ADULTS[2], a3: ADULTS[3], a4: ADULTS[4], a5: ADULTS[5],
   pip: CALVES[0], moss: CALVES[1], ember: CALVES[2],
+  // life-cycle genomes (the story builder's; absent ones fall back)
+  young: TYPES.YOUNG || MOTHER, mate: TYPES.MATE || MOTHER, newborn: TYPES.NEWBORN || CALF, elderself: TYPES.ELDER_SELF || ELDER,
 });
 
 export default async function (game) {
   const p = game.params;
   const s = game.engine.scene;
   if (!p.get('time')) game.atmosphere.set('morning');
+  // &noao: no screen-space AO (its temporal filter needs many frames to settle headless)
+  // &paint=plain: no painterly strokes (debug comparisons)
+  if (p.has('noao') && game.engine.painterly) game.engine.painterly.aoEnabled = false;
+  if (p.get('paint') === 'plain') game.engine.setLook?.('plain');
   if (game.cloudSea) game.cloudSea.enabled = false;
   if (p.has('sea')) {
     try {
@@ -66,7 +76,14 @@ export default async function (game) {
       add(all[k], new Vector3(col * 46 - 69, alt + row * 22, -row * 70), 0.75 + yaw);
     });
     ['calf', 'pip', 'moss', 'ember'].forEach((k, i) => add(all[k], new Vector3(i * 9 - 13, alt - 10, 38), 0.75 + yaw));
-    subject = models[1];  } else {
+    subject = models[1];
+  } else if (who === 'life') {
+    // the player's life: newborn, young adult, mate, elder self (subject: the young adult)
+    add(all.newborn, new Vector3(-20, alt - 4, 26), 0.75 + yaw);
+    subject = add(all.young, new Vector3(0, alt, 0), 0.75 + yaw);
+    add(all.mate, new Vector3(-26, alt + 6, -24), 0.75 + yaw);
+    add(all.elderself, new Vector3(34, alt + 4, -46), 0.75 + yaw);
+  } else {
     subject = add(all[who] || MOTHER, new Vector3(0, alt, 0), yaw);
   }
   window.__whales = models;
@@ -84,6 +101,9 @@ export default async function (game) {
     u.uCrest.value.set(cr[0] >= 0 && p.has('crest') ? cr[0] : Math.max(0.7, sing, hum * 0.85, charge), cr.length > 1 ? cr[1] : Math.max(sing * 0.8, hum * 0.4, charge), Math.max(sing, charge) * 0.5, 0);
     if (p.has('mouth')) m.bones.jaw.rotation.x = num('mouth') * (m.calf ? 0.5 : 0.38);
     if (p.has('shells')) m.setFurShells(+p.get('shells'));
+    if (p.has('locks')) m.setLocks(+p.get('locks'));
+    if (p.has('wet')) u.uWetSelf.value = num('wet');
+    if (p.has('dbg')) u.uDbg.value = num('dbg'); // body debug: 1 shadow 2 normal 3 albedo 4 ao 5 ink
   }
 
   // camera views relative to the subject (metres scale with its length)
@@ -160,7 +180,7 @@ export default async function (game) {
       vel: vel.set(0, 0, 4).applyQuaternion(quats[i]), quat: quats[i], angVel: { yaw: 0, pitch: 0, roll: 0 },
       effort: num('effort', 0.6), glide: 0.2, climb: 0, mouth: num('mouth'), feed: num('feed'), hum: num('hum'),
       charge: num('charge'), sing: num('sing'), sleep: 0, fear: 0, happy: num('happy'), excite: 0, tired: 0,
-      lookAt: null, worldPos: models[i].group.position, wind,
+      lookAt: null, worldPos: models[i].group.position, wind, wet: p.has('wet') ? num('wet') : undefined,
     });
     let gname = p.get('gesture');
     let gt = p.has('gt') ? +p.get('gt') : null;

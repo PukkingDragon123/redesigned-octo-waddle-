@@ -78,9 +78,11 @@ void main() {
     vec3 side = cross(f, V);
     float sl = length(side);
     side = sl > 1e-3 ? side / sl : r;
-    lp = side * position.x * uBodyW * (1.0 + vFar * 2.0) + f * position.z * uBodyL;
+    // the wide quad (antennae, legs) shrinks back to the body's own when far: no wasted fill
+    vec2 pq = mix(position.xz, clamp(position.xz, -1.0, 1.0), vFar);
+    lp = side * pq.x * uBodyW * (1.0 + vFar * 2.0) + f * pq.y * uBodyL;
     vN = V;
-    vUv = position.xz;
+    vUv = pq;
   } else {
     float hind = part > 2.5 ? 1.0 : 0.0;
     float sgn = position.x < 0.0 ? -1.0 : 1.0;
@@ -108,7 +110,7 @@ void main() {
 const FRAG = /* glsl */ `
 ${UNIFORMS}
 uniform vec3 uColA, uColB, uGlowCol;
-uniform float uGlowDay, uGlowNight, uShape;
+uniform float uGlowDay, uGlowNight, uShape, uBodyW, uBodyL;
 varying vec2 vUv;
 varying float vPart;
 varying float vAlpha;
@@ -119,6 +121,94 @@ varying vec3 vN;
 varying vec3 vV;
 varying vec2 vVar;
 float ell(vec2 p, vec2 c, vec2 r) { vec2 q = (p - c) / r; return dot(q, q); }
+float seg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+// a limb or antenna: two bent segments (a knee), width w tapering to the tip; returns coverage
+float limb(vec2 p, vec2 a, vec2 k, vec2 b, float w) {
+  float d1 = seg(p, a, k), d2 = seg(p, k, b);
+  float t2 = clamp(dot(p - k, b - k) / dot(b - k, b - k), 0.0, 1.0);
+  float d = min(d1, d2);
+  float ww = d2 < d1 ? w * (1.0 - 0.6 * t2) : w;
+  float aa = max(fwidth(d), 1e-5);
+  return clamp(0.5 + (ww - d) / aa, 0.0, 1.0);
+}
+// an insect body seen from above: head with compound eyes, furred thorax, segmented abdomen,
+// antennae and six legs (n: body coordinates in units of the body length, +y forward).
+// Returns coverage; writes colour, emission and a bulge for shading.
+float insect(vec2 n, vec3 cA, vec3 cB, float var, out vec3 col, out float emis, out float bulge) {
+  float a = 0.0; emis = 0.0; bulge = 0.0; col = vec3(0.0);
+  vec2 sn = vec2(abs(n.x), n.y);
+  // hand-drawn: segment rings and outlines wobble a little
+  float wob = sin(n.y * 21.0 + var * 6.0) * 0.012 + sin(n.x * 37.0 - n.y * 9.0) * 0.006;
+  float head, thor, abd, eye, ant, legs, ring = 0.0;
+  if (uShape < 0.5) {
+    // lumen moth: a fat furry body, big feathered antennae
+    head = ell(n, vec2(0.0, 0.8), vec2(0.13, 0.12));
+    eye = ell(sn, vec2(0.1, 0.83), vec2(0.075, 0.08));
+    thor = ell(n, vec2(0.0, 0.43), vec2(0.21 + wob, 0.27));
+    abd = ell(n, vec2(0.0, -0.36), vec2(0.17 * (0.75 + 0.25 * smoothstep(-1.0, 0.1, n.y)) + wob, 0.62));
+    ring = smoothstep(0.78, 0.97, abs(sin((n.y + wob) * 26.0))) * step(n.y, 0.12);
+    // feathered (bipectinate) antennae: a shaft with a comb of barbs
+    float sh = limb(sn, vec2(0.04, 0.9), vec2(0.17, 1.35), vec2(0.42, 1.72), 0.016);
+    float dS = min(seg(sn, vec2(0.04, 0.9), vec2(0.17, 1.35)), seg(sn, vec2(0.17, 1.35), vec2(0.42, 1.72)));
+    float barbs = smoothstep(0.075, 0.03, dS) * smoothstep(0.55, 0.9, sin((sn.y * 1.0 + sn.x * 0.6) * 90.0)) * smoothstep(0.95, 1.2, n.y);
+    ant = max(sh, barbs * 0.55);
+    legs = max(max(limb(sn, vec2(0.14, 0.52), vec2(0.36, 0.66), vec2(0.47, 0.86), 0.018),
+                   limb(sn, vec2(0.16, 0.42), vec2(0.4, 0.36), vec2(0.52, 0.2), 0.018)),
+                   limb(sn, vec2(0.14, 0.3), vec2(0.34, 0.08), vec2(0.42, -0.16), 0.018));
+  } else if (uShape < 1.5) {
+    // spiral gnat: a round glowing abdomen, a hunched thorax, long trailing legs
+    head = ell(n, vec2(0.0, 0.62), vec2(0.18, 0.16));
+    eye = ell(sn, vec2(0.12, 0.66), vec2(0.09, 0.1));
+    thor = ell(n, vec2(0.0, 0.32), vec2(0.26 + wob, 0.24));
+    abd = ell(n, vec2(0.0, -0.25), vec2(0.32 + wob, 0.48));
+    ring = smoothstep(0.8, 0.97, abs(sin((n.y + wob) * 18.0))) * step(n.y, 0.1);
+    ant = limb(sn, vec2(0.05, 0.74), vec2(0.18, 1.0), vec2(0.34, 1.2), 0.02);
+    legs = max(limb(sn, vec2(0.18, 0.34), vec2(0.5, 0.3), vec2(0.62, -0.1), 0.02), limb(sn, vec2(0.16, 0.24), vec2(0.4, -0.2), vec2(0.5, -0.8), 0.02));
+  } else {
+    // skitterfly: dragonfly-like, huge wraparound eyes, a long segmented abdomen
+    head = ell(n, vec2(0.0, 0.88), vec2(0.075, 0.05));
+    eye = ell(sn, vec2(0.045, 0.9), vec2(0.055, 0.06));
+    thor = ell(n, vec2(0.0, 0.69), vec2(0.07 + wob * 0.4, 0.14));
+    float w = 0.03 * (1.0 + 0.25 * smoothstep(0.3, 0.55, n.y)) * (1.0 - 0.3 * smoothstep(-0.2, -0.95, n.y)) + wob * 0.15;
+    abd = n.y < 0.58 && n.y > -0.98 ? pow(abs(n.x) / w, 2.0) : 9.0;
+    // segment joints, each a slightly darker, thicker ring
+    float sj = fract((n.y + wob * 0.3) * 9.0);
+    ring = smoothstep(0.82, 0.96, sj) * step(n.y, 0.56);
+    ant = limb(sn, vec2(0.02, 0.92), vec2(0.04, 0.97), vec2(0.07, 1.0), 0.006);
+    legs = max(limb(sn, vec2(0.05, 0.74), vec2(0.11, 0.8), vec2(0.13, 0.9), 0.008), limb(sn, vec2(0.05, 0.66), vec2(0.12, 0.64), vec2(0.15, 0.72), 0.008));
+  }
+  float aa = max(fwidth(n.y), 1e-4) * 6.0;
+  float mH = smoothstep(1.0, 1.0 - aa * 4.0, head), mE = smoothstep(1.0, 1.0 - aa * 4.0, eye);
+  float mT = smoothstep(1.0, 1.0 - aa * 4.0, thor), mA = smoothstep(1.0, 1.0 - aa * 4.0, abd);
+  float body = max(max(mH, mT), max(mA, mE));
+  // limbs and antennae: dark chitin
+  vec3 chitin = mix(cB * 0.12, vec3(0.03, 0.025, 0.04), 0.5);
+  col = chitin;
+  a = max(ant, legs) * 0.95;
+  // body: furred thorax, banded abdomen, glossy compound eyes
+  vec3 furC = mix(cA * 0.55, cB * 0.35, 0.3 + 0.3 * sin(n.x * 60.0 + n.y * 50.0));
+  vec3 abdC = mix(cB * 0.4, cA * 0.75, smoothstep(-0.9, 0.2, n.y));
+  vec3 bc = mT > 0.0 && thor < min(abd, 1.0) ? furC : abdC;
+  bc = mix(bc, cB * 0.2, mH * step(head, thor));
+  bc *= 1.0 - ring * 0.45;
+  // eyes: dark faceted domes with a tiny highlight
+  float fac = 0.5 + 0.5 * sin(n.x * 160.0) * sin(n.y * 160.0);
+  vec3 eyeC = mix(vec3(0.05, 0.06, 0.08), cA * 0.4, 0.25 + 0.1 * fac);
+  bc = mix(bc, eyeC, mE);
+  float shell = max(max(1.0 - min(head, 1.0), 1.0 - min(thor, 1.0)), max(1.0 - min(abd, 1.0), 1.0 - min(eye, 1.0)));
+  bulge = sqrt(clamp(shell, 0.0, 1.0));
+  // an ink contour along the body's edge, broken into strokes
+  float edgeD = min(min(head, thor), min(abd, eye));
+  float ink = smoothstep(0.62, 0.9, edgeD) * smoothstep(1.02, 0.92, edgeD) * smoothstep(-0.3, 0.4, sin(n.y * 17.0 + n.x * 23.0 + var * 4.0));
+  bc = mix(bc, chitin * 0.6, ink * 0.6);
+  col = mix(col, bc, body);
+  a = max(a, body);
+  // the lumen: the moth's abdomen tip and the gnat's belly glow
+  if (uShape < 0.5) emis = smoothstep(-0.55, -0.95, n.y) * mA * 1.4 + mE * 0.25;
+  else if (uShape < 1.5) emis = mA * (0.6 + 0.6 * (1.0 - min(abd, 1.0))) * 1.2;
+  else emis = mE * 0.5 + ring * mA * 0.25;
+  return a;
+}
 // hand-drawn: wobble a coordinate like a brush that never quite runs straight
 vec2 wob(vec2 p, float k) { return p + k * vec2(sin(p.y * 13.0 + sin(p.x * 7.0) * 1.7), sin(p.x * 11.0 + sin(p.y * 9.0) * 1.3)); }
 // a painted contour: an ink band inside the edge whose width swells and thins along it, broken into strokes
@@ -134,14 +224,26 @@ void main() {
   float var = vVar.x;
   vec3 cA = mix(uColA, uColB, var * 0.35);
   vec3 cB = mix(uColB, uColA, var * 0.25);
+  float bodyBulge = -1.0;
   if (vPart < 0.5) {
-    // body: a soft glowing capsule (a round glow mote when far)
     vec2 q = vUv;
+    {
+      // up close: the insect itself (head, eyes, thorax, abdomen, antennae, legs); evaluated in
+      // uniform control flow (its strokes use screen derivatives)
+      vec2 n = vec2(q.x * uBodyW, q.y * uBodyL) / uBodyL;
+      float bl;
+      vec3 ic; float ie;
+      a = insect(n, cA, cB, var, ic, ie, bl) * (1.0 - vFar);
+      col = ic; emis = ie; bodyBulge = bl;
+    }
+    // far: a soft glowing mote
     float d = length(vec2(q.x, q.y * mix(1.0, 0.35, vFar)));
-    a = smoothstep(1.0, 0.55, d);
-    col = mix(cB * 0.25, cA * 0.7, 0.5 + 0.5 * q.y);
-    emis = (1.0 - d) * (uShape > 0.5 && uShape < 1.5 ? 1.6 : 0.7) + vFar * 0.9;
-    a = max(a, vFar * exp(-d * d * 3.0));
+    float far = vFar * max(smoothstep(1.0, 0.55, d), exp(-d * d * 3.0));
+    if (far > a) {
+      col = mix(cB * 0.25, cA * 0.7, 0.5 + 0.5 * q.y);
+      emis = (1.0 - min(d, 1.0)) * (uShape > 0.5 && uShape < 1.5 ? 1.6 : 0.7) + vFar * 0.9;
+      a = far;
+    }
   } else {
     float hind = vPart > 2.5 ? 1.0 : 0.0;
     vec2 p = vUv; // x: span 0..1, y: chord 0..1
@@ -192,6 +294,8 @@ void main() {
   float glowK = mix(uGlowDay, uGlowNight, max(uNight, dusk)) * (1.0 + vVar.y * 0.8);
   vec3 N = normalize(vN);
   float wrap = 0.35 + 0.65 * abs(dot(N, uSunDir));
+  // a rounded body: lit on its crown, darker toward its sides, a soft wet sheen on the eyes
+  if (bodyBulge >= 0.0) wrap = 0.3 + 0.7 * bodyBulge * (0.6 + 0.4 * max(uSunDir.y, 0.0));
   float back = pow(max(dot(-vV, uSunDir), 0.0), 4.0) * 0.8; // the sun through the wing
   vec3 lit = col * (uSkyAmbient * 0.8 + uSunColor * (wrap * 0.45 + back) + uMoonColor * uNight * 0.4);
   col = lit + uGlowCol * emis * glowK;
@@ -209,7 +313,8 @@ function bugGeometry() {
     P.push(x0, part, z0, x1, part, z0, x1, part, z1, x0, part, z1);
     I.push(b, b + 1, b + 2, b, b + 2, b + 3);
   };
-  quad(0, -1, 1, -1, 1);
+  // the body quad reaches past the body for the antennae and legs (|x| to 2.6 body widths)
+  quad(0, -2.6, 2.6, -1.25, 1.95);
   quad(1, 0, -1, -0.3, 0.7);
   quad(2, 0, 1, -0.3, 0.7);
   quad(3, 0, -0.95, -0.95, 0.05);

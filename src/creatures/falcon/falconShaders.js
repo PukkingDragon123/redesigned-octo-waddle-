@@ -122,7 +122,8 @@ vec3 scallops(vec2 uv, vec2 cellSize) {
   vec2 q = vec2((f.x - 0.5) * 1.7, f.y * 1.15);
   float r = length(q);
   float fringe = smoothstep(0.62, 0.86, r) * (1.0 - smoothstep(0.86, 1.02, r));
-  float streak = smoothstep(0.12, 0.0, abs(f.x - 0.5)) * (1.0 - f.y) * 0.6;
+  // the shaft streak wanders like a brush stroke and tapers toward the feather's base
+  float streak = smoothstep(0.12 * (1.0 - 0.5 * f.y), 0.0, abs(f.x - 0.5 + 0.05 * sin(f.y * 5.0 + row * 1.7))) * (1.0 - f.y) * 0.6;
   float shade = smoothstep(0.35, 1.0, f.y);
   return vec3(fringe, streak, shade);
 }
@@ -229,14 +230,14 @@ void main() {
     trans = 0.12; rim = 0.7; wrap = 0.26;
   } else if (part < 4.5) {
     // ---- bare yellow tarsus with transverse scutes ------------------------------------------
-    float sc = smoothstep(0.08, 0.0, abs(fract(vPart.y * 9.0) - 0.5) - 0.38);
+    float sc = smoothstep(0.08, 0.0, abs(fract(vPart.y * 9.0 + 0.12 * sin(vPart.z * 4.0 + vPart.y * 23.0)) - 0.5) - 0.38);
     float front = smoothstep(-0.2, 0.6, vPart.z);
     albedo = mix(uFeet, uFeet * 0.62, sc * mix(0.35, 0.8, front));
     albedo *= 0.93 + 0.12 * vnoise(vUv * 6.0);
     spec = 0.22; gloss = 0.6; rim = 0.45; trans = 0.03;
   } else if (part < 5.5) {
     // ---- toes: scaled tops, pale knobbly pads ----------------------------------------------
-    float sc = smoothstep(0.1, 0.0, abs(fract(vPart.y * 5.0) - 0.5) - 0.36);
+    float sc = smoothstep(0.1, 0.0, abs(fract(vPart.y * 5.0 + 0.1 * sin(vPart.z * 5.0 + vPart.y * 17.0)) - 0.5) - 0.36);
     float pad = smoothstep(0.2, -0.5, vPart.z);
     albedo = mix(uFeet, uFeet * 0.6, sc * 0.6 * (1.0 - pad));
     albedo = mix(albedo, mix(uFeet, vec3(0.95, 0.86, 0.66), 0.45), pad * 0.7);
@@ -480,7 +481,8 @@ void main() {
     } else if (kind < 3.5) {
       // tail: barred, broad dark subterminal band, pale tip
       col *= 1.0 - smoothstep(0.55, 0.85, sin(m * 2.6 + 1.0)) * 0.2 * (1.0 - smoothstep(0.7, 0.8, y));
-      col = mix(col, uFTopDark, smoothstep(0.7, 0.76, y) * (1.0 - smoothstep(0.9, 0.95, y)));
+      float yb = y + 0.025 * sin(x * 7.0 + m * 1.3) + 0.012 * sin(x * 19.0);
+      col = mix(col, uFTopDark, smoothstep(0.7, 0.76, yb) * (1.0 - smoothstep(0.9, 0.95, yb)));
       col = mix(col, uFUnder * 0.95, smoothstep(0.94, 0.98, y));
     } else {
       // contour feathers on the back keep the body colour
@@ -490,7 +492,7 @@ void main() {
   } else {
     // undersides: pale cream with soft grey barring; primaries keep dark tips
     col = uFUnder * var;
-    float bars = smoothstep(0.5, 0.85, sin(m * 4.4 + x * 0.35));
+    float bars = smoothstep(0.5, 0.85, sin(m * 4.4 + x * 0.35 + 0.45 * sin(x * 3.1 + m * 0.7)));
     float barAmt = kind < 1.5 ? 0.3 : kind < 2.5 ? 0.14 : kind < 3.5 ? 0.42 : 0.2;
     col = mix(col, uFBar, bars * barAmt);
     if (kind < 0.5) col = mix(col, uFTopDark * 1.3, smoothstep(0.6, 0.9, y) * 0.85);

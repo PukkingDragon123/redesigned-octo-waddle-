@@ -97,6 +97,9 @@ function buildHorns(A, acc, q) {
       const ridge = Math.pow(0.5 + 0.5 * Math.cos(ph * Math.PI * 2), 3);
       rr *= 1 + hs.ringAmp * ridge * (1 - smoothstep(0.62, 0.92, s));
       if (hs.gnarl) rr *= 1 + 0.06 * Math.sin(s * 37 + 1.3) * hs.gnarl;
+      // the root flares into the skull under a sleeve of skin (a burr), so the horn grows out of
+      // the head instead of being stuck on
+      rr *= 1 + 0.3 * (1 - smoothstep(0.0, 0.075, s)) ** 2;
       return rr;
     };
     // vents: slits along the underside (phi near 0 = the frame's N side)

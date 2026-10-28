@@ -365,6 +365,9 @@ export class FishSystem {
     }
     if (net > 0.02) tgt.lerp(_v2.set(sc.netC.x, sc.surf - sc.R * 0.5, sc.netC.z), net);
     if (song > 0.02) tgt.lerp(_v2.set(sc.songF.x, sc.surf - Math.max(3, sc.R * 0.6), sc.songF.z), song);
+    // a storm: the school sinks below the churning surface (the floor limit below still holds)
+    const storm = G.uStorm.value;
+    if (storm > 0.05) tgt.y -= storm * 7 * (1 - Math.max(net, song));
     // stay under the surface and above the floor
     const top = sc.surf - 0.8 - sc.R * 0.55 * (1 - net);
     if (tgt.y > top) tgt.y = top;

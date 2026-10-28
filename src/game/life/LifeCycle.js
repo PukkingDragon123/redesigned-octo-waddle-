@@ -13,6 +13,9 @@ import { until } from '../Script.js';
 import { G } from '../../render/Globals.js';
 import { clamp, lerp, smoothstep, easeInOut, TAU } from '../../core/math.js';
 import { ACTS, SKIPS, MOMENTS } from './text.js';
+import { Nursery } from './Nursery.js';
+import { maelstromCenter, maelstromS } from './Hatching.js';
+import { SPECIES, PLACES, NARRATION as N } from './doc.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -38,6 +41,8 @@ export class LifeCycle {
     this.lastRollT = -99;
     this.free = false; // the player may leave the herd's leash (kinematic acts)
     this.helixC = new Vector3();
+    // the Spiral Maelstrom: the whirlpool, the egg, its guards and its predators
+    this.nursery = new Nursery(story);
   }
 
   // ---- the cast ---------------------------------------------------------------------------------
@@ -55,6 +60,7 @@ export class LifeCycle {
 
   /** Build the life-cycle whales quietly in the background (after the world). */
   prepare() {
+    this.nursery.warm();
     if (this.cast || this._preparing) return;
     this._preparing = true;
     const order = [['young', YOUNG, PHYS_PLAYER_ADULT], ['mate', MATE], ['newborn', NEWBORN], ['elder', ELDER_SELF, PHYS_PLAYER_ADULT]];
@@ -101,6 +107,7 @@ export class LifeCycle {
     w.pos.copy(old.pos);
     w.vel.set(0, 0, 0);
     S.player.w = w;
+    if (S.player.moves) S.player.moves.w = w; // tail slaps, dashes and breaches move with the player
     S.player.syncAim();
     w.energy = 1;
     w.furQuality = g.furQuality ?? 1;
@@ -178,6 +185,7 @@ export class LifeCycle {
 
   update(dt) {
     const S = this.story, g = this.game, herd = S.herd;
+    this.nursery.update(dt);
     if (!this.extras.length) return;
     const me = herd.calf;
     const cam = g.engine.camera.position;
@@ -368,6 +376,8 @@ export class LifeCycle {
     C.setFocus(mate);
     yield* C.play(C.rel({ subject: me, side: [-6, -3], up: [3, 2], back: [-2, -6], ahead: 60, fov: 34, lookSide: -10 }), 4);
     mate.lc.target.copy(me.pos).addScaledVector(me.right, 14).addScaledVector(me.fwd, 4);
+    C.lower(SPECIES.mate, 5);
+    C.say(N.court2, 4.5);
     yield* C.play(C.flyby({ subject: mate, side: -10, up: 1.5, to: 18, fov: 36 }), 4.5);
     S.voiceCall(mate, 'answer');
     yield* C.play(C.eye({ whale: mate, side: 1, dist: [0.38, 0.3], fov: [32, 28] }), 3.5);
@@ -497,7 +507,7 @@ export class LifeCycle {
       if (Math.random() < 0.5) this.motes(_v2.copy(pA).lerp(pB, Math.random()), 1, 3, [0.85, 0.85, 1.0], { rise: -0.5, life: 3 });
       shot(clamp(k, 0, 1), t, C.shot);
       if (k > 0.72) C.shot.look.lerp(_v2.copy(c).add(_p.set(0, 400, 0)), (k - 0.72) / 0.28 * 0.8);
-      if (k > 0.55 && !this._bondCard) { this._bondCard = true; C.card(MOMENTS.bond); }
+      if (k > 0.55 && !this._bondCard) { this._bondCard = true; C.say(MOMENTS.bond.line, 6); }
     }
     this._bondCard = false;
     // fade to stars
@@ -513,60 +523,148 @@ export class LifeCycle {
   // ACT III · NEW LIFE
   // ======================================================================================================
   *act3() {
-    const S = this.story, g = this.game, herd = S.herd, C = S.cine;
+    const S = this.story, g = this.game, herd = S.herd, C = S.cine, nur = this.nursery;
     const { young, mate, newborn } = this.ensure();
-    this.setup(3, 70, 'dawn', 'birth', young);
+    this.setup(3, maelstromS(S), 'dawn', 'birth', young);
     g.fadeRate = -0.5;
     const me = herd.calf;
-    // a sheltered spot in the lagoon, deep enough to swim beneath
-    const P = S.path.offsetAt(150, 18, 0);
-    const bed = S.world.seabedAt ? S.world.seabedAt(P.x, P.z) : -30;
-    const sea = seaHeight(g, P.x, P.z);
-    const y = clamp(bed + 7, sea - 12, sea - 5);
-    P.y = y;
-    const f = S.path.frameAt(150);
+    // back at the Spiral Maelstrom, where he hatched
+    const c = maelstromCenter(S);
+    nur.open(c, { radius: 120, depth: 7, spin: 0.22 });
+    const eye = nur.eyeY();
+    const bed = S.world.seabedAt ? S.world.seabedAt(c.x, c.z) : -60;
+    const eggP = new Vector3(c.x, Math.max(eye - 6, bed + 3), c.z);
+    const f = S.path.frameAt(110);
     const yaw = Math.atan2(f.fwd.x, f.fwd.z);
-    mate.place(P, yaw);
+    mate.place(_v.set(c.x, eye - mate.radius * 0.3, c.z), yaw);
     this.show(mate, 'hold');
     this.kin.add(mate);
-    me.place(_v.copy(P).addScaledVector(f.right, -16).addScaledVector(f.fwd, -10).setY(sea - 3), yaw + 0.5);
+    me.place(_v.copy(c).addScaledVector(f.right, -42).addScaledVector(f.fwd, -20).setY(eye + 2), yaw + 0.6);
     S.player.syncAim();
-    newborn.group.scale.setScalar(0.7);
+    newborn.group.scale.setScalar(1);
     this.mark('act3');
-    // ---- the birth (gentle, suggestive): light and bubbles, and then there are two
-    C.begin({ focus: mate, rate: 0.5, snap: true });
+    // ---- the return, the laying, her leaving (skippable) ----
+    C.begin({ focus: mate, rate: 0.5, snap: true, lead: mate });
     C.card(ACTS[3]);
-    yield* C.play(C.aerial({ center: P, dist: [380, 200], height: [110, 30], angle: [yaw + 1.2, yaw + 1.7], fov: 46 }), 7);
+    yield* C.play(C.drone({ center: c, radius: [460, 340], height: [240, 150], angle: [yaw + 1.2, yaw + 1.6], fov: 46 }), 6);
     C.hideCard();
-    let t = 0;
-    const under = C.rel({ subject: mate, side: [16, 12], up: [0.5, -0.5], back: [6, -2], ahead: 0, fov: [40, 34], lookUp: -1 });
-    let born = false;
-    while (t < 9 && !C.skipped) {
+    C.lower(PLACES.maelstrom3, 5.5);
+    C.say(N.return, 5);
+    yield* C.play(C.longLens({ subject: me, dist: 240, angle: [yaw - 2.2, yaw - 2.1], height: 4, fov: [14, 12] }), 5);
+    let egg = null, t = 0;
+    C.setFocus(mate);
+    C.slowmo(0.6);
+    C.say(N.lay3, 4.5);
+    const lay = C.orbit({ center: mate, radius: [mate.L * 1.7, mate.L * 1.3], height: [mate.L * 0.35, mate.L * 0.1], angle: [yaw + 0.4, yaw + 1.1], fov: [40, 36] });
+    while (t < 6 && !C.skipped) {
       const dt = yield 0;
       t += dt;
-      under(easeInOut(t / 9), t, C.shot);
-      // she breathes slowly, hovering; a soft light gathers beneath her
-      this.pose(mate, _v2.copy(P).add(_p.set(0, Math.sin(t * 0.8) * 0.3, 0)), dt, f.fwd);
-      mate.drive.sing = 0.4;
-      if (Math.random() < 0.6) this.motes(_v2.copy(mate.pos).addScaledVector(mate.up, -mate.radius * 0.8), 1, 3, [1.0, 0.9, 0.75], { rise: 0.3, life: 2.5 });
-      if (t > 4 && !born) {
-        born = true;
-        this.bear(newborn, mate);
-      }
-      if (born) newborn.group.scale.setScalar(lerp(newborn.group.scale.x, 1, 1 - Math.exp(-dt * 0.8)));
+      lay(easeInOut(t / 6), t, C.shot);
+      this.pose(mate, _v2.set(c.x, nur.eyeY() - mate.radius * 0.3 + Math.sin(t * 0.8) * 0.2, c.z), dt, f.fwd);
+      if (!egg && t > 2.2) { egg = nur.layEgg(eggP, { yaw }); S.audio.stinger?.('harmony'); this.motes(eggP, 26, 4, [1.0, 0.85, 0.7], { rise: 0.5, life: 3 }); }
+      if (egg) egg.setGlow?.(clamp((t - 2.2) / 3, 0.2, 1));
     }
-    if (!born) this.bear(newborn, mate);
-    newborn.group.scale.setScalar(1);
-    mate.drive.sing = 0;
+    C.slowmo(1);
+    if (!egg) egg = nur.layEgg(eggP, { yaw });
+    egg.setGlow?.(1);
+    egg.setPulse?.(1.1);
+    if (egg.position) eggP.copy(egg.position);
+    // she leaves to feed; he stays by the egg (the carried whale holds a post beside the eye)
+    C.lead = { pos: _p.copy(eggP).addScaledVector(f.right, -30).setY(nur.eyeY() + 1).clone(), right: f.right, fwd: f.fwd, L: 4 };
+    this.kin.delete(mate);
+    mate.lc.mode = 'steer';
+    mate.lc.target.copy(c).addScaledVector(f.fwd, 900).setY(eye + 50);
+    mate.lc.speed = 12;
+    S.voiceCall(mate, 'answer');
+    C.say(N.feed3, 4.8);
+    C.setFocus(mate);
+    yield* C.play(C.longLens({ subject: mate, dist: 200, angle: [yaw + 2.6, yaw + 2.5], height: 3, fov: [18, 22], lag: 1.2 }), 4.8);
+    C.end();
+    // ---- he guards the egg: three waves of predators ----
+    this.mark('guard');
+    S.audio.setMood?.('chase', { fade: 4 });
+    S.audio.setIntensity?.(0.4);
+    C.say(N.guard3, 5);
+    const ring = new Vector3();
+    let ringA = Math.atan2(me.pos.z - c.z, me.pos.x - c.x);
+    this.autoGoal = () => {
+      const th = nur.nearestThreat(eggP);
+      if (th) return th.pos;
+      ringA += 0.004;
+      return ring.set(c.x + Math.cos(ringA) * 40, nur.eyeY() + 2, c.z + Math.sin(ringA) * 40);
+    };
+    this.free = true;
+    // three waves, about a minute and a half in all: one hunter, a pair, then from both sides at once
+    const waves = [
+      [['lanternjack', 0.4, 110]],
+      [['lanternjack', 2.6, 110], ['lanternjack', 3.4, 120]],
+      [['skimmer', 1.6, 140], ['lanternjack', 5.0, 110]],
+    ];
+    const strikes0 = nur.strikes;
+    yield 4;
+    for (let wv = 0; wv < waves.length; wv++) {
+      const ths = waves[wv].map(([k, a, d]) => nur.spawnThreat(k, a + yaw, d, k === 'skimmer' ? 9 : 5.2));
+      const kinds = waves[wv].map((x) => x[0]);
+      if (kinds.includes('lanternjack') && C.lower(SPECIES.lanternjack, 5, 'lanternjack3')) C.say(N.threat3, 4.5);
+      else if (kinds.includes('skimmer') && C.lower(SPECIES.skimmer, 5, 'skimmer3')) C.say(N.above3, 4.5);
+      S.voiceCall(me, 'warn');
+      t = 0;
+      while (t < 28 && ths.some((h) => h.state !== 'flee')) {
+        const dt = yield 0;
+        t += dt;
+        for (const h of ths) {
+          // a predator nosing at the egg for too long leaves on its own (the egg dims a little)
+          if (h.state === 'strike' && h.t > 7) nur.repel(h, eggP);
+          // headless: the autopilot's sonic boom, when close
+          if (this.auto && h.state !== 'flee' && h.pos.distanceTo(me.pos) < 30 && Math.random() < dt) nur.repel(h, me.pos, me);
+        }
+        egg.setGlow?.(clamp((egg.glowT ?? 1) + dt * 0.1, 0, 1));
+      }
+      for (const h of ths) if (h.state !== 'flee') nur.repel(h, eggP);
+      S.audio.setIntensity?.(0.45 + wv * 0.15);
+      yield 3;
+    }
+    this.autoGoal = null;
+    this.free = false;
+    egg.setGlow?.(1);
+    C.say(nur.strikes === strikes0 ? N.held3 : 'It took a knock or two. It is still glowing.', 4.5);
+    S.audio.setMood?.('birth', { fade: 5 });
+    S.audio.stinger?.('resolve');
+    yield 4;
+    // ---- weeks pass; the shell gives (a time-lapse, then a macro) ----
+    this.mark('hatch3');
+    C.begin({ focus: eggP, rate: 0.6 });
+    C.timelapse(4);
+    egg.setPulse?.(2);
+    g.atmosphere.transition('night', 5);
+    yield* C.play(C.drone({ center: c, radius: [220, 260], height: [100, 140], angle: [yaw + 3, yaw + 4], fov: 50 }), 16, {
+      sway: 0, onFrame: (k) => { if (k > 0.55 && !this._lapse) { this._lapse = true; g.atmosphere.transition('dawn', 6); } },
+    });
+    this._lapse = false;
+    C.timelapse(1);
+    if (C.skipped) g.atmosphere.set('dawn');
+    C.say(N.hatch3, 4);
+    let kicks = 0;
+    yield* C.play(C.macro({ subject: eggP, dist: [6, 4.4], angle: [yaw + 1, yaw + 1.4], height: [0.4, 0.1], fov: [28, 22], under: true }), 5, {
+      onFrame: (k) => { if (kicks < 3 && k > 0.2 + kicks * 0.25) { kicks++; egg.embryo?.kick?.(); egg.crack?.(kicks * 0.3); } },
+    });
+    egg.hatch?.();
+    if (egg.embryo?.mesh) egg.embryo.mesh.visible = false;
+    S.audio.stinger?.('discover');
+    newborn.place(eggP.clone(), yaw);
+    this.show(newborn, 'hold');
+    this.kin.add(newborn);
+    S.voiceCall(newborn, 'coo');
+    this.motes(eggP, 30, 5, [1.0, 0.92, 0.8], { rise: 0.6, life: 3.5 });
+    yield* C.play(C.macro({ subject: newborn, dist: [5, 6], angle: [yaw + 1.4, yaw + 1.6], height: [0.2, 0.5], fov: 30, under: true }), 3);
     C.end();
     this.mark('lift');
-    // ---- lift the newborn to the surface for its first breath
-    this.kin.add(newborn);
+    // ---- lift the newborn to the surface for its first breath ----
     newborn.lc.mode = 'hold';
     this.autoGoal = () => _v2.copy(newborn.pos).add(_p.set(0, -(me.radius + newborn.radius + 0.6), 0));
-    S.voiceCall(mate, 'warn');
+    C.say(N.lift3, 5);
     t = 0;
-    let lifted = 0, lastCall = 0;
+    let lastCall = 0;
     for (;;) {
       const dt = yield 0;
       t += dt;
@@ -578,70 +676,74 @@ export class LifeCycle {
       const below = newborn.pos.y - me.pos.y;
       const support = Math.hypot(hx, hz) < me.radius * 1.2 + 2.5 && below > 0 && below < me.radius + newborn.radius + 3;
       if (support) {
-        lifted += dt;
         // carried on its parent's back, rising with it
         _v2.y = Math.max(_v2.y, me.pos.y + me.radius * 0.9 + newborn.radius * 0.7);
         _v2.x += hx * Math.min(1, dt * 1.5);
         _v2.z += hz * Math.min(1, dt * 1.5);
       }
-      if (t > 90) {
-        // the mother lifts it herself: nobody is left stranded
-        _v2.y += 1.4 * dt;
-        this.pose(mate, _p.copy(newborn.pos).add(_v.set(0, -mate.radius - 1, 0)), dt, f.fwd);
-      } else if (t > 2) this.pose(mate, _p.copy(mate.pos).lerp(_v.copy(newborn.pos).addScaledVector(f.right, 8), Math.min(1, dt * 0.5)), dt, f.fwd);
+      // nobody is left stranded: after a while it finds the strength itself
+      if (t > 45) _v2.y += 1.4 * dt;
       newborn.drive.effort = 0.6;
       this.pose(newborn, _v2, dt, f.fwd);
-      if (t - lastCall > 9) { lastCall = t; S.voiceCall(mate, 'answer'); S.voiceCall(newborn, 'coo'); }
+      if (t - lastCall > 9) { lastCall = t; S.voiceCall(newborn, 'coo'); }
       if (newborn.pos.y > sy - newborn.radius * 0.6) break;
-      if (t > 140) break;
+      if (t > 90) break;
     }
     this.mark('breath');
-    // ---- the first breath
+    // ---- the first breath ----
     newborn.pos.y = seaHeight(g, newborn.pos.x, newborn.pos.z) + 0.1;
     newborn.blow(g, 0.9);
     S.voiceCall(newborn, 'chirp');
     S.audio.stinger?.('discover');
     newborn.drive.happy = 1;
-    mate.drive.happy = 1;
     me.drive.happy = 1;
-    this.kin.delete(mate);
     this.kin.delete(newborn);
-    mate.lc.mode = 'follow';
-    mate.lc.side = -1;
     newborn.lc.mode = 'follow';
     newborn.lc.side = 1;
     newborn.lc.back = 4;
+    // she comes back, full of fish
+    mate.place(_v.copy(me.pos).addScaledVector(f.fwd, 200).setY(seaHeight(g, me.pos.x, me.pos.z) + 16), yaw + Math.PI);
+    mate.lc.mode = 'steer';
+    mate.lc.target.copy(me.pos).addScaledVector(me.right, -14);
+    mate.lc.speed = 10;
     C.begin({ focus: newborn, rate: 0.6 });
-    C.card(Object.assign({ low: true }, MOMENTS.breath));
-    yield* C.play(C.low({ subject: newborn, side: [9, 7], back: [-10, -6], height: [0.8, 1.4], fov: 40, lookUp: 0.6 }), 5);
-    yield* C.play(C.eye({ whale: newborn, side: -1, dist: [0.9, 0.7], fov: 34 }), 3);
+    C.say(N.breath3, 4);
+    C.lower(SPECIES.newborn, 5);
+    yield* C.play(C.low({ subject: newborn, side: [9, 7], back: [-10, -6], height: [0.8, 1.4], fov: 40, lookUp: 0.6 }), 4.5);
+    C.setFocus(mate);
+    C.say(N.mate3, 4.5);
+    S.voiceCall(mate, 'answer');
+    yield* C.play(C.longLens({ subject: mate, dist: 150, angle: [yaw + 0.8, yaw + 0.9], height: 2, fov: [20, 26], lag: 1 }), 4.5);
     C.end();
+    mate.lc.mode = 'follow';
+    mate.lc.side = -1;
+    nur.settle(3, 0.12);
     this.mark('teach');
-    // ---- teach it to fly: it follows you, you call, it answers
+    // ---- teach it to follow: it answers when he calls ----
+    C.say(N.teach3, 4.5);
     this.calls = 0;
     this.autoGoal = () => _v2.copy(herd.mother.pos).add(_p.set(20, 14, 0));
     t = 0;
     let autoHum = 0;
-    while (t < 45 && this.calls < 3) {
+    while (t < 30 && this.calls < 3) {
       const dt = yield 0;
       t += dt;
       if (this.auto && (autoHum += dt) > 4) { autoHum = 0; this.onHum(); }
       // without a call for a while, the little one calls first
-      if (t > 10 && Math.floor(t) % 12 === 0 && Math.floor(t - dt) % 12 !== 0) S.voiceCall(newborn, 'coo');
+      if (t > 8 && Math.floor(t) % 10 === 0 && Math.floor(t - dt) % 10 !== 0) S.voiceCall(newborn, 'coo');
     }
     this.mark('lead');
-    // ---- lead it to feed: a shoal in the shallows ahead
+    // ---- lead it to feed: a shoal in the shallows ahead ----
     const shoal = S.path.offsetAt(330, -25, 0);
     shoal.y = seaHeight(g, shoal.x, shoal.z) - 3;
     S.eco?.addFishSchool?.(shoal.clone(), 'glintfin', 260);
     this.autoGoal = () => _v2.copy(shoal).add(_p.set(0, 7, 0));
     S.voiceCall(mate, 'answer');
-    yield* until(() => me.pos.distanceTo(shoal) < 60, 70);
-    // the newborn dives in after its parent
+    yield* until(() => me.pos.distanceTo(shoal) < 60, 50);
     newborn.lc.mode = 'steer';
     let ate = 0;
     t = 0;
-    while (t < 25 && ate < 4) {
+    while (t < 20 && ate < 4) {
       const dt = yield 0;
       t += dt;
       const n = S.eco?.nearestSwarm?.(newborn.pos);
@@ -658,9 +760,9 @@ export class LifeCycle {
     S.voiceCall(newborn, 'chirp');
     this.autoGoal = null;
     this.mark('family');
-    // ---- a family, flying
+    // ---- three of them, flying ----
     C.begin({ focus: me, rate: 0.5 });
-    C.card(Object.assign({ low: true }, MOMENTS.answer));
+    C.say(MOMENTS.answer.line, 5);
     yield* C.play(C.track({ subject: me, side: [-34, -26], up: [6, 10], ahead: 12, fov: 42 }), 6);
     yield* C.play(C.orbit({ center: me, radius: [60, 120], height: [14, 50], angle: [me.yaw + 2, me.yaw + 2.7], fov: 46 }), 6);
     C.end({ release: false });
@@ -706,6 +808,7 @@ export class LifeCycle {
     herd.targetSpeed = 5;
     C.begin({ focus: me, rate: 0.5, snap: true });
     C.card(ACTS[4]);
+    C.say(N.elder, 5);
     yield* C.play(C.track({ subject: me, side: [70, 50], up: [20, 8], ahead: [-40, 10], fov: 44 }), 7);
     C.hideCard();
     yield* C.play(C.low({ subject: me, side: [26, 22], back: [-50, -30], height: [1.5, 2.5], fov: 46, lookUp: 4 }), 5);
@@ -734,7 +837,7 @@ export class LifeCycle {
     const hums0 = this.calls;
     yield* until(() => this.calls > hums0 || this.auto, 14);
     C.begin({ focus: me, rate: 0.3 });
-    C.card(Object.assign({ low: true }, MOMENTS.lastSong));
+    C.say(N.lastSong, 5);
     const beat = S.song.key().beat;
     herd.whales.concat([mate]).forEach((w, i) => {
       if (!w.group.visible) return;
@@ -765,6 +868,8 @@ export class LifeCycle {
     const bedHere = S.world.seabedAt ? S.world.seabedAt(surf.x + fwd.x * 40, surf.z + fwd.z * 40) : -80;
     const deep = surf.clone().addScaledVector(fwd, 40);
     deep.y = Math.max(bedHere + me.radius * 1.2, -16);
+    C.say(N.rest, 5);
+    C.lower(SPECIES.elder, 5);
     const descend = C.rel({ subject: me, side: [36, 30], up: [10, 2], back: [30, 22], ahead: 4, fov: [46, 40], worldUp: true });
     t = 0;
     const T1 = 9, T2 = 16;
@@ -791,7 +896,7 @@ export class LifeCycle {
     this.mark('garden');
     // ---- the whale fall becomes a garden: a time-lapse
     for (let i = 0; i < 3; i++) S.eco?.addFishSchool?.(_v2.copy(deep).add(_v.set((i - 1) * 18, 4 + i * 2, (i % 2) * 14 - 7)).clone(), i === 1 ? 'spiralback' : 'glintfin', 160);
-    C.card(Object.assign({ low: true }, MOMENTS.garden));
+    C.say(N.garden, 6);
     C.slowmo(2.5);
     g.atmosphere.transition('dawn', 9);
     const garden = C.orbit({ center: deep, radius: [me.L * 1.1, me.L * 1.7], height: [me.L * 0.1, me.L * 0.3], angle: [me.yaw + 1.6, me.yaw + 3.4], fov: [42, 48] });
@@ -816,41 +921,43 @@ export class LifeCycle {
     yield* this.dawnAgain();
   }
 
-  /** A new calf wakes beside its mother in the Dawn Lagoon. The title. */
+  /** Year 32: in the eye of the maelstrom, another egg. The title. */
   *dawnAgain() {
-    const S = this.story, g = this.game, herd = S.herd, C = S.cine;
+    const S = this.story, g = this.game, herd = S.herd, C = S.cine, nur = this.nursery;
     this.mark('dawn');
     this.restore();
     S.resetWorldState();
     S.state = 'intro';
     S.player.enabled = false;
-    herd.placeAt(60);
+    herd.placeAt(maelstromS(S));
     herd.mode = 'rest';
     herd.targetSpeed = 0;
-    const calf = herd.calf, mom = herd.mother;
-    calf.drive.sleep = 1;
-    mom.drive.sleep = 0.4;
     g.atmosphere.set('dawn');
     S.audio.setMood?.('dawn', { fade: 4 });
-    C.begin({ focus: calf, rate: 1, snap: true, hold: false });
+    const c = maelstromCenter(S);
+    nur.open(c, { radius: 120, depth: 7, spin: 0.22 });
+    const eye = nur.eyeY();
+    const bed = S.world.seabedAt ? S.world.seabedAt(c.x, c.z) : -60;
+    const egg = nur.layEgg(new Vector3(c.x, Math.max(eye - 6, bed + 3), c.z));
+    egg.setGlow?.(1);
+    egg.setPulse?.(1.2);
+    const eggP = egg.position || nur.eggPos;
+    // a few of the herd circle it, as they always have
+    nur.guard(herd.adults.filter((w) => w !== herd.mother).slice(0, 4), 52);
+    C.begin({ focus: eggP, rate: 1, snap: true, hold: false });
     g.fadeRate = -0.4;
-    const frame = (k, t, s) => {
-      const side = mom.pos.clone().sub(calf.pos).dot(calf.right) > 0 ? -1 : 1;
-      s.pos.copy(calf.pos).addScaledVector(calf.right, side * lerp(9, 7, k)).addScaledVector(calf.fwd, 5.4).add(_p.set(0, 1.5, 0));
-      s.look.copy(calf.pos).addScaledVector(calf.fwd, 0.8).add(_p.set(0, 0.4, 0)).lerp(mom.pos, 0.1);
-      s.fov = 40;
-      s.roll = 0;
-    };
-    let t = 0;
-    while (t < 12) {
+    C.say(N.cycle, 6);
+    const shot = C.macro({ subject: eggP, dist: [7.5, 5], angle: [0.6, 1.2], height: [1.6, 0.6], fov: [30, 24], under: true });
+    let t = 0, kicked = false;
+    while (t < 13) {
       const dt = yield 0;
       t += dt;
-      frame(t / 12, t, C.shot);
-      if (t > 4 && !this._woke) { this._woke = true; S.voiceCall(mom, 'answer'); }
-      if (t > 7 && calf.drive.sleep > 0) { calf.drive.sleep = 0; calf.anim.blinkT = 0.2; S.voiceCall(calf, 'chirp'); calf.drive.happy = 1; }
-      if (t > 8 && !this._cycle) { this._cycle = true; C.card(MOMENTS.cycle); }
+      shot(clamp(t / 13, 0, 1), t, C.shot);
+      C.handheld(C.shot, 1);
+      if (t > 5 && !kicked) { kicked = true; egg.embryo?.kick?.(); }
+      if (t > 7.5 && !this._cycle) { this._cycle = true; C.card(MOMENTS.cycle); }
     }
-    this._woke = this._cycle = false;
+    this._cycle = false;
     S.completed = true;
     S.save(0, 1, true);
     yield 5;

@@ -66,6 +66,12 @@ export const G = {
   // common.js: applyFog tints and attenuates geometry below the sea, caustics, underwater fog)
   uSeaLevel: { value: 0 },
   uSeaState: { value: 0.3 },
+  // the Spiral Maelstrom (world/Ocean.js setWhirlpool): up to 2 sea vortices dipping the surface into a
+  // funnel. uWhirl: centre x, z, radius, depth (m); uWhirlB: strength 0..1, spin, phase, arm pitch.
+  // common.js whirlH(xz) gives the funnel's surface drop, so waterSubmerge measures depth from it.
+  uWhirl: { value: [new Vector4(0, 0, 100, 0), new Vector4(0, 0, 100, 0)] },
+  uWhirlB: { value: [new Vector4(), new Vector4()] },
+  uWhirlOn: { value: 0 },
   // camera submersion 0 (above) .. 1 (below the local wave surface)
   uUnderwater: { value: 0 },
   // lit in-scatter colour of the water column (what deep water and underwater distance fade to)

@@ -442,7 +442,7 @@ void main() {
     float sn = vnoise(q * vec2(30.0, 90.0) + seed);
     float saa = fwidth(sn);
     float streak = smoothstep(0.035 + saa, 0.0, abs(sn - 0.5)) * 0.5 * PFADE(90.0);
-    slate = mix(slate, slate * 1.45 + 0.03, streak * 0.5 + stepEdge * 0.25);
+    slate = mix(slate, slate * 1.4 + 0.025, streak * 0.5 + stepEdge * 0.14);
     slate = mix(slate, slate * 1.3 + 0.05, edge * 0.5 * (0.5 + 0.5 * mix(0.5, vnoise(q * 200.0), PFADE(200.0))));
     slate *= 1.0 - crack * 0.65;
     albedo = slate;
@@ -1274,7 +1274,7 @@ vec3 whip(float a, float len, vec3 rootW, vec3 dirW, float idx, out vec3 T) {
   // the whip's own curl: about an axis across it, so the tip hooks back and in like a whisker
   vec3 sideW = normalize(cross(dirW, vec3(0.0, 1.0, 0.0)) + vec3(1e-4));
   vec3 curlAx = normalize(sideW + vec3(0.0, 0.35 * (hk - 0.5), 0.0));
-  float curl = (1.1 + 1.0 * hk) * (hk > 0.5 ? 1.0 : -0.8) * (1.0 - uWetSelf * 0.5);
+  float curl = (1.1 + 1.0 * hk) * (hk > 0.5 ? 1.0 : -0.8) * (1.0 - uWetSelf * 0.2);
   float ph0 = uTime * (0.9 + 0.35 * hk + uWhip * 3.0) + idx * 1.7;
   float amp = (0.35 + uWhip * 1.2) * (1.0 + 0.4 * sin(uTime * 0.37 + idx));
   vec3 p = rootW;
@@ -1288,7 +1288,7 @@ vec3 whip(float a, float len, vec3 rootW, vec3 dirW, float idx, out vec3 T) {
     float u = (fi + 0.5) / float(WSTEPS);
     // limp toward the tip: turns toward the load (wet whips hang heavier)
     // springy, like a cat's whisker: it holds its curve and only the tip gives to the load
-    float flex = mix(0.008, 0.1, u * u) * lk * (1.0 + uWetSelf * 1.5);
+    float flex = mix(0.008, 0.1, u * u) * lk * (1.0 + uWetSelf * 0.5);
     d = normalize(d + (load - d * dot(load, d)) * flex * st);
     // natural curvature, strongest in the outer half
     d = normalize(d + cross(curlAx, d) * curl * smoothstep(0.25, 1.0, u) / float(WSTEPS) * 2.0 * st);

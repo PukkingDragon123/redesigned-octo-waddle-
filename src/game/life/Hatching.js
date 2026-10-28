@@ -171,7 +171,7 @@ export function* hatching(S, opts = {}) {
     C.setFocus(eggP);
     C.lower(SPECIES.egg, 5);
     C.say(N.macro, 5.5);
-    yield* C.play(C.macro({ subject: eggP, dist: [7, 5.2], angle: [0.3, 0.8], height: [2.5, 1.2], fov: [30, 24], under: true }), 6);
+    yield* C.play(C.macro({ subject: eggP, dist: [10, 8], angle: [0.3, 0.8], height: [3, 1.5], fov: [32, 28], under: true }), 6);
     // 5. she leaves to feed; the males stay
     momPhase = 1;
     away.copy(c).addScaledVector(_v.set(1, 0, 0.4).normalize(), 900).setY(eye + 40);
@@ -243,7 +243,7 @@ export function* hatching(S, opts = {}) {
     C.setFocus(eggP);
     C.say(N.crack, 4.5);
     let kicked = 0;
-    yield* C.play(C.macro({ subject: eggP, dist: [5.6, 4.4], angle: [1.2, 1.5], height: [0.4, 0.0], fov: [26, 22], under: true }), 5, {
+    yield* C.play(C.macro({ subject: eggP, dist: [8.5, 7], angle: [1.2, 1.5], height: [0.8, 0.3], fov: [30, 26], under: true }), 5, {
       onFrame: (k) => {
         if (kicked < 2 && k > 0.3 + kicked * 0.35) { kicked++; egg.embryo?.kick?.(); egg.crack?.(0.08 * kicked); g.cameraRig.addShake(0.08); }
       },
@@ -272,7 +272,7 @@ export function* hatching(S, opts = {}) {
   C.begin({ hold: false, focus: eggP, rate: 2, skippable: false, letterbox: false, snap: true });
   C.say(N.push, 3.5);
   S.audio.setIntensity?.(0.35);
-  const push = C.macro({ subject: eggP, dist: [4.6, 3.6], angle: [1.5, 1.9], height: [0.5, 0.2], fov: [28, 24], under: true });
+  const push = C.macro({ subject: eggP, dist: [8.5, 7], angle: [1.5, 1.9], height: [1.2, 0.5], fov: [34, 30], under: true });
   let crack = 0.16, pushes = 0, t = 0, lastPush = 0, hinted = false;
   egg.crack?.(crack);
   while (pushes < 4) {

@@ -99,7 +99,7 @@ function buildGeometry(L) {
 
 export class Embryo {
   /** L: body length (m) uncurled. */
-  constructor(L = 2.6, { skin = '#f2c2b4', back = '#7f97b8', fluid = '#ffb58a' } = {}) {
+  constructor(L = 2.6, { skin = '#e9b3a6', back = '#6f8cc4', fluid = '#ffb066' } = {}) {
     this.L = L;
     this.curl = 1;          // 1 curled in the egg .. 0 straight
     this.curlTarget = 1;
@@ -120,6 +120,7 @@ export class Embryo {
       uBack: { value: new Color(back) },
       uFluid: { value: new Color(fluid) },
       uFade: { value: 1 },
+      uInside: { value: 1 },
       uLocalSea: { value: 0 },
     });
     this.material = new ShaderMaterial({

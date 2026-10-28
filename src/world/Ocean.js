@@ -191,33 +191,9 @@ void main() {
 // arms on its walls and draws hand-drawn foam streaks winding inward. Mirrored on the CPU
 // (Ocean._whirlH / _whirlWarp) so heightAt / normalAt follow the funnel.
 const NWHIRL = 2;
+// uWhirl / uWhirlB / uWhirlOn and whirlProfile / whirlH live in common.js (UNIFORMS), shared with
+// waterSubmerge so whatever floats in a funnel is not lit as submerged.
 const WHIRL_GLSL = /* glsl */ `
-uniform vec4 uWhirl[${NWHIRL}];   // centre x, z, radius (m), funnel depth (m)
-uniform vec4 uWhirlB[${NWHIRL}];  // strength 0..1, spin (rad/s), rotation phase (rad), arm pitch
-uniform float uWhirlOn;
-// funnel shape 0..1: flat calm eye (q < 0.06), steep throat, long gentle skirt, zero slope at both ends
-float whirlProfile(float q) {
-  float u = pow(clamp((q - 0.06) / 0.94, 0.0, 1.0), 0.8);
-  float a = 1.0 - u;
-  return a * a * a * (1.0 + 3.0 * u);
-}
-// surface height of the vortices (m, negative in the funnel) with their rotating spiral swell arms
-float whirlH(vec2 p) {
-  float h = 0.0;
-  for (int i = 0; i < ${NWHIRL}; i++) {
-    vec4 A = uWhirl[i];
-    vec4 B = uWhirlB[i];
-    if (B.x <= 0.0) continue;
-    vec2 d = p - A.xy;
-    float q = length(d) / A.z;
-    if (q >= 1.0) continue;
-    float th = atan(d.y, d.x);
-    float env = smoothstep(0.07, 0.3, q) * (1.0 - smoothstep(0.45, 1.0, q));
-    float arm = cos(3.0 * (th - B.z) + B.w * log(max(q, 0.03)));
-    h -= B.x * A.w * (whirlProfile(q) - 0.035 * env * arm);
-  }
-  return h;
-}
 // where the wind waves are sampled (bent into the spiral), how calm they are, and the bend angle
 vec4 whirlWarp(vec2 p) {
   vec2 o = p;
@@ -1180,9 +1156,6 @@ export class Ocean {
       uWakeP: { value: Array.from({ length: 64 }, () => new Vector4()) },
       uWakeB: { value: Array.from({ length: 4 }, () => new Vector4()) },
       uWakeN: { value: new Vector4() },
-      uWhirl: { value: Array.from({ length: NWHIRL }, () => new Vector4(0, 0, 100, 0)) },
-      uWhirlB: { value: Array.from({ length: NWHIRL }, () => new Vector4()) },
-      uWhirlOn: { value: 0 },
     });
     // wake trails of things moving at the surface (matched frame to frame by position)
     this.trails = Array.from({ length: 4 }, () => ({

@@ -645,7 +645,7 @@ export class LifeCycle {
     if (C.skipped) g.atmosphere.set('dawn');
     C.say(N.hatch3, 4);
     let kicks = 0;
-    yield* C.play(C.macro({ subject: eggP, dist: [6, 4.4], angle: [yaw + 1, yaw + 1.4], height: [0.4, 0.1], fov: [28, 22], under: true }), 5, {
+    yield* C.play(C.macro({ subject: eggP, dist: [9, 7.5], angle: [yaw + 1, yaw + 1.4], height: [0.8, 0.3], fov: [30, 26], under: true }), 5, {
       onFrame: (k) => { if (kicks < 3 && k > 0.2 + kicks * 0.25) { kicks++; egg.embryo?.kick?.(); egg.crack?.(kicks * 0.3); } },
     });
     egg.hatch?.();
@@ -947,7 +947,7 @@ export class LifeCycle {
     C.begin({ focus: eggP, rate: 1, snap: true, hold: false });
     g.fadeRate = -0.4;
     C.say(N.cycle, 6);
-    const shot = C.macro({ subject: eggP, dist: [7.5, 5], angle: [0.6, 1.2], height: [1.6, 0.6], fov: [30, 24], under: true });
+    const shot = C.macro({ subject: eggP, dist: [10, 8], angle: [0.6, 1.2], height: [1.6, 0.6], fov: [32, 28], under: true });
     let t = 0, kicked = false;
     while (t < 13) {
       const dt = yield 0;

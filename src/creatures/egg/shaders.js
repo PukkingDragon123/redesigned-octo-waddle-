@@ -9,7 +9,7 @@ import { UNIFORMS, NOISE, SHADOW, LIGHTING, DEPTH } from '../../render/shaders/c
 const EGG_COMMON = /* glsl */ `
 uniform float uLocalSea;   // the water surface height at the egg (m)
 vec3 eggFog(vec3 col, vec3 P) {
-  return applyFog(col, P - vec3(0.0, uLocalSea - uSeaLevel, 0.0));
+  return applyFog(col, P - vec3(0.0, uLocalSea - localSeaLevel(P.xz), 0.0));
 }
 // veins on the membrane (q: egg-local position, unit scale): big vessels and finer capillaries
 float eggVeins(vec3 q, out float cap) {
@@ -53,15 +53,17 @@ ${LIGHTING}
 ${DEPTH}
 ${EGG_COMMON}
 uniform sampler2D uSceneTex;
-uniform mat4 uProj;
 uniform vec3 uHalf;         // egg semi-axes (m)
+uniform vec3 uCamLocal;     // the camera in egg space
 uniform float uGlow;        // inner light 0..~2
 uniform float uBeat;        // heartbeat 0..1 (the throb right now)
 uniform float uCrack;       // 0..1 crack spread
 uniform vec3 uCrackDir;     // egg-local unit direction where the first crack starts
 uniform float uAlpha;       // whole-shell fade
 uniform vec3 uMembrane;     // membrane tint
-uniform vec3 uFluid;        // amniotic fluid tint
+uniform vec3 uFluid;        // the inner light (yolk and heart), warm
+uniform vec3 uFluidAbs;     // amniotic fluid extinction per metre (rgb): what colour the depth turns
+uniform vec3 uScatter;      // light scattered by the fluid itself
 uniform vec3 uVein;         // vein colour
 uniform vec3 uLeak;         // light leaking through cracks
 varying vec3 vWorld;
@@ -111,79 +113,100 @@ void main() {
   float sceneZ = sceneDepthAt(suv);
   if (sceneZ < vViewZ - 0.03) discard;
   vec3 q = vLocal / max(uHalf.y, 1e-3);
+  float uw = step(0.5, uUnderwater);
 
   float cap;
   float vein = eggVeins(q, cap);
-  float halo;
+  float halo = 0.0;
   float crack = uCrack > 0.0 ? crackLines(vLocal, halo) : 0.0;
-  if (uCrack <= 0.0) halo = 0.0;
 
-  // ---- inside: the embryo (opaque pass) seen through the fluid, magnified and softened -----------
-  float thick = 2.0 * uHalf.y * nv + 0.15;
+  // ---- the view ray through the egg: fluid thickness and how close it passes the glowing core ----
+  vec3 rd = normalize(vLocal - uCamLocal);
+  vec3 ro1 = vLocal / uHalf, rd1 = rd / uHalf;
+  float qa = dot(rd1, rd1), qb = 2.0 * dot(ro1, rd1), qc = dot(ro1, ro1) - 1.0;
+  float thick = max((-qb + sqrt(max(qb * qb - 4.0 * qa * qc, 0.0))) / (2.0 * qa), 0.02);
+  float tc = clamp(-dot(vLocal, rd), 0.0, thick);
+  float dc = length(vLocal + rd * tc) / uHalf.y;
+  float core = exp(-dc * dc * 3.2);
+
+  // ---- light inside ----------------------------------------------------------------------------
+  float sunUp = smoothstep(-0.1, 0.25, uSunDir.y);
+  float back = pow(max(dot(-V, uSunDir), 0.0), 2.0);
+  float beat = 0.7 + 0.6 * uBeat;
+  // daylight coming through the far side of the egg (from the sky, or the bright surface above)
+  vec3 envBack = uSkyAmbient * 0.9 + uSunColor * (0.1 + 1.4 * back) * sunUp * 0.45 + uMoonColor * uNight * 0.3;
+  vec3 upW = uSkyAmbient * 1.1 + uSunColor * 0.25 * sunUp;
+  envBack = mix(envBack, mix(uWaterTint * 4.0, upW, clamp(-V.y, 0.0, 1.0)), uw);
+  envBack *= uMembrane;
+  // the yolk-and-heart light at the middle and the fluid's own soft scatter
+  vec3 glowIn = uFluid * uGlow * beat * (core * 1.6 + 0.12);
+  vec3 scat = uScatter * (uSkyAmbient * 0.35 + uSunColor * 0.06 * sunUp + uFluid * uGlow * 0.12);
+  vec3 T = exp(-uFluidAbs * thick);
+  vec3 inner = envBack * T + (scat + glowIn * 0.6) * (1.0 - T) + glowIn * core * 0.5;
+
+  // ---- the curled calf (drawn in the opaque pass), seen through the fluid in front of it --------
   vec3 Nv = mat3(viewMatrix) * N;
-  vec2 off = Nv.xy * (0.06 + 0.05 * (1.0 - nv)) * (uHalf.y / max(vViewZ, 0.5)) * 3.0;
+  vec2 off = Nv.xy * (0.04 + 0.05 * (1.0 - nv)) * (uHalf.y / max(vViewZ, 0.5)) * 3.0;
   vec2 ruv = clamp(suv + off, vec2(0.001), vec2(0.999));
   float bz = sceneDepthAt(ruv);
   float behind = bz - vViewZ;
-  float inside = step(-0.05, behind) * step(behind, uHalf.x * 2.2);
-  float blur = clamp(behind * 2.5, 0.5, 4.0) / uResolution.y * 900.0 / max(vViewZ, 1.0);
-  vec2 bo = vec2(blur) / uResolution * 2.0;
-  vec3 emb = texture(uSceneTex, ruv).rgb * 0.36
+  float inside = step(-0.05, behind) * step(behind, thick + 0.1);
+  float blur = clamp(behind * 1.6, 0.3, 3.0) / max(vViewZ, 1.0) * uResolution.y * 0.004;
+  vec2 bo = vec2(blur) / uResolution;
+  vec3 emb = texture(uSceneTex, ruv).rgb * 0.4
            + (texture(uSceneTex, ruv + vec2(bo.x, bo.y)).rgb + texture(uSceneTex, ruv + vec2(-bo.x, bo.y)).rgb
-           + texture(uSceneTex, ruv + vec2(bo.x, -bo.y)).rgb + texture(uSceneTex, ruv - bo).rgb) * 0.16;
-  // light inside: the egg's own glow throbbing with the heart, and sunlight soaking through
-  float sunUp = smoothstep(-0.1, 0.25, uSunDir.y);
-  float back = pow(max(dot(-V, uSunDir), 0.0), 2.0);
-  float beat = 0.75 + 0.5 * uBeat;
-  vec3 inner = uFluid * (uGlow * beat * 0.55 + 0.08) + uFluid * uSunColor * (0.15 + 1.0 * back) * sunUp * 0.35
-             + uFluid * uSkyAmbient * 0.3 + uFluid * uMoonColor * uNight * 0.4;
-  // brighter toward the middle of the egg (the light source is the embryo's heart and yolk)
-  inner *= 0.35 + 0.95 * pow(nv, 1.8);
-  // toward the rim the fluid cools to the membrane's sea-glass teal
-  inner = mix(inner, uMembrane * (uSkyAmbient * 0.9 + uSunColor * 0.25), pow(1.0 - nv, 2.0) * 0.6);
-  vec3 fluidT = exp(-vec3(0.3, 0.55, 0.8) * max(behind, 0.0) * 0.55);
-  // the calf reads as a warm, shadowed form against the glowing fluid (a backlit silhouette)
-  vec3 interior = mix(inner, emb * fluidT * vec3(0.95, 0.62, 0.55) + inner * (1.0 - fluidT) * 0.5, inside * 0.95);
+           + texture(uSceneTex, ruv + vec2(bo.x, -bo.y)).rgb + texture(uSceneTex, ruv - bo).rgb) * 0.15;
+  vec3 Te = exp(-uFluidAbs * max(behind, 0.0));
+  float front = clamp(behind / thick, 0.0, 1.0);
+  // the calf blocks the light behind it: a darker form, rimmed where the glow wraps round it
+  vec3 embSeen = emb * Te * 0.8 + scat * (1.0 - Te) * 0.7 + glowIn * 0.08 * front;
+  vec3 interior = mix(inner, embSeen, inside);
 
-  // ---- the membrane ----------------------------------------------------------------------------
-  vec3 albedo = uMembrane * (0.9 + 0.2 * fbm3(q * 7.0));
-  albedo = mix(albedo, uVein, vein * 0.75 + cap * 0.35);
+  // ---- the membrane: clear and wet, veined, milky only edge-on ------------------------------------
+  vec3 albedo = uMembrane * (0.85 + 0.25 * fbm3(q * 7.0));
+  albedo = mix(albedo, uVein, clamp(vein * 0.9 + cap * 0.5, 0.0, 1.0));
   Surface s = makeSurface(albedo, N, P);
   s.shadow = 1.0;
-  s.rim = 0.9;
-  s.spec = 0.0;
-  s.wrap = 0.32;
-  s.trans = 0.9;
-  vec3 mem = stylizedLight(s);
-  // pearly, milkier where the membrane is seen edge-on; veins a little more opaque
-  float fres = pow(1.0 - nv, 2.2);
-  float opac = clamp(0.2 + 0.62 * fres + vein * 0.42 + cap * 0.2, 0.0, 0.95);
+  s.rim = 0.6;
+  s.wrap = 0.3;
+  s.trans = 0.6;
+  vec3 mem = stylizedLight(s) * 0.85;
+  float fres = pow(1.0 - nv, 2.5);
+  float opac = clamp(0.05 + 0.6 * fres + vein * 0.6 + cap * 0.3, 0.0, 0.92);
   vec3 col = mix(interior, mem, opac);
-  // the vessels carry the pulse: a faint warm throb along them
-  col += uVein * (vein + cap * 0.5) * uBeat * uGlow * 0.35;
-  // wet glossy highlights: sun, sky and a soft sheen
+  // the vessels carry the pulse
+  col += uVein * (vein + cap * 0.5) * uBeat * uGlow * 0.25;
+  // wet glossy highlights: a hard sun glint, a broad sheen, the sky in the rim
   vec3 H = normalize(V + uSunDir);
-  float sp = pow(max(dot(N, H), 0.0), 220.0) * 5.0 + pow(max(dot(N, H), 0.0), 30.0) * 0.18;
-  col += uSunColor * sp * sunUp;
+  float nh = max(dot(N, H), 0.0);
+  float sp = pow(nh, 420.0) * 9.0 + pow(nh, 60.0) * 0.35;
+  col += uSunColor * sp * sunUp * (1.0 - uw * 0.7);
   vec3 R = reflect(-V, N);
-  col += mix(uSkyHorizon, uSkyZenith, clamp(R.y, 0.0, 1.0)) * fres * 0.28;
-  col += uMoonColor * pow(max(dot(N, normalize(V + uMoonDir)), 0.0), 120.0) * 2.0 * uNight;
+  col += mix(uSkyHorizon, uSkyZenith, clamp(R.y, 0.0, 1.0)) * (0.04 + fres * 0.45) * (1.0 - uw * 0.6);
+  col += uMoonColor * pow(max(dot(N, normalize(V + uMoonDir)), 0.0), 160.0) * 3.0 * uNight;
 
-  // ---- cracks: dark broken edges with hot light leaking through ---------------------------------
+  // ---- cracks: dark torn rims with a hot seam of light ------------------------------------------
   if (uCrack > 0.0) {
-    // a dark torn rim either side of a hot seam of light
-    float edge = smoothstep(0.0, 0.35, crack + halo * 0.4);
-    col = mix(col, vec3(0.16, 0.06, 0.07), edge * 0.7);
-    float seam = smoothstep(0.55, 1.0, crack);
-    col += uLeak * (seam * (3.0 + 2.5 * uBeat) + halo * 0.35) * (0.6 + uGlow * 0.6) * min(1.0, uCrack * 3.0);
+    float on = min(1.0, uCrack * 4.0);
+    float edge = smoothstep(0.0, 0.3, crack + halo * 0.35);
+    col = mix(col, vec3(0.05, 0.02, 0.025), edge * 0.85 * on);
+    float seam = smoothstep(0.5, 1.0, crack);
+    col += uLeak * (seam * (3.5 + 2.5 * uBeat) + halo * 0.25) * (0.7 + uGlow * 0.5) * on;
   }
-  // the waterline: a bright wobbling meniscus, and the submerged half seen through the water
+
+  // ---- the waterline -------------------------------------------------------------------------------
   float wl = P.y - uLocalSea + (vnoise(P.xz * 3.0 + uTime * 0.6) - 0.5) * 0.05;
   float subm = smoothstep(0.01, -0.06, wl);
-  vec3 wcol = uWaterTint * (1.2 + 0.6 * dot(uSkyAmbient, vec3(0.33)));
-  vec3 Tw = exp(-uWaterAbsorb * (max(-wl, 0.0) * 2.0 + 0.6));
-  col = mix(col, col * Tw + wcol * (1.0 - Tw), subm);
-  col += (uSkyAmbient * 0.8 + uSunColor * 0.3) * exp(-abs(wl) / 0.025) * 0.5;
+  if (uw < 0.5) {
+    // from above: the submerged half seen down through the water
+    vec3 wcol = uWaterTint * (1.2 + 0.6 * dot(uSkyAmbient, vec3(0.33)));
+    vec3 Tw = exp(-uWaterAbsorb * (max(-wl, 0.0) * 2.0 + 0.4));
+    col = mix(col, col * Tw + wcol * (1.0 - Tw), subm);
+  } else {
+    // from below: the part above the water is only glimpsed through the surface
+    col = mix(col, col * 0.35 + uWaterTint * 2.0, (1.0 - subm) * 0.6);
+  }
+  col += (uSkyAmbient * 0.8 + uSunColor * 0.3) * exp(-abs(wl) / 0.025) * 0.4;
   col = eggFog(col, P);
   gl_FragColor = vec4(col * uAlpha, uAlpha);
 }
@@ -242,6 +265,7 @@ uniform vec3 uSkin;      // pale flesh
 uniform vec3 uBack;      // the first blue of the back
 uniform vec3 uFluid;
 uniform float uFade;
+uniform float uInside;   // 1 while the shell is whole
 varying vec3 vWorld;
 varying vec3 vN;
 varying vec2 vRing;
@@ -295,11 +319,16 @@ void main() {
   s.trans = 1.2;
   s.spec = 0.25;
   s.gloss = 0.8;
-  vec3 col = stylizedLight(s) * 0.7;
-  // lit from within the egg: warm glow wrapping the body, the heart throbbing in the chest
-  float heart = exp(-pow((vT - 0.24) / 0.06, 2.0)) * smoothstep(0.2, -0.6, ca);
-  col += alb * uFluid * uGlow * (0.55 + 0.45 * uBeat) * 0.55;
-  col += vec3(1.0, 0.35, 0.3) * heart * uBeat * uGlow * 0.6;
+  // inside the egg the daylight arrives dimmed through membrane and fluid (the hatched calf gets it all)
+  vec3 col = stylizedLight(s) * mix(0.3, 0.8, 1.0 - uFade * step(0.5, uInside));
+  // backlit by the glow at the egg's heart: warm translucent rims around a darker form
+  vec3 V = normalize(uCamPos - vWorld);
+  float fr = pow(1.0 - max(dot(N, V), 0.0), 2.2);
+  col += uFluid * uGlow * fr * (part > 0.5 ? 0.9 : 0.55) * (0.7 + 0.3 * uBeat);
+  col += alb * uFluid * uGlow * 0.12;
+  // the heart throbbing in the chest, seen through the thin skin
+  float heart = exp(-pow((vT - 0.23) / 0.05, 2.0)) * smoothstep(0.3, -0.5, ca);
+  col += vec3(1.0, 0.28, 0.2) * heart * (0.25 + uBeat) * uGlow * 1.2;
   col = eggFog(col, vWorld);
   gl_FragColor = vec4(col, 1.0);
 }

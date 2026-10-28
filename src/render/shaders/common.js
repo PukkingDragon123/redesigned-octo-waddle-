@@ -40,6 +40,40 @@ uniform vec4 uWaterParams;
 uniform vec4 uCloudShade[16];
 uniform vec2 uCloudShadeK;
 uniform vec4 uLightK;
+uniform vec4 uWhirl[2];
+uniform vec4 uWhirlB[2];
+uniform float uWhirlOn;
+#ifndef WHIRL_FUNCS
+#define WHIRL_FUNCS
+// The Spiral Maelstrom's funnel (world/Ocean.js mirrors this on the CPU): a calm flat eye, a steep
+// throat, a long skirt; zero slope at both ends.
+float whirlProfile(float q) {
+  float u = pow(clamp((q - 0.06) / 0.94, 0.0, 1.0), 0.8);
+  float a = 1.0 - u;
+  return a * a * a * (1.0 + 3.0 * u);
+}
+// surface height of the vortices at p (m, <= 0 in a funnel) with their rotating spiral swell arms
+float whirlH(vec2 p) {
+  float h = 0.0;
+  for (int i = 0; i < 2; i++) {
+    vec4 A = uWhirl[i];
+    vec4 B = uWhirlB[i];
+    if (B.x <= 0.0) continue;
+    vec2 d = p - A.xy;
+    float q = length(d) / A.z;
+    if (q >= 1.0) continue;
+    float th = atan(d.y, d.x);
+    float env = smoothstep(0.07, 0.3, q) * (1.0 - smoothstep(0.45, 1.0, q));
+    float arm = cos(3.0 * (th - B.z) + B.w * log(max(q, 0.03)));
+    h -= B.x * A.w * (whirlProfile(q) - 0.035 * env * arm);
+  }
+  return h;
+}
+// the mean water level at p: the sea level, dipped by any maelstrom
+float localSeaLevel(vec2 p) {
+  return uWhirlOn > 0.5 ? uSeaLevel + whirlH(p) : uSeaLevel;
+}
+#endif
 `;
 
 export const NOISE = /* glsl */ `
@@ -294,7 +328,7 @@ float waterCaustics(vec3 P, float depth) {
 }
 /** Light reaching a submerged surface: depth attenuation, blue-green tint and caustics. */
 vec3 waterSubmerge(vec3 col, vec3 P) {
-  float d = uSeaLevel - P.y;
+  float d = localSeaLevel(P.xz) - P.y;
   // a short blend across the mean level (whatever skims the waves above it stays dry)
   float w = smoothstep(-0.1, 0.45, d);
   if (w <= 0.0) return col;
@@ -321,9 +355,10 @@ vec3 waterFogColor(vec3 rd, float depth) {
 }
 /** Metres of water between the camera and P (camera under the surface). */
 float waterPathLength(vec3 P, float dist) {
-  float cy = uSeaLevel - uCamPos.y;
+  float sea = localSeaLevel(uCamPos.xz);
+  float cy = sea - uCamPos.y;
   if (cy <= 0.0) return 0.0;
-  if (P.y <= uSeaLevel) return dist;
+  if (P.y <= sea) return dist;
   return dist * clamp(cy / max(P.y - uCamPos.y, 1e-4), 0.0, 1.0);
 }
 vec3 underwaterFog(vec3 col, vec3 P) {

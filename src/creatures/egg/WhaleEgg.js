@@ -20,6 +20,8 @@ import { SHELL_VERT, SHELL_FRAG, SHARD_VERT, SHARD_FRAG } from './shaders.js';
 import { Embryo } from './Embryo.js';
 
 const NSHARD = 36;
+// amniotic fluid extinction per metre: what the depth of the egg turns to (opts.tint)
+const TINTS = { teal: [1.15, 0.5, 0.42], cornflower: [1.25, 0.72, 0.26], amber: [0.35, 0.6, 1.3] };
 const TAU = Math.PI * 2;
 
 /** An egg-shaped ellipsoid: long axis along local x, one end a little blunter. */
@@ -101,12 +103,14 @@ export class WhaleEgg {
       uCrack: { value: 0 },
       uCrackDir: { value: new Vector3(0.35, 0.9, 0.25).normalize() },
       uAlpha: { value: 1 },
-      uMembrane: { value: col(opts.membrane, '#a6dbe2') },
-      uFluid: { value: col(opts.fluid, '#ffc48e') },
-      uVein: { value: col(opts.vein, '#b2405a') },
-      uLeak: { value: col(opts.leak, '#ffd08a') },
+      uMembrane: { value: col(opts.membrane, '#e4f1f2') },
+      uFluid: { value: col(opts.fluid, '#ffb066') },
+      uFluidAbs: { value: opts.fluidAbs ? new Vector3().copy(opts.fluidAbs) : new Vector3().fromArray(TINTS[opts.tint] || TINTS.teal) },
+      uScatter: { value: col(opts.scatter, (opts.tint === 'cornflower') ? '#5e7fd6' : '#3e9a9e') },
+      uVein: { value: col(opts.vein, '#8e2238') },
+      uLeak: { value: col(opts.leak, '#ffcf7a') },
       uLocalSea: { value: 0 },
-      uProj: { value: new Matrix4() },
+      uCamLocal: { value: new Vector3() },
     });
     this.uniforms = shellU;
     const geo = eggGeometry(a, b);
@@ -157,6 +161,7 @@ export class WhaleEgg {
     // scratch (no per-frame allocation)
     this._m = new Matrix4();
     this._sm = new Matrix4();
+    this._inv = new Matrix4();
     this._q = new Quaternion();
     this._q2 = new Quaternion();
     this._e = new Euler();
@@ -168,6 +173,12 @@ export class WhaleEgg {
     this._sea = 0;
     this._settled = false;
 
+    // the camera in egg space, as it renders (the view ray's path through the fluid)
+    this._hook = (cam) => {
+      this._inv.copy(this.shell.matrix).invert();
+      this.uniforms.uCamLocal.value.setFromMatrixPosition(cam.matrixWorld).applyMatrix4(this._inv);
+    };
+    this.engine.beforeRender.push(this._hook);
     this.update(0);
     this.precompile();
   }
@@ -425,6 +436,7 @@ export class WhaleEgg {
     const ht = this._hatchT;
     // the shell is gone in a blink; the light inside flares and fades
     this._fade = Math.max(0, 1 - ht / 0.12);
+    this.embryo.uniforms.uInside.value = 0;
     if (ht < 0.3) this._glowTarget = 2.2;
     else if (ht < 0.4) this._glowTarget = 0.5;
     this.shardMat.uniforms.uHot.value = Math.exp(-ht * 0.9);
@@ -492,6 +504,8 @@ export class WhaleEgg {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    const hi = this.engine.beforeRender.indexOf(this._hook);
+    if (hi >= 0) this.engine.beforeRender.splice(hi, 1);
     this.engine.scene.remove(this.group);
     this.engine.scene.remove(this.shards);
     this.engine.sceneT.remove(this.shell);

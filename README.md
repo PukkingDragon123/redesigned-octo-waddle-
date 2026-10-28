@@ -1,12 +1,17 @@
 # SKYSONG
 
-*A cinematic 3D fantasy adventure about being a tiny sky-whale calf on its first migration.*
+*A cinematic 3D fantasy adventure about being a tiny flying-whale calf on its first migration
+across Vur Sok, an ocean planet of spiral islands.*
 
-You wake at sunrise beside your mother, in a herd of enormous furry sky whales drifting
-above an endless ocean of cloud. The great migration to the legendary **Oasis** is about to
-begin. Fly with your family through floating valleys, glowing krill fields, a cloud forest
-of giant trees, a golden-hour herd song, a night of stars, a violent thunderstorm and the
-hunt of a gigantic falcon, then through the clouds into the Oasis.
+You wake at sunrise in a lagoon beside your mother, in a herd of enormous horned, fluffy
+flying whales. The great migration to the legendary **Oasis** is about to begin. Fly low over
+the sea with your family through the Spiral Reach, dive with them to feast in the shoals,
+play in the Coil Forest, sing the herd song at golden hour, cross the night under a spiral
+galaxy, survive a violent storm and the hunt of a gigantic falcon, then find your way
+through the fog into the Oasis atoll and its Mother Tree.
+
+The whole world is painted: soft Tiny Glade-like light, brush-stroke shading, hand-painted
+whales with ink-drawn contours, moving alien plants and realistic rock.
 
 The game has **no UI at all**: no HUD, no meters, no prompts, no markers. Everything is
 told through the world: your mother's movements and voice, your calf's breathing and
@@ -54,8 +59,11 @@ menu is the only place text ever appears.
 
 - Fly close to your mother and nuzzle her.
 - Hum. She always answers. Tilt your nose up while humming to sing higher.
-- Swim through a krill swarm with your mouth open when you are tired.
-- Carve tunnels through clouds, skim the cloud ocean, roll through waterfall spray.
+- Dive into the sea at the Feasting Shoals and swim through a bait ball: your mouth opens by
+  itself. Come up for air before your breath runs out; you spout when you surface.
+- Skim the waves, breach, carve tunnels through clouds, roll through waterfall spray.
+- Bump into your playmates: they bump back or start a chase. Bump your mother softly.
+- Fly low over the islands: the anemones curl shut as you pass.
 - When the herd sings, watch your mother breathe in before each note, and answer her.
 - In the storm, fly in your mother's lee: her body breaks the wind.
 - When the falcon comes, get between the adults.
@@ -66,16 +74,16 @@ menu is the only place text ever appears.
 
 | Chapter | Light | What happens |
 |---|---|---|
-| Dawn Cradle | sunrise | Waking, following your mother, learning to fly |
-| Floating Valleys | morning | Islands, waterfalls, call and answer, the Great Arch |
-| Krill Fields | late morning | Feeding grounds, mother demonstrates a lunge, sky rays |
-| Cloud Forest | afternoon | Giant trees, sky jellies, playmates invite you to a chase |
+| Dawn Lagoon | sunrise | Waking in a lagoon, following your mother, learning to fly |
+| The Spiral Reach | morning | Spiral sea stacks, waterfalls into the sea, call and answer, the Spiral Arch |
+| The Feasting Shoals | noon | The adults blow a spiral bubble net; your mother dives, lunges, and takes you down to feast |
+| The Coil Forest | afternoon | Giant coil trees and alien meadows; playmates invite you to a chase |
 | The Herd Song | golden hour | Call-and-response singing with the whole herd |
-| Night Passage | night | Stars, the giant planet, glowing krill |
-| The Storm | storm | Gales, rain, lightning; a downdraft tears you away |
+| Night Passage | night | A spiral galaxy, two moons, glowing plankton in the wakes |
+| The Storm | storm | Gales, 9 m seas, rain, lightning; a downdraft tears you away |
 | The Falcon | stormy dawn | A huge shadow, a hunt, a living shelter of whales |
-| The Cloud Wall | whiteout | Climbing blind through cloud, following her voice |
-| The Oasis | morning | Floating lakes, the Mother Tree, the gathering, the final song |
+| The Fog Wall | whiteout | Flying blind through sea fog, following her voice |
+| The Oasis | morning | A spiral atoll, the Mother Tree, the gathering, the final song |
 
 Progress is saved at each chapter. **Continue** in the title menu resumes from there.
 
@@ -84,35 +92,39 @@ Progress is saved at each chapter. **Continue** in the title menu resumes from t
 ## How it is made
 
 - **Renderer** (`src/render`): Three.js WebGL 2 with a custom pipeline. Shadow map, MSAA
-  HDR opaque pass, a raymarched cloud-ocean pass, sorted transparent pass, then post:
-  restrained bloom, crepuscular rays, sonic-boom lens distortion, in-cloud veil, grading
-  and a neutral tone map. All lighting goes through one stylized model
-  (`render/shaders/common.js`): a soft cel ramp, tinted shadows, a warm terminator band,
-  sky/bounce ambient, rim light and translucency.
-- **Skywhales** (`src/creatures/Whale*.js`): procedural lofted bodies with a real mouth
-  cut (palate, floor and filter combs). Each has a ~25-bone skeleton with smooth skin
-  weights, shell-texture fur that moves with wind and inertia, cambered membrane wing-fins
-  with bony rays, a fluke, expressive eyes with painted lids, and feathery gill fronds.
-  The animator is procedural and spring-driven: asymmetric wingbeats with elbow lag and
-  feathering, a tail wave, overlapping action, breathing, throat resonator vibration, and
-  expressions.
-- **Sky and clouds** (`src/world`): a painted sky dome with horizon cumulus banks, cirrus,
-  a ringed gas giant, stars and a moon. Cumulus is built from lit impostor puffs that part
-  around the calf, blow apart in booms and ripple with song. The cloud ocean is a
-  raymarched heightfield with billows, silver linings and real cast shadows.
-- **World**: one migration spline with ten chapters. Floating islands with banded
-  strata, painted meadows, instanced stylized trees (including giant trees and the Mother
-  Tree), waterfalls, floating lakes and the Great Arch, built time-sliced behind the menu.
-- **Herd and story** (`src/game`): herd formation and behaviours, the mother's care AI,
-  the coroutine-scripted story director, the singing game, weather, sonic booms and the
-  floating menu.
-- **Ecosystem and falcon** (`src/creatures/Ecosystem.js`, `Falcon.js`): plankton, krill
-  swarms, sky rays, sky jellies and puffbirds, plus the storm falcon. Its anatomy is
-  hexapod: four wings and two talons.
+  HDR opaque pass, half-res GTAO ambient occlusion, a sorted transparent pass (the ocean,
+  clouds, particles), then post: bloom, crepuscular rays, sonic-boom distortion, grading, and
+  the painterly chain (`render/painterly`): an anisotropic Kuwahara brush filter, canvas,
+  painted grade and a depth-aware depth of field with title, gameplay and cinematic looks.
+  All lighting goes through one stylized model (`render/shaders/common.js`) with sky fill,
+  warm bounce and soft wide shadows.
+- **Ocean** (`world/Ocean.js`): wind sea and swell up to storm seas, CPU-mirrored heights for
+  physics, sky and screen-space reflections, clear shallows over reefs, foam, wakes and
+  splashes, plankton glow, and an underwater view with caustics, light shafts and Snell's
+  window. The sky has a ringed gas giant, two moons and a spiral galaxy.
+- **Whales** (`src/creatures/whale`): rorqual-and-tulkun anatomy with armoured back plates,
+  Monster Hunter-style resonance horns, a flaring sensor crest, four small golden eyes,
+  barbels, six fins and fluffy clumped shell fur; GPU-baked skin, painted brush-stroke
+  shading with ink contours, a palette per whale (the scarred alpha with a torn wing, the
+  barnacled elder, the mother, the calf). The animator is procedural and spring-driven.
+- **World** (`src/world`, `src/flora`): one migration route at sea level through ten
+  chapters. Spiral islands rising from the sea (helical stacks, coils, ammonites, peaks,
+  forming volcanic islands), reefs and atolls, a detailed rock shader, painted backdrops,
+  fluffy painted grass, a few accent trees and the Mother Tree, and nine species of
+  animated alien plants, built time-sliced behind the menu.
+- **Herd and story** (`src/game`): bouncy whale-to-whale physics (`WhalePhysics.js`), social
+  behaviours and the spiral bubble-net hunt (`HerdBehaviors.js`), swimming, buoyancy, breath
+  and splashes (`Swim.js`), the mother's care AI, the coroutine-scripted story director, the
+  singing game, weather, sonic booms and the floating menu.
+- **Wildlife and falcon** (`src/creatures/Ecosystem.js`, `eco/`, `Falcon.js`): glintfin bait
+  balls, spiralback and lanternjack fish, skimmer and coilwing bird-reptiles, night
+  plankton, plus the storm falcon.
 - **Audio** (`src/audio`): a Web Audio score synthesized at runtime (piano, celesta,
   strings, choir, harp, flute, drums and brass), adaptive moods, spatial whale voices tuned
-  to the current key, and ambience.
+  to the current key, and ambience: wind, rain, the sea's swell and foam, and the muffled
+  deep with bubbles under water.
 
+The Vur Sok design contract is [`docs/VUR_SOK.md`](docs/VUR_SOK.md).
 The visual and audio research behind all of this is in
 [`docs/ART_DIRECTION.md`](docs/ART_DIRECTION.md).
 
@@ -121,7 +133,8 @@ The visual and audio research behind all of this is in
 Add `?debug` to the URL, then optionally:
 - `&chapter=N` to jump to a chapter (0-9), `&intro` to play the opening.
 - `&auto` for an autopilot that follows the mother; `&dt=0.05&warp=30` to simulate ahead.
-- `&test=fly|whale|islands|world` (dev scenes in `src/dev/`), `&time=dawn|morning|…`.
+- `&test=fly|whale|islands|world|ocean|flora|painterly|herd|ecosystem` (dev scenes in
+  `src/dev/`; add `&ocean` to give a dev scene the real ocean), `&time=dawn|morning|…`.
 - `&quality=high|medium|low`, `&nobloom`, `&norays`, `&noshadow`, `&nosea`.
 
 ### Headless checks

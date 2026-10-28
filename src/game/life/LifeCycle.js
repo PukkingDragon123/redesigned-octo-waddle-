@@ -764,7 +764,7 @@ export class LifeCycle {
     surf.y = seaHeight(g, surf.x, surf.z) + 1;
     const bedHere = S.world.seabedAt ? S.world.seabedAt(surf.x + fwd.x * 40, surf.z + fwd.z * 40) : -80;
     const deep = surf.clone().addScaledVector(fwd, 40);
-    deep.y = Math.max(bedHere + me.radius * 1.2, -36);
+    deep.y = Math.max(bedHere + me.radius * 1.2, -16);
     const descend = C.rel({ subject: me, side: [36, 30], up: [10, 2], back: [30, 22], ahead: 4, fov: [46, 40], worldUp: true });
     t = 0;
     const T1 = 9, T2 = 16;
@@ -793,18 +793,20 @@ export class LifeCycle {
     for (let i = 0; i < 3; i++) S.eco?.addFishSchool?.(_v2.copy(deep).add(_v.set((i - 1) * 18, 4 + i * 2, (i % 2) * 14 - 7)).clone(), i === 1 ? 'spiralback' : 'glintfin', 160);
     C.card(Object.assign({ low: true }, MOMENTS.garden));
     C.slowmo(2.5);
-    g.atmosphere.transition('dawn', 20);
-    const garden = C.orbit({ center: deep, radius: [me.L * 1.4, me.L * 2.2], height: [me.L * 0.3, me.L * 0.8], angle: [me.yaw + 1.6, me.yaw + 3.4], fov: [42, 48] });
+    g.atmosphere.transition('dawn', 9);
+    const garden = C.orbit({ center: deep, radius: [me.L * 1.1, me.L * 1.7], height: [me.L * 0.1, me.L * 0.3], angle: [me.yaw + 1.6, me.yaw + 3.4], fov: [42, 48] });
     t = 0;
     while (t < 22 && !C.skipped) {
       const dt = yield 0;
       t += dt;
       garden(easeInOut(t / 22), t, C.shot);
-      const n = Math.min(4, 1 + Math.floor(t / 5));
+      // stay under the water, beside the resting body
+      C.shot.pos.y = Math.min(C.shot.pos.y, seaHeight(g, C.shot.pos.x, C.shot.pos.z) - 2.5);
+      const n = Math.min(5, 2 + Math.floor(t / 4));
       for (let i = 0; i < n; i++) {
         const u = (Math.random() - 0.5) * me.L;
         this.motes(_v2.copy(me.pos).addScaledVector(me.fwd, u).add(_p.set(0, me.radius * 0.6, 0)), 1, me.radius * 2.2,
-          Math.random() < 0.6 ? [0.35, 1.0, 0.85] : [1.0, 0.75, 0.9], { rise: 0.15, life: 4 + Math.random() * 3, size: 0.3 + Math.random() * 0.3, alpha: 0.9 });
+          Math.random() < 0.6 ? [0.35, 1.0, 0.85] : [1.0, 0.75, 0.9], { rise: 0.15, life: 3.5 + Math.random() * 2.5, size: 0.45 + Math.random() * 0.45, alpha: 1 });
       }
     }
     C.slowmo(1);

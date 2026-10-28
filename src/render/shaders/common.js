@@ -277,13 +277,20 @@ float waterCaustics(vec3 P, float depth) {
   // two crossing sine fields bend the filaments so they curve and wobble like real caustics
   vec2 wq = q + 0.42 * vec2(sin(q.y * 1.7 + t * 0.7) + sin((q.x + q.y) * 0.61 - t * 0.31),
                             sin(q.x * 1.5 - t * 0.6) + sin((q.x - q.y) * 0.67 + t * 0.4));
+  // hand-drawn threads (no straight polygon edges): a finer, slowly drifting tremor on top bends
+  // every cell edge into a wavering curve
+  wq += 0.11 * vec2(sin(wq.y * 4.3 + wq.x * 1.3 - t * 0.9), sin(wq.x * 3.9 - wq.y * 1.1 + t * 0.8));
   float a = wcCells(wq, t * 0.9);
   float b = wcCells(wq * 0.71 + vec2(3.7 + t * 0.05, 8.1 - t * 0.04), t * 1.13 + 2.0);
+  // each thread swells and thins along its length and tapers out in places, like brushed light
+  float sa = 0.5 + 0.5 * sin(wq.x * 2.3 + wq.y * 1.9 + t * 0.5) * sin(wq.y * 2.9 - wq.x * 0.7 - t * 0.4);
+  float sb = 0.5 + 0.5 * sin(wq.x * 1.7 - wq.y * 2.4 - t * 0.45) * sin(wq.x * 0.9 + wq.y * 2.2 + t * 0.35);
   // filaments are sharp near the surface and blur with depth
   float w = 0.055 + 0.02 * depth;
-  float la = exp(-a * a / (w * w));
-  float lb = exp(-b * b / (w * w * 1.6));
-  return max(la, lb) * 0.85 + la * lb * 0.9;
+  float wa = w * (0.55 + 0.8 * sa), wb = w * (0.55 + 0.8 * sb);
+  float la = exp(-a * a / (wa * wa)) * smoothstep(0.08, 0.42, sa);
+  float lb = exp(-b * b / (wb * wb * 1.6)) * smoothstep(0.08, 0.42, sb);
+  return max(la, lb) * 0.95 + la * lb * 0.9;
 }
 /** Light reaching a submerged surface: depth attenuation, blue-green tint and caustics. */
 vec3 waterSubmerge(vec3 col, vec3 P) {

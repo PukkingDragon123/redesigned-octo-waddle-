@@ -364,19 +364,29 @@ function buildPlates(A, acc, q) {
 }
 
 function buildDomeBands(A, acc, q) {
+  // the sonic dome is armoured with small overlapping keratin scutes, like a pangolin's,
+  // in staggered rows that shingle back toward the blowholes
   const D = A.P.dome, L = A.L;
-  const n = A.calf ? 2 : 3;
+  const rows = A.calf ? 3 : 5;
   const r = rng(A.shapeSeed + 77);
-  for (let i = 0; i < n; i++) {
-    const f0 = i / n, f1 = (i + 1) / n;
-    const ta = lerp(D.t1 - 0.004, D.t0 + 0.01, f0), tb = lerp(D.t1 - 0.004, D.t0 + 0.01, f1);
-    const tc = (ta + tb) * 0.5 - 0.002;
-    const ht = (ta - tb) * 0.5 + 0.006;
-    // half width in ring parameter: the dome is narrower at its ends
-    const w = D.w * (0.62 + 0.38 * Math.sin(Math.PI * (0.25 + 0.6 * (f0 + f1) * 0.5)));
-    const sHalf = w / (Math.PI * 2) * 1.05;
-    const plate = { sc: 0.5, hs: sHalf, tc, ht, thick: L * (A.calf ? 0.0025 : 0.0042), seed: 50 + i + r(), chip: 0.2 * r(), weights: [['head', 1]] };
-    plateShape(A, acc, plate, q * 0.8, { exp: 2.6, rearK: 1.2, frontK: 0.55, lift: 0.4, part: PART.DOME, band: i / n });
+  for (let i = 0; i < rows; i++) {
+    const f = (i + 0.5) / rows;
+    const tc = lerp(D.t1 - 0.012, D.t0 + 0.014, f);
+    const ht = (D.t1 - D.t0) / rows * 0.72;
+    // narrower rows toward the front and back of the dome
+    const w = D.w * Math.sin(Math.PI * (0.18 + 0.64 * f)) * 0.95;
+    const cols = Math.max(2, Math.round((A.calf ? 3 : 5) * Math.sin(Math.PI * (0.18 + 0.64 * f)) + 0.4));
+    const sW = w / (Math.PI * 2);
+    for (let j = 0; j < cols; j++) {
+      const off = (i % 2 ? 0.5 : 0) - 0.25;
+      const cf = (j + 0.5 + off * 0.5) / cols;
+      const sc = 0.5 + (cf - 0.5) * 2 * sW;
+      const plate = {
+        sc, hs: sW / cols * 1.5, tc: tc + (r() - 0.5) * 0.002, ht: ht * (1.15 + 0.15 * r()),
+        thick: L * (A.calf ? 0.0011 : 0.0016), seed: 50 + i * 10 + j + r(), chip: 0.3 * r(), weights: [['head', 1]],
+      };
+      plateShape(A, acc, plate, q * 0.55, { exp: 3.0, rearK: 1.35, frontK: 0.35, lift: 0.6, part: PART.DOME, band: (i * 7 + j) / 40 });
+    }
   }
 }
 

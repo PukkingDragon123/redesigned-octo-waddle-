@@ -469,7 +469,7 @@ function buildLayout(A) {
   }
   const nCook = Math.round(sc * (A.calf ? 3 : 26));
   for (let i = 0; i < nCook; i++) {
-    scars.push({ kind: 1, s: r(), t: lerp(0.1, 0.9, r()), ang: r() * Math.PI, len: L * lerp(0.004, 0.009, r()), n: 1, gap: 0, w: L * lerp(0.003, 0.006, r()), age: r() });
+    scars.push({ kind: 1, s: r(), t: lerp(0.1, 0.9, r()), ang: r() * Math.PI, len: L * lerp(0.0028, 0.0065, r()), n: 1, gap: 0, w: L * lerp(0.002, 0.0042, r()), age: r() });
   }
   // the alpha's great scars: a few long healed gashes over the flank and head
   if (g.alpha) {

@@ -25,7 +25,7 @@ const STRIDE = 20;
 
 const SPEC = {
   skimmer: { max: 192, nearMax: 72, span: [1.25, 1.75], nearPx: 70, minPx: 0.8, beat: 2.3 },
-  coilwing: { max: 2048, nearMax: 360, span: [0.27, 0.37], nearPx: 34, minPx: 0.7, beat: 7.5 },
+  coilwing: { max: 2048, nearMax: 200, span: [0.27, 0.37], nearPx: 40, minPx: 0.7, beat: 7.5 },
 };
 const ROOST_RANGE = 420;
 const PERCH_RANGE = 320;

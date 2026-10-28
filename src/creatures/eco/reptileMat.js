@@ -489,8 +489,14 @@ void main() {
     vec4 sc = fishScales(vec2(L.z * 260.0, atan(L.x, L.y) * 9.0));
     albedo = mix(pA * 0.9, pB * 0.8, smoothstep(-0.2, -0.7, N.y));
     albedo *= 1.0 - smoothstep(0.75, 1.0, sc.x) * 0.3;
-    float lip = smoothstep(0.004, 0.0, abs(L.y + 0.004 + (L.z - 0.06) * 0.15)) * smoothstep(0.04, 0.08, L.z);
+    // a long gape with a pale lip line and tiny teeth, a dark stripe through the eye
+    float gy = -0.006 - (L.z - 0.06) * 0.1;
+    float lip = smoothstep(0.003, 0.0, abs(L.y - gy)) * smoothstep(0.03, 0.06, L.z);
     albedo = mix(albedo, vec3(0.85, 0.8, 0.65), lip * 0.8);
+    float teeth = smoothstep(0.55, 0.95, sin(L.z * 900.0)) * smoothstep(0.004, 0.0015, abs(L.y - gy + 0.002)) * smoothstep(0.06, 0.08, L.z);
+    albedo = mix(albedo, vec3(0.92, 0.9, 0.82), teeth * 0.7);
+    float stripe = smoothstep(0.006, 0.0, abs(L.y - 0.012 - (L.z - 0.045) * 0.25)) * step(abs(L.x), 0.035) * smoothstep(0.0, 0.02, L.z);
+    albedo = mix(albedo, pA * 0.3, stripe * 0.6);
     sheen = 0.4; sheenCol = pC;
     spec = 0.3; gloss = 0.75;
   } else if (part < 5.5) {
@@ -532,21 +538,31 @@ void main() {
     albedo = mix(albedo, pB * 0.6, fringe * 0.35);
     albedo = mix(albedo, vec3(0.9, 0.86, 0.78) * 0.7, tipD * 0.35);
     albedo = mix(albedo, pB * 0.7, covert * 0.2);
-    albedo *= 1.0 - rachis * 0.25;
+    albedo *= 1.0 - rachis * 0.35;
+    // every feather a little different, a dark seam where the vanes overlap, barbs
+    float fid = hash11(floor(f) + seed * 13.0);
+    albedo *= 0.82 + 0.3 * fid;
+    float seam = smoothstep(0.08, 0.0, min(fi, 1.0 - fi)) * (1.0 - covert);
+    albedo *= 1.0 - seam * 0.45;
+    float barbs = smoothstep(0.5, 1.0, sin((fi - v * 0.6) * 90.0)) * (1.0 - covert) * smoothstep(40.0, 120.0, vPx);
+    albedo *= 1.0 - barbs * 0.12;
+    // covert rows: small rounded feathers in offset rows near the arm
+    float cr = fract(u * nF * 2.0 + floor(v * 9.0) * 0.5);
+    albedo *= 1.0 - covert * smoothstep(0.75, 1.0, fract(v * 9.0)) * (0.3 + 0.2 * cr);
     // each feather's rounded tip; primaries at the hand separate (slots)
     float slot = hind < 0.5 ? smoothstep(0.62, 0.85, u) : 0.0;
     float tipShape = 0.92 - 0.18 * pow(abs(fi - 0.5) * 2.0, 2.0) * (0.5 + slot);
     alpha = smoothstep(tipShape + 0.02, tipShape - 0.02, v);
     sheen = 0.75 * (1.0 - covert * 0.4);
     sheenCol = pC;
-    trans = 0.9; rim = 0.6; wrap = 0.4;
+    trans = 0.4; rim = 0.6; wrap = 0.4;
   } else if (part < 10.5) {
     // scaled legs and claws
     albedo = mix(vec3(0.16, 0.13, 0.1), vec3(0.05), smoothstep(0.7, 1.0, u));
     spec = 0.3;
   } else {
     // eye: large, gold iris with a round pupil
-    vec2 q = (L.yz - vec2(0.012, 0.06)) / 0.012;
+    vec2 q = (L.yz - vec2(0.012, 0.045)) / 0.0095;
     float r = length(q);
     albedo = mix(vec3(0.012), mix(vec3(0.85, 0.6, 0.12), vec3(0.35, 0.2, 0.05), r), smoothstep(0.42, 0.5, r));
     spec = 2.2; gloss = 0.97; rim = 0.2;

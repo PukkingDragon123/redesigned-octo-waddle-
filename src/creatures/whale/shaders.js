@@ -224,13 +224,20 @@ void main() {
       vec3 pl = pleatAt(vLoft.y, vLoft.x, uPleat.z, uPleat.x, uPleat.y);
       // stretched, each groove opens wider and shows the tissue in its floor
       float sb = vLoft.y < 0.5 ? vLoft.y : 1.0 - vLoft.y;
-      float fx = fract(sb / mix(0.13, 0.235, smoothstep(uPleat.x + 0.02, uPleat.x + 0.26, vLoft.x)) * uPleat.z * 0.5);
-      float groove = smoothstep(0.18 + 0.2 * infl, 0.0, abs(fx - 0.5) - 0.02) * pl.y;
-      vec3 flesh = vec3(0.78, 0.34, 0.36);
-      float vein = smoothstep(0.06, 0.0, abs(vnoise(vTex * vec2(220.0, 90.0)) - 0.5));
-      flesh = mix(flesh, vec3(0.5, 0.12, 0.18), vein * 0.6);
+      float px = sb / mix(0.13, 0.235, smoothstep(uPleat.x + 0.02, uPleat.x + 0.26, vLoft.x)) * uPleat.z * 0.5;
+      px += sin(vLoft.x * 140.0 + floor(px) * 2.3) * 0.08;
+      float fx = fract(px);
+      float wv = 0.6 + 0.8 * hash12(vec2(floor(px), 3.1));
+      float groove = smoothstep((0.1 + 0.16 * infl) * wv, 0.0, abs(fx - 0.5) - 0.02) * pl.y;
+      // the floor of each groove: thin pink-grey tissue with dark veins, deeper red where the
+      // stretch is greatest; the ridges keep their own pale skin
+      vec3 flesh = mix(vec3(0.62, 0.36, 0.36), vec3(0.42, 0.16, 0.18), smoothstep(0.3, 1.2, infl));
+      float vein = smoothstep(0.045, 0.0, abs(vnoise(vTex * vec2(260.0, 70.0) + uSeed) - 0.5));
+      float vein2 = smoothstep(0.03, 0.0, abs(vnoise(vTex * vec2(600.0, 160.0)) - 0.5));
+      flesh = mix(flesh, vec3(0.28, 0.06, 0.1), vein * 0.55 + vein2 * 0.3);
+      flesh *= 0.85 + 0.3 * vnoise(vTex * vec2(90.0, 30.0));
       float open = groove * bell * smoothstep(0.05, 0.9, infl);
-      albedo = mix(albedo, flesh, open * 0.85);
+      albedo = mix(albedo, flesh, open * 0.7);
       albedo = mix(albedo, albedo * vec3(1.08, 0.86, 0.86), uFlush * bell * 0.6);
       trans += open * 1.2 + bell * infl * 0.25;
       rough = mix(rough, 0.3, open);
@@ -344,9 +351,9 @@ void main() {
     float radial = vnoise(vec2(atan(vP.y, vP.x) * 6.0, rho * 3.0));
     float crown = 1.0 - smoothstep(0.0, 0.45, vP.z);
     N = bumpN(N, vWorldPos, (grow * 0.5 * (1.0 - crown) + radial * 0.2) * uLen * 0.00045, 1.0);
-    albedo = mix(uHornBase, uPlateCol, 0.5) * (0.78 + 0.3 * grow * (1.0 - crown) + 0.1 * radial);
-    albedo = mix(albedo, mix(uHornTip, uPlateCol, 0.6), crown * 0.35);
-    albedo = mix(albedo, uHornTip * 0.7, smoothstep(0.88, 1.0, vP.z) * 0.35);
+    albedo = mix(uHornBase, uPlateCol, 0.55) * (0.85 + 0.14 * grow * (1.0 - crown) + 0.08 * radial);
+    albedo = mix(albedo, mix(uHornTip, uPlateCol, 0.75), crown * 0.18);
+    albedo *= 1.0 - smoothstep(0.85, 1.0, vP.z) * 0.25;
     rough = 0.36 + crown * 0.1;
     f0 = 0.04;
     rim = 0.4;
@@ -355,23 +362,30 @@ void main() {
     float inner = vP.w * smoothstep(1.0, 0.93, vTex.y);
     float rib = vMask.y;
     vec3 outer = uBack * (0.75 + 0.5 * rib) * (0.9 + 0.2 * vnoise(vTex * vec2(60.0, 20.0)));
-    vec2 pq = vTex * vec2(64.0, 15.0);
-    float wp = worley2(pq);
-    float pit = smoothstep(0.3, 0.14, wp);
-    float pitRim = smoothstep(0.42, 0.3, wp) * (1.0 - pit);
-    vec3 flesh = mix(uCrestIn, uCrestIn * vec3(1.15, 0.9, 0.9), vnoise(vTex * vec2(40.0, 9.0)));
-    flesh = mix(flesh, uCrestIn * 0.25, pit);
-    flesh = mix(flesh, uCrestIn * 1.25 + 0.03, pitRim * 0.5);
-    float vein = smoothstep(0.05, 0.0, abs(vnoise(vTex * vec2(30.0, 50.0)) - 0.5));
-    flesh = mix(flesh, vec3(0.35, 0.05, 0.1), vein * 0.4);
+    // sensor pits in rows between the ribs, each a dark pore with a raised pale rim
+    vec2 pq = vec2(vTex.x * 58.0, vTex.y * 11.0 + floor(vTex.x * 58.0) * 0.5);
+    vec2 pc = fract(pq) - 0.5;
+    float jit = hash12(floor(pq));
+    float pr = length(pc * vec2(1.0, 1.25)) + (jit - 0.5) * 0.08;
+    float pitSize = mix(0.16, 0.32, smoothstep(0.1, 0.9, vTex.y)) * step(0.15, jit);
+    float pit = smoothstep(pitSize, pitSize * 0.55, pr);
+    float pitRim = smoothstep(pitSize * 1.7, pitSize * 1.05, pr) * (1.0 - pit);
+    // deep maroon at the root, rosy toward the free edge, mottled
+    vec3 flesh = mix(uCrestIn * 0.32, uCrestIn * 0.8, smoothstep(0.0, 0.85, vTex.y));
+    flesh *= 0.85 + 0.3 * vnoise(vTex * vec2(40.0, 9.0));
+    flesh = mix(flesh, vec3(0.08, 0.01, 0.02), pit * 0.9);
+    flesh = mix(flesh, flesh * 1.25 + vec3(0.04, 0.025, 0.02), pitRim * 0.6);
+    float vein = smoothstep(0.04, 0.0, abs(vnoise(vTex * vec2(24.0, 40.0)) - 0.5));
+    flesh = mix(flesh, vec3(0.25, 0.03, 0.07), vein * 0.5);
     flesh = mix(flesh, flesh * vec3(1.2, 0.85, 0.85), uFlush * 0.5);
     float hgt = inner > 0.5 ? (pitRim * 0.5 - pit * 1.0) : rib;
     N = bumpN(N, vWorldPos, hgt * uLen * 0.0007, 1.0);
     // the edge of each leaf is darker, the outer face pale near its base under the fur
     albedo = mix(outer, flesh, inner);
     albedo = mix(albedo, albedo * 0.55, smoothstep(0.85, 1.0, vTex.y) * (1.0 - inner));
-    trans = mix(0.45, 1.5, inner);
-    rough = mix(0.45, 0.22, inner);
+    trans = mix(0.45, 0.6, inner);
+    rough = mix(0.45, 0.2, inner);
+    wet = max(wet, inner * 0.7);
     ao *= mix(1.0, 0.7, pit * inner);
     rim = 0.5;
   } else {

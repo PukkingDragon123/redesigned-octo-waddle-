@@ -39,6 +39,7 @@ const GRID = 8; // startle lookup grid (m)
 const STRIDE = 12; // raw record: x y z s qx qy qz qw seed hue pal aux
 
 const LOD_MARGIN = 5; // m: plants join a LOD early so budgeted repacks never open a hole
+const BIG_SCALE = 2; // plants scaled above this are heroes (giant fiddleheads): own chunks / regions
 const _q = new Quaternion();
 function markRange(attr, n) {
   attr.clearUpdateRanges();
@@ -231,8 +232,11 @@ export class AlienFlora {
         // dense filler uses smaller chunks: tighter culling and less LOD overlap
         const csz = sp.def.chunk ?? CHUNK;
         const cx = Math.floor(x / csz), cz = Math.floor(z / csz);
-        // region-major, then chunk; random order inside a chunk (filler thinning takes a prefix)
-        keys[j] = ((rx + 4096) * 8192 + (rz + 4096)) * 1048576 + ((cx + 4096) & 1023) * 1024 + ((cz + 4096) & 1023) + sp.raw[i * STRIDE + 8] * 0.999;
+        // region-major, then chunk; random order inside a chunk (filler thinning takes a prefix).
+        // Hero-sized plants (scale > 2) get chunks of their own: they stay visible from far away,
+        // and must not drag the small plants around them into the far LOD range.
+        const big = sp.raw[i * STRIDE + 3] > BIG_SCALE ? 1048576 : 0;
+        keys[j] = ((rx + 4096) * 8192 + (rz + 4096)) * 2097152 + big + ((cx + 4096) & 1023) * 1024 + ((cz + 4096) & 1023) + sp.raw[i * STRIDE + 8] * 0.999;
         order[j] = j;
       }
       order.sort((a, b) => keys[a] - keys[b]);
@@ -316,7 +320,8 @@ export class AlienFlora {
     const regionMap = new Map();
     this.regions = [];
     for (const c of allChunks) {
-      const key = Math.floor(c.x / REGION) * 100003 + Math.floor(c.z / REGION);
+      // big plants' chunks live in regions of their own (a long LOD reach for those regions only)
+      const key = (Math.floor(c.x / REGION) * 100003 + Math.floor(c.z / REGION)) * 2 + (c.lsMax > BIG_SCALE * 0.6 ? 1 : 0);
       let reg = regionMap.get(key);
       if (!reg) {
         reg = { chunks: [], x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, z0: 1e9, z1: -1e9, x: 0, y: 0, z: 0, r: 0, live: false, maxLod: 0 };

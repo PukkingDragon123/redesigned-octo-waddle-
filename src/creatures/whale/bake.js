@@ -272,7 +272,7 @@ void main() {
       vec2 r = vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y) / vec2(a.w, b.z);
       float rl = length(r);
       rl += (vnoise(r * 3.0 + float(i)) - 0.5) * 0.25;
-      m = smoothstep(1.0, 0.7, rl) * 0.55;
+      m = smoothstep(1.0, 0.7, rl) * 0.32;
       h -= smoothstep(1.0, 0.6, rl) * b.z * 0.08;
       col = mix(col, col * 0.55, smoothstep(1.15, 1.0, rl) * smoothstep(0.8, 1.0, rl) * 0.5);
     }

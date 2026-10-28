@@ -31,7 +31,7 @@ export const MOTHER = {
   eyePatch: { size: 1.1, len: 1.3, angle: 0.2, dark: 0.7 },
   scars: 0.25, barnacles: 0.25, tornWing: null, notchedFluke: null,
   horns: { style: 'elegant' }, hornBase: '#2b2723', hornTip: '#e4d9c2',
-  plate: '#323a44', crestIn: '#c8505c',
+  plate: '#323a44', crestIn: '#b04652',
   arm: '#2e3a4a', membrane: '#6c6470', finTip: '#857883', ray: '#2a3442', finMark: '#ece8df', finMarkAmt: 0.6,
   iris: '#d69a30', iris2: '#4a2408', lid: '#2c3644', sclera: '#cbbfae',
   frond: '#d97690', frondTip: '#f2b3c0', gill: '#e07a86', mouth: '#8c4458',

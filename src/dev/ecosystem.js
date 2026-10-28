@@ -344,7 +344,8 @@ export default async function (game) {
         for (const b of birds) c.add(b.pos);
         if (birds.length) c.divideScalar(birds.length); else c.set(62, 40, -26);
         look = c;
-        pos = orbit(c, dist ?? 45, 4, new Vector3(-0.5, 0, 0.86).normalize());
+        // from below the flock, against the sky
+        pos = orbit(c, dist ?? 24, -9, new Vector3(-0.5, 0, 0.86).normalize());
       }
       fov = 52;
     } else if (shot === 'roost' && roostWhale) {

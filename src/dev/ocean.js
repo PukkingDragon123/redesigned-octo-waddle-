@@ -85,18 +85,12 @@ export default async function (game) {
   }
   if (p.has('state')) ocean.setSeaState(+p.get('state'), { dur: 0.01 });
   if (p.has('odebug')) ocean.uniforms.uDebug.value = +p.get('odebug');
-  // &painterly: the painted look through PostFX's own hook (engine.post.painterly)
-  if (p.has('painterly')) {
-    try {
-      const { PainterlyPost } = await import('../render/painterly/index.js');
-      const pp = new PainterlyPost(game.engine.renderer, { quality: 1 });
-      pp.sea = true;
-      pp.setSize(game.engine.width, game.engine.height);
-      pp.precompile?.(game.engine.camera);
-      game.engine.midPasses.unshift(pp.aoPass);
-      game.engine.post.painterly = pp;
-      game.painterly = pp;
-    } catch (e) { console.warn('[ocean] painterly unavailable', e); }
+  // the painted look is on by default (engine.painterly); &painterly=0 shows the plain frame,
+  // &look=title|gameplay|cinematic picks the engine look
+  if (game.engine.painterly) {
+    game.painterly = game.engine.painterly;
+    if (p.get('painterly') === '0') game.engine.painterly.enabled = false;
+    if (p.get('look')) game.engine.setLook(p.get('look'), { ease: 0 });
   }
   // &set=uniform:x,y,z  pins an ocean uniform for experiments
   const pins = (p.get('set') || '').split(';').filter(Boolean).map((e) => e.split(':'));

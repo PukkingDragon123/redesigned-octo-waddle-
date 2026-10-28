@@ -194,7 +194,11 @@ void main() {
     vec3 mineral = mh < 0.22 ? vec3(1.12, 0.94, 0.8) : mh < 0.42 ? vec3(0.9, 0.95, 1.05) : mh < 0.55 ? vec3(0.95, 1.02, 0.92) : mh < 0.7 ? vec3(1.07, 1.04, 0.95) : vec3(1.0);
     float bandTone = 0.82 + 0.32 * hard;
     // the bedding plane is an eroded notch; hard beds stand proud with a lit lip
-    float notch = smoothstep(0.16, 0.0, bf) + smoothstep(0.9, 1.0, bf) * 0.5;
+    // some bedding planes are deep notches, most only faint partings (massive beds, thin beds)
+    // (each plane's depth hashes on the bed above it, so both sides of a plane agree)
+    float notchLo = mix(0.22, 1.0, step(0.58, hash11(bandId * 2.31 + 0.4)));
+    float notchHi = mix(0.22, 1.0, step(0.58, hash11((bandId + 1.0) * 2.31 + 0.4)));
+    float notch = smoothstep(0.16, 0.0, bf) * notchLo + smoothstep(0.9, 1.0, bf) * 0.5 * notchHi;
     float bedRelief = (hard - 0.5) * 0.35 - notch * 0.45;
     // thin laminae inside the softer beds
     float lam = sin(st * 18.0 + nm.b * 3.0) * (1.0 - hard) * 0.5 + 0.5;

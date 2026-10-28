@@ -155,7 +155,7 @@ export function buildSkimmer(near = true) {
     void roots; void tips;
   }
   // wings
-  for (const side of [1, -1]) wingGrid(B, 8, near ? 22 : 8, near ? 7 : 3, side, (u) => u);
+  for (const side of [1, -1]) wingGrid(B, 8, near ? 22 : 7, near ? 7 : 2, side, (u) => u);
   // legs (thigh-shin-foot), posed by the shader
   for (const side of [1, -1]) procTube(B, 10, near ? 6 : 3, near ? 5 : 3, (u) => 0.012 - u * 0.007, side);
   return B.build(true);
@@ -166,17 +166,20 @@ export function buildSkimmer(near = true) {
 // spiral when it perches and streams with a feather frond in flight.
 export function buildCoilwing(near = true) {
   const B = new Builder(REPTILE_ATTRS);
-  torso(B, 0.17, -0.15, 0.068, 0.066, 0.07, near ? 9 : 5, near ? 10 : 6);
-  procTube(B, 1, near ? 4 : 2, near ? 8 : 5, (u) => 0.045 - u * 0.008);
-  procTube(B, 6, near ? 24 : 8, near ? 6 : 4, (u) => 0.026 * Math.pow(1 - u, 0.8) + 0.003);
-  // head: a lizard skull with a short toothed snout and a crest of quills
-  const nH = near ? 8 : 4, aH = near ? 10 : 6;
+  torso(B, 0.17, -0.15, 0.068, 0.066, 0.07, near ? 9 : 4, near ? 10 : 5);
+  procTube(B, 1, near ? 4 : 1, near ? 8 : 4, (u) => 0.045 - u * 0.008);
+  procTube(B, 6, near ? 18 : 6, near ? 5 : 3, (u) => 0.026 * Math.pow(1 - u, 0.8) + 0.003);
+  // head: a lizard skull, flat-topped and wedge-shaped, with a long toothed snout, heavy brow
+  // ridges over the eyes and a crest of quills
+  const nH = near ? 10 : 4, aH = near ? 10 : 6;
+  const HT = [0, 0.12, 0.3, 0.5, 0.75, 1], HW = [0.55, 0.95, 1, 0.82, 0.55, 0.22], HH = [0.6, 0.95, 0.9, 0.7, 0.48, 0.25];
   loft(B, nH, (i) => {
     const u = i / (nH - 1);
-    const z = -0.01 + u * 0.13;
-    const w = 0.034 * Math.sin(Math.min(1, 0.3 + u * 0.85) * Math.PI) * (1 - u * 0.35) + 0.004;
-    return { z, hw: w, ht: w * 1.0, hb: w * 0.8, cy: -u * 0.01, ex: 0.9, ey: 0.9 };
-  }, aH, (i, j, th) => ({ aB: [2, i / (nH - 1), th / TAU, 0] }), { noseApex: { p: [0, -0.012, 0.125], n: [0, 0, 1], a: { aB: [2, 1, 0, 0] } } });
+    const z = -0.02 + u * 0.17;
+    const w = 0.032 * smooth(HT, HW, u) + 0.002;
+    const h = 0.032 * smooth(HT, HH, u) + 0.002;
+    return { z, hw: w, ht: h * 0.85, hb: h * 0.75, cy: 0.004 - u * 0.012, ex: 0.85, ey: 0.75, eyb: 1.0 };
+  }, aH, (i, j, th) => ({ aB: [2, i / (nH - 1), th / TAU, 0] }), { noseApex: { p: [0, -0.007, 0.155], n: [0, 0, 1], a: { aB: [2, 1, 0, 0] } } });
   // the quill crest: a fan of thin spines raised from the crown
   {
     const n = near ? 7 : 3;
@@ -191,7 +194,7 @@ export function buildCoilwing(near = true) {
     membrane(B, roots, tips, near ? 3 : 1, (k, s, sd) => ({ aB: [5, k / (n - 1), s, sd] }), { normalHint: [1, 0, 0] });
   }
   if (near) {
-    for (const side of [1, -1]) ellipsoid(B, [side * 0.028, 0.012, 0.06], [0.011, 0.012, 0.012], 4, 6, () => ({ aB: [11, 0, 0, side] }));
+    for (const side of [1, -1]) ellipsoid(B, [side * 0.027, 0.012, 0.045], [0.009, 0.0095, 0.0105], 4, 6, () => ({ aB: [11, 0, 0, side] }));
   }
   // tail frond: a fan of feathers at the tip (two-sided strip along the tail end, posed by shader)
   {
@@ -208,9 +211,9 @@ export function buildCoilwing(near = true) {
   }
   // four wings: fore (arm) and hind (leg), feathered
   for (const side of [1, -1]) {
-    wingGrid(B, 8, near ? 18 : 6, near ? 6 : 2, side);
-    wingGrid(B, 9, near ? 12 : 4, near ? 4 : 2, side);
-    procTube(B, 10, near ? 5 : 2, near ? 5 : 3, (u) => 0.016 - u * 0.009, side);
+    wingGrid(B, 8, near ? 15 : 5, near ? 5 : 1, side);
+    wingGrid(B, 9, near ? 9 : 3, near ? 3 : 1, side);
+    procTube(B, 10, near ? 4 : 2, near ? 4 : 3, (u) => 0.016 - u * 0.009, side);
   }
   return B.build(true);
 }

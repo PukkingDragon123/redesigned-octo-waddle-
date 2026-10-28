@@ -12,6 +12,11 @@
 // progress 0..1, t the seconds into the shot. Subjects may be a Vector3 or anything with .pos.
 // A skip ends the remaining shots and waits of the current cinematic at once (C.skipped stays
 // true until end()), so a sequence never traps the player.
+//
+// Documentary language (docs/VUR_SOK.md 0.7): long-lens observational shots (longLens, narrow FOV,
+// an operator's slow follow), drone aerials (drone), macro close-ups (macro), time-lapse and slow
+// motion (timelapse / slowmo), a faint hand-held sway on every shot, lower-third captions
+// (C.lower({ place, name, sci })) and sparse narrator subtitles (C.say(line), yield* C.narrate(...)).
 import { Vector3 } from 'three';
 import { clamp, lerp, easeInOut, easeInOutSine } from '../core/math.js';
 
@@ -45,7 +50,19 @@ export class Cinematics {
     this.lineEl = this.el?.querySelector('.line') || null;
     this.skipEl = this.el?.querySelector('.skip') || null;
     this.skipBar = this.skipEl?.querySelector('i') || null;
+    this.lowerEl = this.el?.querySelector('.lower') || null;
+    this.lowerPlace = this.lowerEl?.querySelector('.place') || null;
+    this.lowerName = this.lowerEl?.querySelector('.name') || null;
+    this.lowerSci = this.lowerEl?.querySelector('.sci') || null;
+    this.subEl = this.el?.querySelector('.sub') || null;
     this.cardText = null; // the card on screen (for headless checks)
+    this.lowerText = null; // the lower-third on screen
+    this.subText = null; // the narrator line on screen
+    this.lowerT = 0;
+    this.subT = 0;
+    this.seen = new Set(); // documentary captions already shown (species reveals happen once)
+    this.sway = 1; // the hand-held drift of the camera operator (0 for locked-off shots)
+    this.swayT = 0;
     this._goal = new Vector3();
     this._lb = false;
     // carries the player's whale beside its leader while the camera is away (PlayerController.autopilot)
@@ -99,6 +116,8 @@ export class Cinematics {
     this.skipped = false;
     this.letterbox(false);
     this.hideCard(true);
+    if (!opts.keepText) this.clearText();
+    this.sway = 1;
     this.slowmo(1);
     g.cameraRig.cineRate = opts.rate ?? 0.5;
     g.cameraRig.cineTarget = 0;
@@ -175,6 +194,73 @@ export class Cinematics {
     })(), 'card');
   }
 
+  // ---- documentary text ---------------------------------------------------------------------
+  /**
+   * A lower-third caption: { place, name, sci } (place: a small kicker like "VUR SOK", name in
+   * Almendra SC, sci the invented scientific name in italics). Clears itself after hold seconds.
+   * once: a key so the caption is only ever shown the first time (species reveals).
+   */
+  lower(c, hold = 6, once = null) {
+    if (!c) return false;
+    if (once) {
+      if (this.seen.has(once)) return false;
+      this.seen.add(once);
+    }
+    this.lowerText = c;
+    this.lowerT = hold;
+    if (!this.lowerEl) return true;
+    this.lowerPlace.textContent = c.place || '';
+    this.lowerName.textContent = c.name || '';
+    this.lowerSci.textContent = c.sci || '';
+    this.lowerEl.classList.remove('on');
+    void this.lowerEl.offsetWidth;
+    this.lowerEl.classList.add('on');
+    return true;
+  }
+
+  hideLower() {
+    this.lowerEl?.classList.remove('on');
+    this.lowerText = null;
+    this.lowerT = 0;
+  }
+
+  /** A narrator subtitle at the bottom of the frame (Cormorant italic); clears after hold seconds. */
+  say(line, hold = 4.6) {
+    if (!line) return;
+    this.subText = line;
+    this.subT = hold;
+    if (!this.subEl) return;
+    this.subEl.textContent = line;
+    this.subEl.classList.remove('on');
+    void this.subEl.offsetWidth;
+    this.subEl.classList.add('on');
+  }
+
+  hideSay() {
+    this.subEl?.classList.remove('on');
+    this.subText = null;
+    this.subT = 0;
+  }
+
+  clearText() {
+    this.hideLower();
+    this.hideSay();
+  }
+
+  /** Coroutine: narrator lines one after another (each holds, then a short breath between). */
+  *narrate(lines, hold = 4.2, gap = 0.7) {
+    for (const l of [].concat(lines)) {
+      if (this.skipped) break;
+      this.say(l, hold);
+      yield* this.wait(hold + gap);
+    }
+  }
+
+  /** Time-lapse (scale > 1) or slow motion (scale < 1); 1 restores real time. */
+  timelapse(scale = 3) {
+    this.slowmo(scale);
+  }
+
   // ---- running shots ------------------------------------------------------------------------
   /** Wait seconds of story time, ending early on a skip. */
   *wait(sec) {
@@ -193,6 +279,7 @@ export class Cinematics {
     while (t < dur && !this.skipped) {
       const k = ease(clamp(t / dur, 0, 1));
       fn(k, t, this.shot);
+      this.handheld(this.shot, opts.sway ?? this.sway);
       opts.onFrame?.(k, t);
       if (opts.until && opts.until()) break;
       t += yield 0;
@@ -292,6 +379,85 @@ export class Cinematics {
     return this.orbit({ center, radius: dist, height, angle, fov, lookUp });
   }
 
+  /**
+   * The camera operator's hand: a faint, slow drift of the aim (a few hundredths of a degree at
+   * long lenses, where it reads most). Applied after a shot writes its frame.
+   */
+  handheld(s, amount = 1) {
+    if (!amount) return;
+    const T = this.swayT;
+    const d = s.pos.distanceTo(s.look);
+    // narrower lenses magnify the hand: keep the on-screen drift about constant
+    const a = amount * d * 0.0026 * clamp((s.fov || 45) / 45, 0.25, 1.2);
+    s.look.x += (Math.sin(T * 0.53) + 0.5 * Math.sin(T * 1.31 + 2.1)) * a;
+    s.look.y += (Math.sin(T * 0.71 + 1.3) + 0.4 * Math.sin(T * 1.73)) * a * 0.6;
+    s.look.z += (Math.sin(T * 0.47 + 4.2) + 0.5 * Math.sin(T * 1.19 + 0.7)) * a;
+  }
+
+  /**
+   * A long-lens observational shot: the camera far off (dist m) beside the subject's path, a narrow
+   * lens (fov 9..20), panning after its subject with an operator's slight lag. angle is the bearing
+   * (radians, world) from the subject at the start; height above the sea.
+   */
+  longLens({ subject, dist = 260, angle = 0, height = 6, fov = 14, lag = 1.6, sea = true }) {
+    const g = this.game;
+    const anchor = new Vector3(), aim = new Vector3();
+    let set = false, prevT = 0;
+    return (k, t, s) => {
+      const p = P(subject);
+      const dt = Math.max(0, t - prevT);
+      prevT = t;
+      if (!set) {
+        set = true;
+        const a = R(angle, 0), r = R(dist, 0);
+        anchor.set(p.x + Math.cos(a) * r, 0, p.z + Math.sin(a) * r);
+        aim.copy(p);
+      }
+      const a = R(angle, k), r = R(dist, k);
+      // a slow dolly along the bank, the camera itself barely moving
+      const fa = 1 - Math.exp(-dt * 0.3);
+      anchor.x = lerp(anchor.x, p.x + Math.cos(a) * r, fa);
+      anchor.z = lerp(anchor.z, p.z + Math.sin(a) * r, fa);
+      const base = sea && g.ocean?.heightAt ? Math.max(g.ocean.heightAt(anchor.x, anchor.z), 0) : 0;
+      s.pos.set(anchor.x, (sea ? base : p.y) + R(height, k), anchor.z);
+      // the pan trails the subject a little, as a hand on a fluid head would
+      if (t === 0) aim.copy(p); else aim.lerp(p, 1 - Math.exp(-dt * 4 / Math.max(lag, 0.05)));
+      s.look.copy(aim);
+      s.fov = R(fov, k);
+      s.roll = 0;
+    };
+  }
+
+  /** A drone aerial: high, slow, rising or sinking, looking down at a point (tilt: look below it). */
+  drone({ center, radius = [260, 200], height = [140, 90], angle = [0, 0.5], fov = 42, tilt = 0 }) {
+    return (k, t, s) => {
+      const c = P(center);
+      const a = R(angle, k), r = R(radius, k);
+      s.pos.set(c.x + Math.cos(a) * r, c.y + R(height, k), c.z + Math.sin(a) * r);
+      s.look.copy(c);
+      s.look.y -= R(tilt, k);
+      s.fov = R(fov, k);
+      s.roll = 0;
+    };
+  }
+
+  /**
+   * A macro close-up: very near a small subject (an egg, an eye), slowly circling, with a narrow
+   * lens. under: keep the lens beneath the sea surface (an underwater macro).
+   */
+  macro({ subject, dist = [3.2, 2.4], angle = [0, 0.4], height = [0.3, 0.1], fov = [26, 22], under = false }) {
+    const g = this.game;
+    return (k, t, s) => {
+      const c = P(subject);
+      const a = R(angle, k), r = R(dist, k);
+      s.pos.set(c.x + Math.cos(a) * r, c.y + R(height, k), c.z + Math.sin(a) * r);
+      if (under && g.ocean?.heightAt) s.pos.y = Math.min(s.pos.y, g.ocean.heightAt(s.pos.x, s.pos.z) - 0.6);
+      s.look.copy(c);
+      s.fov = R(fov, k);
+      s.roll = 0;
+    };
+  }
+
   /** Blend between two shots (both evaluated each frame). */
   blend(fa, fb) {
     const sa = { pos: new Vector3(), look: new Vector3(), fov: 45, roll: 0 };
@@ -310,6 +476,11 @@ export class Cinematics {
   // ---- per frame (real time) -------------------------------------------------------------------
   update(dtReal) {
     const inp = this.game.input;
+    this.swayT += dtReal;
+    if (this.story.state !== 'paused') {
+      if (this.lowerT > 0 && (this.lowerT -= dtReal) <= 0) this.hideLower();
+      if (this.subT > 0 && (this.subT -= dtReal) <= 0) this.hideSay();
+    }
     if (!this.active || !this.skippable || this.story.state === 'paused' || this.story.state === 'menu') {
       this.skipT = 0;
       if (this.holding) { this.holding = false; this.skipEl?.classList.remove('on'); }
@@ -326,6 +497,7 @@ export class Cinematics {
       if (this.skipT >= SKIP_HOLD) {
         this.skipped = true;
         this.hideCard(true);
+        this.clearText();
         this.skipEl?.classList.remove('on');
         this.holding = false;
       }

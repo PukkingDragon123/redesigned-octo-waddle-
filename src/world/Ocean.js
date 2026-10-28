@@ -186,8 +186,64 @@ void main() {
 `;
 
 // ------------------------------------------------------------------------------------------
+// The Spiral Maelstrom: slow sea vortices (whirlpool nurseries). Each one dips the surface into a
+// funnel with a calm glassy eye, bends the wind waves into a spiral, raises rotating spiral swell
+// arms on its walls and draws hand-drawn foam streaks winding inward. Mirrored on the CPU
+// (Ocean._whirlH / _whirlWarp) so heightAt / normalAt follow the funnel.
+const NWHIRL = 2;
+const WHIRL_GLSL = /* glsl */ `
+uniform vec4 uWhirl[${NWHIRL}];   // centre x, z, radius (m), funnel depth (m)
+uniform vec4 uWhirlB[${NWHIRL}];  // strength 0..1, spin (rad/s), rotation phase (rad), arm pitch
+uniform float uWhirlOn;
+// funnel shape 0..1: flat calm eye (q < 0.06), steep throat, long gentle skirt, zero slope at both ends
+float whirlProfile(float q) {
+  float u = pow(clamp((q - 0.06) / 0.94, 0.0, 1.0), 0.8);
+  float a = 1.0 - u;
+  return a * a * a * (1.0 + 3.0 * u);
+}
+// surface height of the vortices (m, negative in the funnel) with their rotating spiral swell arms
+float whirlH(vec2 p) {
+  float h = 0.0;
+  for (int i = 0; i < ${NWHIRL}; i++) {
+    vec4 A = uWhirl[i];
+    vec4 B = uWhirlB[i];
+    if (B.x <= 0.0) continue;
+    vec2 d = p - A.xy;
+    float q = length(d) / A.z;
+    if (q >= 1.0) continue;
+    float th = atan(d.y, d.x);
+    float env = smoothstep(0.07, 0.3, q) * (1.0 - smoothstep(0.45, 1.0, q));
+    float arm = cos(3.0 * (th - B.z) + B.w * log(max(q, 0.03)));
+    h -= B.x * A.w * (whirlProfile(q) - 0.035 * env * arm);
+  }
+  return h;
+}
+// where the wind waves are sampled (bent into the spiral), how calm they are, and the bend angle
+vec4 whirlWarp(vec2 p) {
+  vec2 o = p;
+  float calm = 1.0, tw = 0.0;
+  for (int i = 0; i < ${NWHIRL}; i++) {
+    vec4 A = uWhirl[i];
+    vec4 B = uWhirlB[i];
+    if (B.x <= 0.0) continue;
+    vec2 d = p - A.xy;
+    float q = length(d) / A.z;
+    if (q >= 1.25) continue;
+    float g = 1.0 - smoothstep(0.0, 1.25, q);
+    float a = B.x * sign(B.y) * 2.4 * g * g;
+    float c = cos(a), s = sin(a);
+    o = A.xy + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+    tw += a;
+    calm *= 1.0 - B.x * 0.94 * (1.0 - smoothstep(0.07, 0.6, q));
+  }
+  return vec4(o, calm, tw);
+}
+`;
+
 const OCEAN_VERT = /* glsl */ `
 ${UNIFORMS}
+${WHIRL_GLSL}
+varying vec3 vWarp;
 uniform vec2 uCenter;
 uniform sampler2D uA0;
 uniform sampler2D uA1;
@@ -221,14 +277,23 @@ float shelterAt(vec2 p) {
 void main() {
   vec2 grid = uCenter + position.xz;
   float sp = aSpacing;
+  // inside a maelstrom the waves are sampled along the spiral and calmed toward the eye
+  vec4 ww = uWhirlOn > 0.5 ? whirlWarp(grid) : vec4(grid, 1.0, 0.0);
+  vec2 wg = ww.xy;
+  vWarp = vec3(wg, ww.w);
   vec3 D = vec3(0.0);
-  D += textureLod(uA0, casUv(grid, uCas[0]), max(log2(sp / uCas[0].z), 0.0)).xyz;
-  D += textureLod(uA1, casUv(grid, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
-  vec3 D2 = textureLod(uA2, casUv(grid, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
+  D += textureLod(uA0, casUv(wg, uCas[0]), max(log2(sp / uCas[0].z), 0.0)).xyz;
+  D += textureLod(uA1, casUv(wg, uCas[1]), max(log2(sp / uCas[1].z), 0.0)).xyz;
+  vec3 D2 = textureLod(uA2, casUv(wg, uCas[2]), max(log2(sp / uCas[2].z), 0.0)).xyz;
   vCrest = vec2(D2.y * uCrestNorm.x, D.y * uCrestNorm.y);
   D += D2;
-  float sh = shelterAt(grid);
+  float sh = shelterAt(grid) * ww.z;
   D *= sh;
+  if (ww.w != 0.0) {
+    float c = cos(-ww.w), s = sin(-ww.w);
+    D.xz = vec2(c * D.x - s * D.z, s * D.x + c * D.z);
+  }
+  if (uWhirlOn > 0.5) D.y += whirlH(grid);
   if (uSimXf.w > 0.0) {
     vec2 su = (grid - uSimXf.xy) / uSimXf.z + 0.5;
     if (su.x > 0.0 && su.y > 0.0 && su.x < 1.0 && su.y < 1.0) {
@@ -286,6 +351,52 @@ uniform vec4 uRings[8];   // splash ring trains: x, z, start time, strength
 uniform vec4 uWakeP[64];  // 4 wake trails x 16 points, head first: x, z, time, speed
 uniform vec4 uWakeB[4];   // per trail: bounds centre xz, bounds radius, body width
 uniform vec4 uWakeN;      // points per trail
+${WHIRL_GLSL}
+varying vec3 vWarp;
+
+// Maelstrom foam: hand-drawn streaks winding inward along log spirals (wobbling, swelling and
+// thinning along their length, broken into strokes), a lace ring at the lip of the eye, and the
+// depth of the funnel (for its deep blue glow). x: foam cover, y: funnel depth 0..1, z: eye ring.
+vec3 whirlFoam(vec2 p, float dist) {
+  vec3 res = vec3(0.0);
+  float lod = clamp(log2(max(dist, 1.0) * 0.06), 0.0, 6.0);
+  for (int i = 0; i < ${NWHIRL}; i++) {
+    vec4 A = uWhirl[i];
+    vec4 B = uWhirlB[i];
+    if (B.x <= 0.0) continue;
+    vec2 d = p - A.xy;
+    float r = length(d);
+    float q = r / A.z;
+    if (q >= 1.05) continue;
+    res.y += B.x * whirlProfile(q);
+    float lq = log(max(q, 0.02));
+    float th = atan(d.y, d.x) - B.z;
+    float spinS = sign(B.y);
+    // seamless around the circle: whole numbers of bands and noise tiles per turn
+    float across = (th * 3.0 + B.w * lq) / 6.2831853;           // 3 arms per turn
+    float flow = -lq * 1.6 + uTime * abs(B.y) * 0.9;              // drifting inward along the arms
+    float wob = textureLod(uNoise, vec2(across * 2.0, flow * 0.21), lod).r - 0.5;
+    float wob2 = textureLod(uNoise, vec2(across * 5.0 + 0.3, flow * 0.6), lod).b - 0.5;
+    float streaks = 0.0;
+    // two families of streaks at different pitches: 7 and 13 per turn
+    for (int k = 0; k < 2; k++) {
+      float nb = k == 0 ? 7.0 : 13.0;
+      float X = (th * nb + B.w * lq * (k == 0 ? 2.4 : 4.4)) / 6.2831853 + wob * (0.9 + float(k) * 0.4) + wob2 * 0.35;
+      float band = abs(fract(X) - 0.5);
+      // width swells and thins along the stroke; strokes break and taper
+      float along = textureLod(uNoise, vec2(floor(X) * 0.137 + 0.5, flow * (0.35 + float(k) * 0.25)), lod).g;
+      float wdt = mix(0.025, 0.12, along) * (k == 0 ? 1.0 : 0.6);
+      float stroke = smoothstep(wdt, wdt * 0.35, band) * smoothstep(0.32, 0.62, along);
+      streaks = max(streaks, stroke * (k == 0 ? 1.0 : 0.7));
+    }
+    float env = smoothstep(0.07, 0.22, q) * (1.0 - smoothstep(0.6, 1.02, q));
+    // the lip of the calm eye: a ring of churned lace
+    float lip = exp(-pow((q - 0.085 - wob * 0.02) / 0.03, 2.0));
+    res.x += B.x * (streaks * env * (0.75 + 0.5 * wob2) + lip * 0.8);
+    res.z += B.x * lip;
+  }
+  return res;
+}
 
 // Kelvin wake behind a trail: chevrons of divergent waves inside a 19.5 degree wedge, strongest
 // along the cusp lines. Returns the slope (dh/dx, dh/dz) and the arm crest mask in z.
@@ -405,7 +516,8 @@ void main() {
   vec3 V = toCam / dist;
 
   // ---- wave slopes and their filtered variance from the cascades --------------------------------
-  vec2 u0 = casUv(p, uCas[0]), u1 = casUv(p, uCas[1]), u2 = casUv(p, uCas[2]), u3 = casUv(p, uCas[3]);
+  vec2 pw = vWarp.xy;
+  vec2 u0 = casUv(pw, uCas[0]), u1 = casUv(pw, uCas[1]), u2 = casUv(pw, uCas[2]), u3 = casUv(pw, uCas[3]);
   vec4 b0 = texture2D(uB0, u0), b1 = texture2D(uB1, u1), b2 = texture2D(uB2, u2);
   vec4 c0 = texture2D(uC0, u0), c1 = texture2D(uC1, u1), c2 = texture2D(uC2, u2);
   vec4 d3 = texture2D(uD3, u3);
@@ -425,6 +537,21 @@ void main() {
            + (max(c2.y - b2.y * b2.y, 0.0) + max(d3.w - d3.y * d3.y, 0.0)) * shs * shs;
   float cap = uOcean.x * mix(0.25, 1.0, sh) * patchy * mix(1.0, 0.45, 1.0 - smoothstep(18.0, 70.0, dist));
   float crestFoam = (c0.w * 1.0 + c1.w * 0.9 + c2.w * 0.55) * sh;
+  // maelstrom: slopes sampled along the spiral turn back to world axes; the funnel's own slope
+  float twc = cos(vWarp.z), tws = sin(vWarp.z);
+  if (vWarp.z != 0.0) {
+    vec2 hh = vec2(twc * hx + tws * hz, -tws * hx + twc * hz);
+    hx = hh.x;
+    hz = hh.y;
+    d3.xy = vec2(twc * d3.x + tws * d3.y, -tws * d3.x + twc * d3.y);
+  }
+  vec3 wf = vec3(0.0);
+  if (uWhirlOn > 0.5) {
+    const float we = 0.4;
+    hx += (whirlH(p + vec2(we, 0.0)) - whirlH(p - vec2(we, 0.0))) / (2.0 * we);
+    hz += (whirlH(p + vec2(0.0, we)) - whirlH(p - vec2(0.0, we))) / (2.0 * we);
+    wf = whirlFoam(p, dist);
+  }
 
   // interaction sheet: ripples, wakes, splash foam, plankton glow
   float simFoam = 0.0, simGlow = 0.0, simH = 0.0;
@@ -590,6 +717,13 @@ void main() {
     sss *= (1.0 - farK);
     // light scattered up from inside the water dims under island and cloud shade
     vec3 body = (uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) + uSeaScatter * sss) * mix(0.6, 1.0, shadow);
+    if (uWhirlOn > 0.5) {
+      // the funnel glows a deep luminous blue: daylight pours down its walls into deep water
+      float wk = clamp(wf.y, 0.0, 1.0);
+      vec3 deep = vec3(0.02, 0.2, 0.55) * (dot(uSkyAmbient, vec3(0.33)) * 1.6 + dot(uSunColor, vec3(0.33)) * 0.35 * sunUp)
+                + vec3(0.01, 0.12, 0.3) * uWaterParams.z * 0.4;
+      body = mix(body, deep + uSeaScatter * sss * 1.4, wk * 0.8);
+    }
 
     float Tf = 1.0 - F;
     vec3 S = env * F + spec;
@@ -611,7 +745,7 @@ void main() {
     // storm streaks along the wind
     float streak = texture2D(uNoise, vec2(wa.x / 140.0, wa.y / 9.0) + uDrift / 900.0).b;
     streak = smoothstep(0.55, 0.85, streak) * smoothstep(0.35, 0.75, lace) * uFoamCtl.y;
-    cover += streak * 0.6 + simFoam + wakeArm * 0.6;
+    cover += streak * 0.6 + simFoam + wakeArm * 0.6 + wf.x;
     // where the sea meets rock, whales and fish at the surface
     float shore = 0.0;
     if (!open) {
@@ -693,7 +827,7 @@ void main() {
     below *= 1.0 + 0.8 * smoothstep(0.02, 0.3, length(N.xz));
     below = below * Tp + fogc * (1.0 - Tp);
     col = through * (1.0 - F) + below * F;
-    float foamU = clamp(crestFoam * uFoamCtl.x + simFoam, 0.0, 1.0);
+    float foamU = clamp(crestFoam * uFoamCtl.x + simFoam + wf.x * 0.6, 0.0, 1.0);
     col = mix(col, fogc * 0.6 + uWaterTint * 0.4, foamU * 0.5);
     col += vec3(0.08, 0.55, 0.85) * (simGlow + crestFoam * 0.2) * uWaterParams.z * 0.6;
   }
@@ -796,6 +930,14 @@ export class Ocean {
     this._v = new Vector3();
     this._v2 = new Vector3();
     this._d = { x: 0, y: 0, z: 0, hx: 0, hz: 0, dxx: 0, dzz: 0, dxz: 0 };
+    // maelstroms (setWhirlpool): pooled slots, eased in and out
+    this.whirls = Array.from({ length: NWHIRL }, () => ({
+      id: null, x: 0, z: 0, radius: 100, depth: 10, spin: 0.12, s: 0, lin: 0, target: 0, phase: 0, phaseT: 0, ease: 4,
+    }));
+    this._whirlN = 0;
+    this._calm = 1;
+    this._wx = 0;
+    this._wz = 0;
 
     this._buildWaves(opts.seed ?? 7);
     this._buildCascades();
@@ -1036,6 +1178,9 @@ export class Ocean {
       uWakeP: { value: Array.from({ length: 64 }, () => new Vector4()) },
       uWakeB: { value: Array.from({ length: 4 }, () => new Vector4()) },
       uWakeN: { value: new Vector4() },
+      uWhirl: { value: Array.from({ length: NWHIRL }, () => new Vector4(0, 0, 100, 0)) },
+      uWhirlB: { value: Array.from({ length: NWHIRL }, () => new Vector4()) },
+      uWhirlOn: { value: 0 },
     });
     // wake trails of things moving at the surface (matched frame to frame by position)
     this.trails = Array.from({ length: 4 }, () => ({
@@ -1125,6 +1270,218 @@ export class Ocean {
     return f;
   }
 
+  // ------------------------------------------------------------------ the Spiral Maelstrom
+  /**
+   * A slow sea vortex (the whirlpool nursery). Calling it again with the same id updates it.
+   * center: Vector3-like (x, z used); radius (m, ~60-140); depth: funnel depth (m, ~6-14);
+   * spin: rad/s, its sign is the direction; ease: seconds to build (default 4).
+   * Up to two at once (a third id replaces the faintest). Returns the slot (read-only info).
+   */
+  setWhirlpool(id, { center = null, radius, depth, spin, ease } = {}) {
+    let w = this.whirls.find((q) => q.id === id);
+    if (!w) {
+      w = this.whirls.find((q) => q.id === null) || this.whirls.reduce((a, b) => (b.s < a.s ? b : a));
+      w.id = id;
+      w.s = 0;
+      w.lin = 0;
+      w.phase = 0;
+      w.phaseT = G.uTime.value;
+    }
+    if (center) { w.x = center.x; w.z = center.z; }
+    if (radius !== undefined) w.radius = Math.max(5, radius);
+    if (depth !== undefined) w.depth = Math.max(0, depth);
+    if (spin !== undefined) w.spin = spin;
+    if (ease !== undefined) w.ease = Math.max(0.01, ease);
+    w.target = 1;
+    this._syncWhirls();
+    return w;
+  }
+
+  /** Let a vortex die down (eased out over its ease time, then its slot frees). */
+  clearWhirlpool(id, { ease } = {}) {
+    const w = this.whirls.find((q) => q.id === id);
+    if (!w) return;
+    if (ease !== undefined) w.ease = Math.max(0.01, ease);
+    w.target = 0;
+  }
+
+  /** The vortex with this id (or null): { x, z, radius, depth, spin, s (strength 0..1), phase }. */
+  getWhirlpool(id) {
+    return this.whirls.find((q) => q.id === id) || null;
+  }
+
+  /** The funnel's surface drop at (x, z) for a vortex (m, <= 0), without waves. Handy for floating things. */
+  whirlHeightAt(x, z) {
+    return this._whirlN > 0 ? this._whirlH(x, z, G.uTime.value) : 0;
+  }
+
+  /** Swirl velocity of the vortices at a point (m/s, world xz into out.x/out.z; out.y: sink). */
+  whirlFlowAt(x, z, out = new Vector3()) {
+    out.set(0, 0, 0);
+    for (const w of this.whirls) {
+      if (w.s <= 0) continue;
+      const dx = x - w.x, dz = z - w.z;
+      const r = Math.hypot(dx, dz);
+      const q = r / w.radius;
+      if (q >= 1.1 || r < 1e-3) continue;
+      // a soft Rankine vortex: solid-body in the eye, falling off outside; a gentle inward drift
+      const qe = 0.18;
+      const vt = w.spin * w.radius * (q < qe ? q : (qe * qe) / q) * (1 - smoothstep(0.7, 1.1, q)) * w.s * 1.6;
+      const vin = -0.25 * w.s * smoothstep(0.08, 0.3, q) * (1 - smoothstep(0.7, 1.1, q)) * Math.abs(w.spin) * 8;
+      out.x += (-dz / r) * vt + (dx / r) * vin;
+      out.z += (dx / r) * vt + (dz / r) * vin;
+    }
+    return out;
+  }
+
+  _whirlProfile(q) {
+    const u = Math.pow(clamp((q - 0.06) / 0.94, 0, 1), 0.8);
+    const a = 1 - u;
+    return a * a * a * (1 + 3 * u);
+  }
+
+  /** CPU mirror of whirlH (GLSL). */
+  _whirlH(x, z, t) {
+    let h = 0;
+    for (const w of this.whirls) {
+      if (w.s <= 0) continue;
+      const dx = x - w.x, dz = z - w.z;
+      const q = Math.hypot(dx, dz) / w.radius;
+      if (q >= 1) continue;
+      const th = Math.atan2(dz, dx);
+      const ph = w.phase + w.spin * (t - w.phaseT);
+      const env = smoothstep(0.07, 0.3, q) * (1 - smoothstep(0.45, 1, q));
+      const arm = Math.cos(3 * (th - ph) + this._pitch(w) * Math.log(Math.max(q, 0.03)));
+      h -= w.s * w.depth * (this._whirlProfile(q) - 0.035 * env * arm);
+    }
+    return h;
+  }
+
+  _pitch(w) { return -Math.sign(w.spin || 1) * 5; }
+
+  /** CPU mirror of whirlWarp: sets _wx/_wz (wave sample point) and _calm; returns the bend angle. */
+  _whirlWarp(x, z) {
+    let ox = x, oz = z, calm = 1, tw = 0;
+    for (const w of this.whirls) {
+      if (w.s <= 0) continue;
+      const dx = x - w.x, dz = z - w.z;
+      const q = Math.hypot(dx, dz) / w.radius;
+      if (q >= 1.25) continue;
+      const g = 1 - smoothstep(0, 1.25, q);
+      const a = w.s * Math.sign(w.spin) * 2.4 * g * g;
+      const c = Math.cos(a), s = Math.sin(a);
+      ox = w.x + c * dx - s * dz;
+      oz = w.z + s * dx + c * dz;
+      tw += a;
+      calm *= 1 - w.s * 0.94 * (1 - smoothstep(0.07, 0.6, q));
+    }
+    this._wx = ox;
+    this._wz = oz;
+    this._calm = calm;
+    return tw;
+  }
+
+  /** Per frame: ease strengths, turn the spiral, and the mist over it / the swirl seen from below. */
+  _updateWhirls(dt) {
+    const t = G.uTime.value;
+    let any = false;
+    for (const w of this.whirls) {
+      if (w.id === null) continue;
+      any = true;
+      const k = dt / w.ease;
+      w.lin = w.target > w.lin ? Math.min(w.target, w.lin + k) : Math.max(w.target, w.lin - k);
+      w.s = w.lin * w.lin * (3 - 2 * w.lin);
+      w.phase = (w.phase + w.spin * dt * (0.4 + 0.6 * w.s)) % TAU;
+      w.phaseT = t;
+      if (w.target === 0 && w.lin <= 0) w.id = null;
+    }
+    if (!any && this._whirlN === 0) return;
+    this._syncWhirls();
+    if (this.enabled && dt > 0) this._whirlFx(dt);
+  }
+
+  _syncWhirls() {
+    const A = this.uniforms.uWhirl.value, B = this.uniforms.uWhirlB.value;
+    let n = 0;
+    for (let i = 0; i < NWHIRL; i++) {
+      const w = this.whirls[i];
+      const on = w.id !== null && w.s > 0;
+      if (on) n++;
+      A[i].set(w.x, w.z, w.radius, w.depth);
+      B[i].set(on ? w.s : 0, w.spin, w.phase, this._pitch(w));
+    }
+    this._whirlN = n;
+    this.uniforms.uWhirlOn.value = n > 0 ? 1 : 0;
+  }
+
+  /** Mist breathing off the funnel and the spray at the lip of the eye; under water, a slow swirl of
+   *  bubbles and motes around the camera. */
+  _whirlFx(dt) {
+    const g = this.game;
+    const mist = g.mist;
+    if (!mist) return;
+    const v = this._v2;
+    const cam = this.engine.camera.position;
+    for (const w of this.whirls) {
+      if (w.id === null || w.s < 0.05) continue;
+      const sp = Math.abs(w.spin);
+      const dir = Math.sign(w.spin) || 1;
+      // a veil of mist hanging over the funnel, drawn round with the spin
+      w._mistAcc = (w._mistAcc || 0) + dt * 5 * w.s;
+      while (w._mistAcc >= 1) {
+        w._mistAcc -= 1;
+        const q = 0.08 + Math.random() * 0.5;
+        const a = Math.random() * TAU;
+        const r = q * w.radius;
+        const x = w.x + Math.cos(a) * r, z = w.z + Math.sin(a) * r;
+        const y = this._whirlH(x, z, G.uTime.value) + 0.6 + Math.random() * 2.5;
+        const vt = sp * r * 0.5 * dir;
+        v.set(-Math.sin(a) * vt, 0.25 + Math.random() * 0.5, Math.cos(a) * vt);
+        mist.emit({
+          pos: this._tp(x, y, z), vel: v, life: 6 + Math.random() * 5, size: 3 + Math.random() * 4, sizeEnd: 10 + Math.random() * 10,
+          color: [1, 1, 1], alpha: 0.12 * w.s, drag: 0.15, gravity: -0.02, kind: 0, fadeIn: 0.35,
+        });
+      }
+      // spray flicking off the churned lip of the eye
+      w._lipAcc = (w._lipAcc || 0) + dt * 14 * w.s;
+      while (w._lipAcc >= 1) {
+        w._lipAcc -= 1;
+        const a = Math.random() * TAU;
+        const r = w.radius * (0.075 + Math.random() * 0.03);
+        const x = w.x + Math.cos(a) * r, z = w.z + Math.sin(a) * r;
+        const y = this._whirlH(x, z, G.uTime.value) + 0.1;
+        const vt = sp * w.radius * 0.18 * dir;
+        v.set(-Math.sin(a) * vt, 1 + Math.random() * 1.8, Math.cos(a) * vt);
+        mist.emit({
+          pos: this._tp(x, y, z), vel: v, life: 0.8 + Math.random() * 0.8, size: 0.08 + Math.random() * 0.12, sizeEnd: 0.04,
+          color: [0.92, 0.95, 0.97], alpha: 0.75, drag: 0.3, gravity: 9.8, kind: 3, fadeIn: 0.02,
+        });
+      }
+      // from below: bubbles and motes drawn round the vortex near the camera
+      if (this.underwater > 0.5) {
+        const dx = cam.x - w.x, dz = cam.z - w.z;
+        if (Math.hypot(dx, dz) < w.radius * 1.2) {
+          w._subAcc = (w._subAcc || 0) + dt * 40 * w.s;
+          while (w._subAcc >= 1) {
+            w._subAcc -= 1;
+            const a = Math.random() * TAU, rr = 2 + Math.random() * 16;
+            const x = cam.x + Math.cos(a) * rr, z = cam.z + Math.sin(a) * rr;
+            const y = Math.min(cam.y + (Math.random() - 0.5) * 12, this.camSurface - 0.4);
+            this.whirlFlowAt(x, z, v);
+            const bubble = Math.random() < 0.45;
+            v.y = bubble ? 0.5 + Math.random() * 0.6 : (Math.random() - 0.5) * 0.15;
+            mist.emit({
+              pos: this._tp(x, y, z), vel: v, life: 3 + Math.random() * 4,
+              size: bubble ? 0.04 + Math.random() * 0.08 : 0.03 + Math.random() * 0.05, sizeEnd: bubble ? 0.1 : 0.03,
+              color: [0.9, 1, 1], alpha: bubble ? 0.7 : 0.55, drag: 0.02, gravity: bubble ? -0.6 : 0, kind: bubble ? 4 : 5,
+              fadeIn: 0.4,
+            });
+          }
+        }
+      }
+    }
+  }
+
   /** Displacement and derivatives of the displacing cascades at a tile (Lagrangian) point. */
   _eval(x, z, t, deriv, count = Infinity) {
     const d = this._d;
@@ -1190,10 +1547,11 @@ export class Ocean {
   _lagrange(x, z, t, n = this.state > 0.7 ? 80 : 40) {
     let px = x, pz = z;
     const sheltered = this.shelters.length > 0;
+    const calm = this._calm;
     let d = null;
     for (let it = 0; it < 5; it++) {
       d = this._eval(px, pz, t, true, n);
-      const sh = sheltered ? this._shelterAt(px, pz) : 1;
+      const sh = (sheltered ? this._shelterAt(px, pz) : 1) * calm;
       const fx = px + d.x * sh - x, fz = pz + d.z * sh - z;
       if (Math.abs(fx) + Math.abs(fz) < 0.002) break;
       const a = 1 + d.dxx * sh, b = d.dxz * sh, c = 1 + d.dzz * sh;
@@ -1216,12 +1574,16 @@ export class Ocean {
 
   /** Sea surface height at a world point, now (matches the rendered waves to a few cm). */
   heightAt(x, z, t = G.uTime.value) {
-    this._lagrange(x, z, t);
+    // inside a maelstrom: waves sampled along the spiral (in the warped frame), calmed, plus the funnel
+    const W = this._whirlN > 0;
+    if (W) this._whirlWarp(x, z);
+    const qx = W ? this._wx : x, qz = W ? this._wz : z;
+    this._lagrange(qx, qz, t);
     const px = this._lx, pz = this._lz;
     // one Newton step with every wave, and the height carried along it to first order
     const d = this._eval(px, pz, t, true);
-    const sh = this.shelters.length ? this._shelterAt(px, pz) : 1;
-    const fx = px + d.x * sh - x, fz = pz + d.z * sh - z;
+    const sh = (this.shelters.length ? this._shelterAt(px, pz) : 1) * this._calm;
+    const fx = px + d.x * sh - qx, fz = pz + d.z * sh - qz;
     const a = 1 + d.dxx * sh, b = d.dxz * sh, c = 1 + d.dzz * sh;
     const det = a * c - b * b;
     let ux = 0, uz = 0;
@@ -1229,16 +1591,29 @@ export class Ocean {
       ux = -(c * fx - b * fz) / det;
       uz = -(a * fz - b * fx) / det;
     }
-    return this.level + (d.y + d.hx * ux + d.hz * uz) * sh;
+    this._calm = 1;
+    return this.level + (d.y + d.hx * ux + d.hz * uz) * sh + (W ? this._whirlH(x, z, t) : 0);
   }
 
   /** Surface normal at a world point. */
   normalAt(x, z, out = new Vector3()) {
     const t = G.uTime.value;
-    this._lagrange(x, z, t);
+    const W = this._whirlN > 0;
+    const tw = W ? this._whirlWarp(x, z) : 0;
+    this._lagrange(W ? this._wx : x, W ? this._wz : z, t);
     const d = this._eval(this._lx, this._lz, t, true);
-    const sh = this.shelters.length ? this._shelterAt(this._lx, this._lz) : 1;
-    const hx = d.hx * sh, hz = d.hz * sh, dxx = d.dxx * sh, dzz = d.dzz * sh, dxz = d.dxz * sh;
+    const sh = (this.shelters.length ? this._shelterAt(this._lx, this._lz) : 1) * this._calm;
+    this._calm = 1;
+    let hx = d.hx * sh, hz = d.hz * sh;
+    const dxx = d.dxx * sh, dzz = d.dzz * sh, dxz = d.dxz * sh;
+    if (W) {
+      // slopes from the spiral frame back to world axes, plus the funnel's own slope
+      const c = Math.cos(tw), s = Math.sin(tw);
+      const rx = c * hx + s * hz, rz = -s * hx + c * hz;
+      const e = 0.4;
+      hx = rx + (this._whirlH(x + e, z, t) - this._whirlH(x - e, z, t)) / (2 * e);
+      hz = rz + (this._whirlH(x, z + e, t) - this._whirlH(x, z - e, t)) / (2 * e);
+    }
     const jx = Math.max(1 + dxx, 0.15), jz = Math.max(1 + dzz, 0.15);
     const J = Math.max(jx * jz - dxz * dxz, 0.05);
     return out.set(hz * dxz - hx * jz, J, dxz * hx - hz * jx).normalize();
@@ -1284,7 +1659,7 @@ export class Ocean {
       pz = z - d.z;
     }
     d = this._eval(px, pz, t, false, 24);
-    return this.level + d.y * (this.shelters.length ? this._shelterAt(px, pz) : 1);
+    return this.level + d.y * (this.shelters.length ? this._shelterAt(px, pz) : 1) + (this._whirlN > 0 ? this._whirlH(x, z, t) : 0);
   }
 
   /** Per-frame wake of something moving at (or just under) the surface. */
@@ -1596,6 +1971,7 @@ export class Ocean {
     u.uMeshEdge.value = this.meshEdge;
     if (this.enabled) this._weatherSpray(dt);
     if (this.enabled && this.underwater > 0.5) this._marineSnow(dt);
+    this._updateWhirls(dt);
     // camera submersion
     const cam = this.engine.camera.position;
     const h = this.enabled ? this.heightAt(cam.x, cam.z) : -1e9;

@@ -1,11 +1,12 @@
 // Sensor whips: long barbels trailing beneath the mouth. Built once per type as thin tapered
-// tubes in the jaw bone's frame; the vertex shader swings each whip with gravity, the relative
-// wind, flight inertia and a slow travelling wave (they feel the water and air like catfish
-// whiskers), so they always hang and stream naturally.
+// tubes in the jaw bone's frame; the vertex shader integrates each whip as a flexible rod (stiff
+// at the fleshy root, limp toward the tip, its length preserved) bent by gravity, the relative
+// wind and flight inertia, with its own natural curl and a slow travelling sway (they feel the
+// water and air like catfish whiskers), so they hang in soft curves even in a still pose.
 import { BufferGeometry, Float32BufferAttribute, Vector3 } from 'three';
 import { lerp } from '../../core/math.js';
 
-const SEG = 18, SIDES = 6;
+const SEG = 22, SIDES = 7;
 
 /** Returns { geo, count } with attributes: aB (index, along, angle, radius), aRoot, aDir. */
 export function buildBarbels(A, jawAbs) {
@@ -21,11 +22,15 @@ export function buildBarbels(A, jawAbs) {
   spec.forEach(([t, m, side, len, rad], bi) => {
     const sp = A.spot(t, m, side);
     const root = sp.p.clone().addScaledVector(sp.n, -rad * L * 0.6).sub(jawAbs);
-    // rest: hang down and back, splaying a little outward
-    const dir = new Vector3(side * 0.18, -0.72, -0.62).normalize();
+    // rest: the root sweeps out sideways and a little forward, then the whip droops and curls
+    // back (the shader bends it); each whip leans its own way
+    const h = Math.sin(bi * 12.9898 + (A.g.seed || 1) * 78.233) * 43758.5453;
+    const j = h - Math.floor(h);
+    const dir = new Vector3(side * (0.62 + 0.2 * j), -0.42 - 0.15 * j, 0.18 - 0.3 * j).normalize();
     for (let i = 0; i <= SEG; i++) {
       const a = i / SEG;
-      const r = rad * L * k * lerp(1, 0.12, Math.pow(a, 0.8));
+      // a fleshy root that narrows quickly, then a long fine whip
+      const r = rad * L * k * 1.45 * lerp(1, 0.08, Math.pow(a, 0.55));
       for (let j = 0; j <= SIDES; j++) {
         pos.push(root.x, root.y, root.z);
         aB.push(bi, a, (j / SIDES) * Math.PI * 2, r);

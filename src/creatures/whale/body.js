@@ -49,17 +49,22 @@ export function furAt(A, t, s) {
   if (A.calf) {
     // soft down all over (sleeker toward the tail), a fluffy crown and cheeks
     f = Math.max(f, 0.34 * lerp(0.55, 1, smoothstep(0.12, 0.4, t)));
-    const crown = smoothstep(P.eye.t - 0.05, P.eye.t - 0.01, t) * (1 - smoothstep(P.blow.t + 0.005, P.blow.t + 0.03, t)) * (1 - smoothstep(0.18, 0.32, sw));
-    f = Math.max(f, crown * 1.4);
+    // the crown tuft sits on top of the head behind the eyes (never over the face)
+    const tEyes = Math.min(P.eye.t, P.eye2.t);
+    const crown = smoothstep(tEyes - 0.07, tEyes - 0.035, t) * (1 - smoothstep(tEyes - 0.03, tEyes - 0.008, t)) * (1 - smoothstep(0.16, 0.28, sw));
+    f = Math.max(f, crown * 1.35);
   }
-  // bare: the face around and in front of the eyes, lips, rostrum, throat bellows
-  if (t > P.eye.t - 0.035) {
-    const face = smoothstep(P.eye.t - 0.035, P.eye.t + (A.calf ? 0.0 : -0.012), t);
-    f *= 1 - face * (A.calf ? (sw > 0.36 ? 1 : 0.55) : 1);
+  // bare: the face around and in front of the eyes, lips, rostrum, throat bellows (the calf
+  // keeps only a short velvet on the forehead, so its face and eyes read clearly)
+  const tFace = Math.min(P.eye.t, P.eye2.t) - (A.calf ? 0.03 : 0.035);
+  if (t > tFace) {
+    const face = smoothstep(tFace, tFace + (A.calf ? 0.022 : 0.023), t);
+    f *= 1 - face * (A.calf ? (sw > 0.3 ? 1 : 0.85) : 1);
   }
+  const er = A.calf ? 6.5 : 4.5, es = A.calf ? 4.6 : 3.2;
   const eyeD = Math.min(
-    Math.hypot((t - P.eye.t) / (P.eye.r * 4.5), Math.min(Math.abs(s - lm.sEye), Math.abs(s - (1 - lm.sEye))) / (P.eye.r * 3.2)),
-    Math.hypot((t - P.eye2.t) / (P.eye2.r * 4.5), Math.min(Math.abs(s - lm.sEye2), Math.abs(s - (1 - lm.sEye2))) / (P.eye2.r * 3.2)));
+    Math.hypot((t - P.eye.t) / (P.eye.r * er), Math.min(Math.abs(s - lm.sEye), Math.abs(s - (1 - lm.sEye))) / (P.eye.r * es)),
+    Math.hypot((t - P.eye2.t) / (P.eye2.r * er), Math.min(Math.abs(s - lm.sEye2), Math.abs(s - (1 - lm.sEye2))) / (P.eye2.r * es)));
   f *= smoothstep(1.0, 1.8, eyeD);
   const bell = bellowsAt(A, t, s);
   f *= 1 - smoothstep(0.05, 0.4, bell);

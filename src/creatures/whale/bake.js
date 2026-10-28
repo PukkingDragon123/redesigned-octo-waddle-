@@ -131,11 +131,17 @@ void main() {
   }
 
   // ---- the fine network of pale streaks across the dark skin (tulkun) ----
+  // Long, flowing, hand-drawn veins: the cells are stretched along the body and bent by a slow
+  // warp, so the network runs with the body's flow instead of reading as short straight dashes.
+  // Each line is antialiased by its own texel width and never drawn thinner than about a texel
+  // (it survives the mip chain as a soft line), swells and thins along its length, and breaks
+  // only here and there; finer, fainter veins branch between the main ones.
   {
-    vec2 sp = vec2(s * perim, t * L) / (L * 0.016);
-    sp += vec2(fbm2(sp * 0.35 + 1.7), fbm2(sp * 0.35 + 9.2)) * 1.6;
-    // hand-drawn: a finer pen tremor on top of the slow warp, so no cell edge runs straight
-    sp += (vec2(vnoise(sp * 2.3 + 3.7), vnoise(sp * 2.3 + 8.1)) - 0.5) * 0.46;
+    vec2 mp = vec2(s * perim, t * L);
+    vec2 sp = mp / (L * vec2(0.021, 0.05));
+    sp += vec2(fbm2(sp * vec2(0.2, 0.32) + 1.7), fbm2(sp * vec2(0.2, 0.32) + 9.2)) * vec2(1.9, 1.1);
+    // a gentle pen tremor (low amplitude, so the strokes stay smooth and long)
+    sp += (vec2(vnoise(sp * 1.5 + 3.7), vnoise(sp * 1.5 + 8.1)) - 0.5) * 0.22;
     vec2 i = floor(sp), f = fract(sp);
     float f1 = 8.0, f2 = 8.0;
     for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
@@ -146,11 +152,31 @@ void main() {
       if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
     }
     float edge = sqrt(f2) - sqrt(f1);
-    // the width swells and thins along each streak, and the strokes fade out at their ends
-    float lw = 0.045 * (0.35 + 1.3 * vnoise(sp * 1.4 + 5.3));
-    float line = smoothstep(lw, lw * 0.15, edge) * smoothstep(0.45, 0.72, fbm3(q * 7.0 + 7.0)) * smoothstep(0.25, 0.5, vnoise(sp * 0.9 + 2.2));
-    col = mix(col, mix(col, uMark2, 0.45), line * cs * uAmt.y * 0.7);
-    h += line * cs * uAmt.y * L * 0.00008;
+    float aaw = max(fwidth(edge), 1e-4);
+    float lw = 0.055 * (0.4 + 1.2 * vnoise(sp * 0.7 + 5.3));
+    lw = max(lw, aaw * 0.85);
+    float line = 1.0 - smoothstep(lw * 0.45, lw + aaw, edge);
+    // strokes: long runs, broken only where a slow noise dips; whole regions stay plain
+    float runs = smoothstep(0.26, 0.5, vnoise(sp * vec2(0.42, 0.26) + 2.2));
+    float region = smoothstep(0.4, 0.66, fbm3(q * 6.0 + 7.0));
+    line *= runs * region;
+    // fine secondary veins (a quarter of the cell size), fainter
+    vec2 sp2 = sp * 2.3 + 17.0;
+    vec2 i2 = floor(sp2), f2b = fract(sp2);
+    float g1 = 8.0, g2 = 8.0;
+    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+      vec2 g = vec2(float(x), float(y));
+      vec2 r = g + hash22(i2 + g + 31.0) - f2b;
+      float d = dot(r, r);
+      if (d < g1) { g2 = g1; g1 = d; } else if (d < g2) { g2 = d; }
+    }
+    float e2 = sqrt(g2) - sqrt(g1);
+    float aa2 = max(fwidth(e2), 1e-4);
+    float lw2 = max(0.04 * (0.3 + vnoise(sp2 * 0.6)), aa2 * 0.8);
+    float vein = (1.0 - smoothstep(lw2 * 0.4, lw2 + aa2, e2)) * smoothstep(0.45, 0.7, vnoise(sp2 * 0.35 + 6.0)) * region;
+    float net = max(line, vein * 0.45);
+    col = mix(col, mix(col, uMark2, 0.5), net * cs * uAmt.y * 0.75);
+    h += net * cs * uAmt.y * L * 0.00008;
   }
 
   // ---- eye patches (and the mother's pale crescent under each eye) ----

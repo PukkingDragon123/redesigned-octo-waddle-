@@ -85,10 +85,15 @@ menu is the only place text ever appears.
 
 ## The journey
 
-The game is one life in four acts. Cinematic moments and title cards carry it; hold any key,
-button or touch for a moment to skip a cinematic.
+The game is one life, filmed like a wildlife film journal: datelines, species labels and a
+cameraman's notes appear only in cinematic moments. Hold any key, button or touch for a moment
+to skip a cinematic.
 
-**ACT I · The Calf**: your first migration with your mother and the herd.
+**The hatching**: each season the herd returns to the Spiral Maelstrom, a slow sea vortex.
+The female lays a single glowing egg in its calm eye and leaves to feed while the males circle
+and guard it. You hatch: push out of the shell and rise to your first breath.
+
+**Season one · the calf**: your first migration with your mother and the herd.
 
 | Chapter | Light | What happens |
 |---|---|---|
@@ -103,13 +108,14 @@ button or touch for a moment to skip a cinematic.
 | The Fog Wall | whiteout | Flying blind through sea fog, following her voice |
 | The Oasis | morning | A spiral atoll, the Mother Tree, the gathering, home |
 
-**ACT II · The Song of Two**: seasons turn and you are grown. At golden hour a mate answers your
+**Year nine · the song of two**: you are grown. At golden hour a mate answers your
 voice: sing a duet, then follow and mirror her rising spiral dance into the night.
 
-**ACT III · New Life**: in a sheltered lagoon at dawn your calf is born. Carry it up for its
-first breath, then teach it to follow, answer and feed.
+**New life**: your mate lays your egg in the maelstrom's eye and goes to feed. Guard it
+against lanternjacks and skimmers with slaps, dashes, breaches and booms until it hatches,
+then lift your calf to its first breath and teach it to follow, answer and feed.
 
-**ACT IV · The Elder**: years pass. You lead the herd's migration, sing the last song under the
+**Year thirty-one · the elder**: years pass. You lead the herd's migration, sing the last song under the
 galaxy, and come to rest in the deep, where your body becomes a glowing garden. At dawn a new
 calf wakes beside its mother.
 
@@ -162,8 +168,9 @@ The visual and audio research behind all of this is in
 ### Debug parameters
 
 Add `?debug` to the URL, then optionally:
-- `&chapter=N` to jump to a chapter (0-9), `&act=2|3|4` to jump to a later act (or
-  `&chapter=10|11|12`), `&intro` to play the opening.
+- `&hatch` to play the hatching opening (`&hatch=push` starts at the push), `&chapter=N` to
+  jump to a chapter (0-9, skipping the hatching), `&act=2|3|4` for the courtship, new life and
+  elder parts (or `&chapter=10|11|12`), `&intro` to play the opening from the menu.
 - `&auto` for an autopilot that follows the mother; `&dt=0.05&warp=30` to simulate ahead.
 - `&test=fly|whale|islands|world|ocean|flora|painterly|herd|ecosystem` (dev scenes in
   `src/dev/`; add `&ocean` to give a dev scene the real ocean), `&time=dawn|morning|…`.
@@ -184,5 +191,7 @@ All of these drive headless Chromium against the dev server (`npm run dev`):
 | `node tools/story-acts.mjs 2 60 [shot]` | Plays an act headless (2, 3 or 4) and reports its state |
 | `node tools/story-pace.mjs` | Measures how long each chapter and act takes with the autopilot |
 | `node tools/story-shot.mjs` | A page screenshot, so the title-card overlay shows |
+| `node tools/doc-check.mjs` | Runs the hatching or an act and logs its beats (`CANVAS=1` saves the frame) |
+| `node tools/doc-overlay.mjs` | Renders the film-journal overlay (cards, lower-thirds, subtitles) without WebGL |
 
 `EXTRA="&worldslice=4000"` makes the world build much faster in headless checks.

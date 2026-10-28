@@ -190,6 +190,7 @@ ${DEPTH}
 uniform sampler2D uNoise;
 uniform vec3 uShallow;
 uniform vec3 uDeep;
+uniform float uDepthK;
 varying vec3 vWorldPos;
 void main() {
   vec2 p = vWorldPos.xz;
@@ -207,7 +208,7 @@ void main() {
   float sceneZ = sceneDepthAt(suv);
   float z = length(vWorldPos - uCamPos) * dot(normalize(vWorldPos - uCamPos), normalize(-vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2])));
   float depth = max(sceneZ - z, 0.0);
-  vec3 body = mix(uShallow, uDeep, smoothstep(0.5, 9.0, depth));
+  vec3 body = mix(uShallow, uDeep, smoothstep(0.5, uDepthK, depth));
   body *= hemiAmbient(vec3(0.0, 1.0, 0.0)) * 0.9 + uSunColor * 0.35;
   vec3 col = mix(body, sky, 0.25 + 0.6 * fres);
   // sun glints
@@ -243,6 +244,7 @@ export function buildLake(center, radiusFn, segments = 64) {
       uNoise: { value: getNoiseTexture() },
       uShallow: { value: new Color('#8fe0d6') },
       uDeep: { value: new Color('#2f8c88') },
+      uDepthK: { value: 9 },
     }),
     transparent: true,
     depthWrite: true,
@@ -256,4 +258,22 @@ export function buildLake(center, radiusFn, segments = 64) {
   mesh.renderOrder = 8; // before the cloud puffs (10); writes depth so puffs behind it are hidden
   mesh.name = 'lake';
   return mesh;
+}
+
+/**
+ * Dev scenes only: a plain sea at y = 0 until the real ocean (game.ocean) exists. Reuses the
+ * lake shader: depth-tinted turquoise shallows over the reefs, painted sky reflection.
+ */
+export function placeholderSea(game, radius = 9000) {
+  if (game.ocean) return null;
+  if (game.cloudSea) game.cloudSea.enabled = false;
+  const sea = buildLake(new Vector3(0, 0, 0), () => radius, 96);
+  sea.material.uniforms.uShallow.value.set('#6fd6cf');
+  sea.material.uniforms.uDeep.value.set('#0f4f66');
+  sea.material.uniforms.uDepthK.value = 30;
+  sea.name = 'placeholder-sea';
+  sea.frustumCulled = false;
+  game.engine.sceneT.add(sea);
+  game.engine.beforeRender.push((cam) => { sea.position.set(cam.position.x, 0, cam.position.z); });
+  return sea;
 }

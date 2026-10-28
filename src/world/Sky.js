@@ -2,7 +2,8 @@
 // cloud ocean at the horizon, high cirrus, a huge ringed gas giant, stars and moon.
 import { Mesh, SphereGeometry, ShaderMaterial, BackSide, Vector3, Color, LessEqualDepth } from 'three';
 import { G } from '../render/Globals.js';
-import { UNIFORMS, NOISE } from '../render/shaders/common.js';
+import { UNIFORMS, NOISE, LIGHTING, SEA } from '../render/shaders/common.js';
+import { FullscreenPass, FS_VERT } from '../render/FullscreenPass.js';
 
 const VERT = /* glsl */ `
 varying vec3 vDir;
@@ -13,9 +14,7 @@ void main() {
 }
 `;
 
-const FRAG = /* glsl */ `
-${UNIFORMS}
-${NOISE}
+const SKY_FN = /* glsl */ `
 uniform vec3 uPlanetDir;
 uniform vec3 uPlanetAxis;
 uniform float uPlanetSize;
@@ -25,7 +24,6 @@ uniform float uBankHeight;
 uniform float uCirrus;
 uniform vec3 uBankLit;
 uniform vec3 uBankShadow;
-varying vec3 vDir;
 
 // Towering cloud banks around the horizon. Returns (alpha, light).
 // Azimuth is mapped onto a circle in noise space so the banks wrap without a seam.
@@ -50,8 +48,8 @@ vec2 cloudBank(vec3 rd, float seed, float height, float scale) {
   return vec2(alpha, light);
 }
 
-void main() {
-  vec3 rd = normalize(vDir);
+// env: 1 when rendering the reflection map (no sun disk: the sea adds its own glitter).
+vec3 skyColor(vec3 rd, float env) {
   float y = rd.y;
   float sd = max(dot(rd, uSunDir), 0.0);
 
@@ -147,15 +145,54 @@ void main() {
   col += uSunScatter * pow(sd, 10.0) * 0.18 * (1.0 - storm);
   col += uSunColor * pow(sd, 120.0) * 0.06 * (1.0 - storm);
   float disk = smoothstep(0.99955, 0.99975, sd);
-  col += uSunColor * disk * 7.0 * (1.0 - storm) * smoothstep(-0.03, 0.01, y);
+  col += uSunColor * disk * 7.0 * (1.0 - storm) * smoothstep(-0.03, 0.01, y) * (1.0 - env);
 
   // --- Storm & lightning -------------------------------------------------------------------
   if (uFlash > 0.0) {
     float fl = fbm2(rd.xz / (abs(y) + 0.2) * 1.5 + 13.0);
     col += vec3(0.75, 0.78, 1.0) * uFlash * (0.4 + fl * 0.8) * 0.9;
   }
+  return col;
+}
+`;
 
+const FRAG = /* glsl */ `
+${UNIFORMS}
+${NOISE}
+${LIGHTING}
+${SEA}
+${SKY_FN}
+varying vec3 vDir;
+void main() {
+  vec3 rd = normalize(vDir);
+  vec3 col;
+  if (uUnderwater > 0.5) {
+    // under the surface everything not drawn is water
+    col = waterFogColor(rd, max(uSeaLevel - uCamPos.y, 0.0) + max(-rd.y, 0.0) * 40.0);
+  } else if (rd.y < 0.0 && uCamPos.y > uSeaLevel) {
+    // the open sea past the end of the ocean mesh, to the horizon
+    float t = (uCamPos.y - uSeaLevel) / max(-rd.y, 1e-5);
+    vec3 P = uCamPos + rd * min(t, 1e6);
+    col = airFog(seaFarColor(rd), P);
+    // keep the horizon line soft
+    col = mix(col, airFog(skyColor(vec3(rd.x, 0.0, rd.z), 0.0), uCamPos + rd * 2e5), smoothstep(-0.004, 0.0, rd.y) * 0.5);
+  } else {
+    col = skyColor(rd, 0.0);
+  }
   gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const ENV_FRAG = /* glsl */ `
+${UNIFORMS}
+${NOISE}
+${SKY_FN}
+varying vec2 vUv;
+void main() {
+  float az = (vUv.x - 0.5) * 6.28318530718;
+  float el = vUv.y * vUv.y * 1.5707963;
+  vec3 rd = vec3(sin(az) * cos(el), sin(el), cos(az) * cos(el));
+  gl_FragColor = vec4(skyColor(rd, 1.0), 1.0);
 }
 `;
 
@@ -189,5 +226,14 @@ export class Sky {
 
   update(camera) {
     this.mesh.position.copy(camera.position);
+  }
+
+  /** A fullscreen pass that renders this sky into an upper-hemisphere equirect map (sea reflections). */
+  createEnvPass() {
+    return new FullscreenPass(new ShaderMaterial({
+      vertexShader: FS_VERT,
+      fragmentShader: ENV_FRAG,
+      uniforms: this.uniforms,
+    }));
   }
 }

@@ -2,7 +2,7 @@
 // while the world grows behind it. Owns colliders (islands, the arch, giant trunks),
 // waterfalls, lakes, chapter visibility, and spawn points for the living ecosystem.
 import { Group, Vector3, Quaternion } from 'three';
-import { buildIsland, islandDistance } from './Islands.js';
+import { buildIsland, islandDistance } from './LegacyIslands.js';
 import { Vegetation, TEMPLATES, PALETTES } from './Trees.js';
 import { buildWaterfall, buildLake } from './Water.js';
 import { buildArch } from './Landmarks.js';

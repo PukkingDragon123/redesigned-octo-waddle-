@@ -58,6 +58,28 @@ export const G = {
   // Song ripples through clouds: xyz center, w start time
   uSongRipple: { value: new Vector4(0, -9999, 0, -999) },
   uSongAmp: { value: 0 },
+
+  // Ocean of Vur Sok (written by world/Ocean.js and Atmosphere.js; read by every material through
+  // common.js: applyFog tints and attenuates geometry below the sea, caustics, underwater fog)
+  uSeaLevel: { value: 0 },
+  uSeaState: { value: 0.3 },
+  // camera submersion 0 (above) .. 1 (below the local wave surface)
+  uUnderwater: { value: 0 },
+  // lit in-scatter colour of the water column (what deep water and underwater distance fade to)
+  uWaterTint: { value: new Color(0.012, 0.075, 0.1) },
+  // extinction per metre (rgb): red goes first, blue-green travels furthest
+  uWaterAbsorb: { value: new Vector3(0.3, 0.07, 0.045) },
+  // x caustic strength, y caustic scale (1/m), z night plankton glow, w unused
+  uWaterParams: { value: new Vector4(1, 0.35, 0, 0) },
+  // resolved opaque colour of the frame (refraction through the sea surface); set by the ocean
+  uSceneTex: { value: null },
+  // equirect sky radiance (reflections, Snell's window); rendered each frame by the ocean
+  uSkyEnv: { value: null },
+  // lit upwelling colour of deep open water, and the turquoise light scattered through thin crests
+  uSeaBody: { value: new Color(0.004, 0.03, 0.05) },
+  uSeaScatter: { value: new Color(0.05, 0.4, 0.38) },
+  // x: total slope variance of the waves (far roughness), y: mean foam cover, z: wave rms (m), w: shallow tint mix
+  uSeaFar: { value: new Vector4(0.01, 0, 0.3, 0) },
 };
 
 /** Convenience to merge the global uniform references into a material's uniforms. */

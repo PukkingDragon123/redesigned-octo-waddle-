@@ -70,6 +70,16 @@ void main() {
   } else if (kind < 1.5) {
     // glow mote: tight core, soft halo
     a = exp(-r2 * 6.0) + exp(-r2 * 28.0) * 0.8;
+  } else if (kind > 3.5) {
+    // bubble: clear centre, bright rim and a glint (rises through the water)
+    float r = sqrt(r2);
+    a = smoothstep(0.55, 0.85, r) * smoothstep(1.0, 0.86, r) * 0.9 + exp(-dot(vUv - vec2(-0.35, 0.35), vUv - vec2(-0.35, 0.35)) * 40.0) * 0.8;
+    col = mix(uWaterTint * 3.0 + uSkyAmbient * 0.4, vec3(1.0), 0.35) * vCol.rgb;
+  } else if (kind > 2.5) {
+    // sea spray droplet: dense bright core, lit by sun and sky, a little glint toward the sun
+    a = exp(-r2 * 3.5);
+    vec3 lit = uSunColor * 0.55 + uSkyAmbient * 0.75 + uMoonColor * uNight * 0.5;
+    col = lit * vCol.rgb;
   } else {
     // sparkle: four-point glint
     float c = exp(-r2 * 30.0);
@@ -148,7 +158,8 @@ export class Particles {
   }
 
   /**
-   * o: { pos, vel, life, size, sizeEnd, color (Color or [r,g,b]), alpha, drag, gravity, kind (0 mist, 1 glow, 2 sparkle) }
+   * o: { pos, vel, life, size, sizeEnd, color (Color or [r,g,b]), alpha, drag, gravity,
+   *      kind (0 mist, 1 glow, 2 sparkle, 3 sea spray droplet, 4 bubble) }
    */
   emit(o) {
     let i;

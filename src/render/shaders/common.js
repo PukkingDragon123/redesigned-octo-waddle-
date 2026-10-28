@@ -31,6 +31,12 @@ uniform float uFlash;
 uniform vec3 uFlashPos;
 uniform float uInCloud;
 uniform float uStorm;
+uniform float uSeaLevel;
+uniform float uSeaState;
+uniform float uUnderwater;
+uniform vec3 uWaterTint;
+uniform vec3 uWaterAbsorb;
+uniform vec4 uWaterParams;
 `;
 
 export const NOISE = /* glsl */ `
@@ -190,7 +196,97 @@ vec3 stylizedLight(Surface s) {
   return col;
 }
 
-vec3 applyFog(vec3 col, vec3 P) {
+// ---- Water column (the sea of Vur Sok) ----------------------------------------------------
+// Everything below the sea level is lit by light that came down through the water: red is
+// absorbed first, so submerged surfaces turn blue-green with depth, and the moving surface
+// focuses sunlight into caustics. When the camera itself is under the surface, the view path is
+// water, not air. Self-contained (no NOISE dependency): some shaders include LIGHTING alone.
+vec2 wcHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.xx + p3.yz) * p3.zy);
+}
+// Animated cellular edges (F2 - F1): thin bright filaments where neighbouring cells meet.
+float wcCells(vec2 p, float t) {
+  vec2 i = floor(p), f = fract(p);
+  float f1 = 8.0, f2 = 8.0;
+  for (int y = -1; y <= 1; y++)
+  for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y));
+    vec2 o = wcHash(i + g);
+    o = 0.5 + 0.38 * sin(t + 6.2831 * o);
+    vec2 r = g + o - f;
+    float d = dot(r, r);
+    if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) { f2 = d; }
+  }
+  return sqrt(f2) - sqrt(f1);
+}
+// Direction sunlight travels after refracting into the sea (pointing down).
+vec3 waterSunRefract() {
+  return refract(-uSunDir, vec3(0.0, 1.0, 0.0), 0.7519);
+}
+/** Caustic light 0..~1.5 at a submerged point (needs the depth below the surface). */
+float waterCaustics(vec3 P, float depth) {
+  vec3 sr = waterSunRefract();
+  // the patch of surface that focused this light: walk back up the refracted sun ray
+  vec2 S = P.xz + sr.xz * (depth / min(sr.y, -0.2));
+  vec2 q = S * uWaterParams.y;
+  // gentle domain warp so the filaments curve like real caustics
+  q += 0.35 * vec2(sin(q.y * 0.9 + uTime * 0.45), sin(q.x * 0.8 - uTime * 0.38));
+  float t = uTime * 0.85;
+  float a = wcCells(q, t);
+  float b = wcCells(q * 1.37 + vec2(5.2, 1.3), t * 1.21 + 1.7);
+  // filaments sharpen near the focal depth and spread deeper down
+  float w = 0.05 + 0.02 * depth;
+  float c = exp(-a * a / (w * w)) + exp(-b * b / (w * w * 1.3));
+  c = c * c * 0.55 + c * 0.25;
+  return c * smoothstep(0.15, 1.6, depth) * exp(-depth * 0.045);
+}
+/** Light reaching a submerged surface: depth attenuation, blue-green tint and caustics. */
+vec3 waterSubmerge(vec3 col, vec3 P) {
+  float d = uSeaLevel - P.y;
+  // waves wet a band around the mean level; the band widens with the swell
+  float band = max(0.25, uWaterParams.w);
+  float w = smoothstep(-band * 0.6, band, d);
+  if (w <= 0.0) return col;
+  float dd = max(d, 0.0);
+  vec3 Td = exp(-uWaterAbsorb * (dd * 1.15 + 0.4));
+  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
+  float cs = uWaterParams.x > 0.0 ? waterCaustics(P, dd) * uWaterParams.x * sunUp : 0.0;
+  vec3 lit = col * Td * (1.0 + cs * 1.6);
+  return mix(col, lit, w);
+}
+/** In-scattered light of the water column toward the viewer along rd, at a given depth. */
+vec3 waterFogColor(vec3 rd, float depth) {
+  float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 c = uWaterTint * mix(0.28, 1.35, up * up);
+  vec3 sr = waterSunRefract();
+  float toward = pow(max(dot(rd, -sr), 0.0), 5.0);
+  float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);
+  c += uWaterTint * toward * 2.2 * sunUp;
+  return c * exp(-uWaterAbsorb * max(depth, 0.0) * 0.55);
+}
+/** Metres of water between the camera and P (camera under the surface). */
+float waterPathLength(vec3 P, float dist) {
+  float cy = uSeaLevel - uCamPos.y;
+  if (cy <= 0.0) return 0.0;
+  if (P.y <= uSeaLevel) return dist;
+  return dist * clamp(cy / max(P.y - uCamPos.y, 1e-4), 0.0, 1.0);
+}
+vec3 underwaterFog(vec3 col, vec3 P) {
+  vec3 v = P - uCamPos;
+  float dist = length(v);
+  vec3 rd = v / max(dist, 1e-4);
+  float dw = waterPathLength(P, dist);
+  // above the surface: the air part of the path hazes first
+  float air = max(dist - dw, 0.0);
+  col = mix(col, uFogColor, 1.0 - exp(-air * uFogParams.x * 2.0));
+  vec3 T = exp(-uWaterAbsorb * dw);
+  float midDepth = max(uSeaLevel - (uCamPos.y + rd.y * dw * 0.5), 0.0);
+  return col * T + waterFogColor(rd, midDepth) * (1.0 - T);
+}
+
+vec3 airFog(vec3 col, vec3 P) {
   vec3 v = P - uCamPos;
   float dist = length(v);
   vec3 rd = v / max(dist, 1e-4);
@@ -207,7 +303,17 @@ vec3 applyFog(vec3 col, vec3 P) {
   return mix(col, fogCol, clamp(f, 0.0, 1.0));
 }
 
-float fogAmount(vec3 P) {
+// Atmospheric (or, with the camera submerged, underwater) fog for a lit surface at P. Geometry
+// below the sea level is first lit as submerged (attenuation + caustics); seen from above, the
+// ocean surface in front of it adds the view-path absorption itself.
+vec3 applyFog(vec3 col, vec3 P) {
+  col = waterSubmerge(col, P);
+  vec3 a = airFog(col, P);
+  if (uUnderwater <= 0.0) return a;
+  return mix(a, underwaterFog(col, P), uUnderwater);
+}
+
+float airFogAmount(vec3 P) {
   vec3 v = P - uCamPos;
   float dist = length(v);
   vec3 rd = v / max(dist, 1e-4);
@@ -220,9 +326,20 @@ float fogAmount(vec3 P) {
   return clamp(1.0 - (1.0 - fd) * (1.0 - fh), 0.0, 1.0);
 }
 
+float fogAmount(vec3 P) {
+  float a = airFogAmount(P);
+  if (uUnderwater <= 0.0) return a;
+  float dist = length(P - uCamPos);
+  vec3 T = exp(-uWaterAbsorb * waterPathLength(P, dist));
+  float w = 1.0 - dot(T, vec3(0.2, 0.5, 0.3));
+  return mix(a, w, uUnderwater);
+}
+
 vec3 fogColorFor(vec3 rd) {
   float sunAmt = pow(max(dot(rd, uSunDir), 0.0), 10.0);
-  return mix(uFogColor, uSunScatter, sunAmt * 0.85) + vec3(0.8, 0.85, 1.0) * uFlash * 0.25;
+  vec3 a = mix(uFogColor, uSunScatter, sunAmt * 0.85) + vec3(0.8, 0.85, 1.0) * uFlash * 0.25;
+  if (uUnderwater <= 0.0) return a;
+  return mix(a, waterFogColor(rd, max(uSeaLevel - uCamPos.y, 0.0)), uUnderwater);
 }
 `;
 
@@ -248,5 +365,69 @@ vec3 windSway(vec3 worldPos, float flex, float phase) {
   vec3 dir = length(w) > 0.001 ? normalize(w) : vec3(1.0, 0.0, 0.0);
   float s = length(w) * 0.06;
   return (dir * (gust * s) + vec3(dir.z, 0.15, -dir.x) * flutter * s * 0.6) * flex;
+}
+`;
+
+/**
+ * The sea's optics, shared by the ocean surface and the sky dome (which continues the ocean past
+ * the end of the surface mesh, so the two meet without a seam). Needs UNIFORMS.
+ * skyEnv(dir, lod) also gives any glossy material the current sky radiance for reflections.
+ */
+export const SEA = /* glsl */ `
+uniform sampler2D uSkyEnv;
+uniform vec3 uSeaBody;
+uniform vec3 uSeaScatter;
+uniform vec4 uSeaFar;
+
+// Upper-hemisphere equirect, elevation warped so the horizon gets most of the texels.
+vec2 skyEnvUv(vec3 d) {
+  float az = atan(d.x, d.z);
+  float el = asin(clamp(d.y, 0.0, 1.0));
+  return vec2(az * 0.15915494 + 0.5, sqrt(el * 0.63661977));
+}
+vec3 skyEnv(vec3 d, float lod) {
+  return textureLod(uSkyEnv, skyEnvUv(d), lod).rgb;
+}
+float seaFresnel(float c) {
+  float f = 1.0 - clamp(c, 0.0, 1.0);
+  float f2 = f * f;
+  return 0.02 + 0.98 * f2 * f2 * f;
+}
+// Beckmann microfacet glitter for a light of the given radiance, from the mean normal and the
+// per-axis slope variance of everything the pixel averages (LEAN-style), so the sun path keeps
+// its width at any distance instead of collapsing into a mirror.
+vec3 seaGlitter(vec3 N, vec3 V, vec3 L, float s2, vec3 lightCol) {
+  vec3 H = normalize(V + L);
+  float nh = max(dot(N, H), 1e-3);
+  float nh2 = nh * nh;
+  float m2 = max(2.0 * s2, 2e-4);
+  float tan2 = (1.0 - nh2) / nh2;
+  float D = exp(-tan2 / m2) / (3.14159265 * m2 * nh2 * nh2);
+  float nv = max(dot(N, V), 0.02);
+  float nl = max(dot(N, L), 0.0);
+  float F = seaFresnel(max(dot(V, H), 0.0));
+  // Smith-like masking for rough seas at grazing view
+  float g = nv / (nv + sqrt(m2) * 0.5);
+  return lightCol * D * F * g * smoothstep(0.0, 0.05, nl) / (4.0 * nv);
+}
+float seaEnvLod(float s2) {
+  return clamp(log2(1.0 + sqrt(s2) * 64.0) * 1.15, 0.0, 6.0);
+}
+// The open sea far away: flat mean surface, all waves below a pixel, so only their statistics
+// remain (roughened reflection, glitter, mean foam). rd points down; returns unfogged radiance.
+vec3 seaFarColor(vec3 rd) {
+  vec3 V = -rd;
+  float nv = max(V.y, 1e-3);
+  float s2 = uSeaFar.x;
+  // rough seas reflect less at grazing angles (wave faces turn toward the viewer)
+  float F = seaFresnel(nv) / (1.0 + sqrt(s2) * 4.0 * (1.0 - nv));
+  vec3 R = vec3(rd.x, abs(rd.y) + sqrt(s2) * 0.5, rd.z);
+  vec3 refl = skyEnv(normalize(R), seaEnvLod(s2) + 1.0);
+  vec3 col = refl * F + uSeaBody * (1.0 - F);
+  vec3 N = vec3(0.0, 1.0, 0.0);
+  col += seaGlitter(N, V, uSunDir, s2 + 1e-4, uSunColor) * 0.9;
+  col += seaGlitter(N, V, uMoonDir, s2 + 1e-4, uMoonColor * 0.35) * uNight;
+  vec3 foamCol = uSunColor * max(uSunDir.y, 0.0) * 0.75 + uSkyAmbient * 0.8;
+  return mix(col, foamCol, uSeaFar.y * 0.5);
 }
 `;

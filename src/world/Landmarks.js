@@ -71,6 +71,13 @@ function sweepRock(pathFn, thickFn, nAlong, nAround, seed, opts = {}) {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
+  { // temporary bridge to the Vur Sok terrain shader (aMat: meadow, sand, kind, heat; aExt: ao, strata)
+    const pa = geo.attributes.position.array, ga = geo.attributes.aGrass.array;
+    const m = new Float32Array(ga.length * 4), e = new Float32Array(ga.length * 2);
+    for (let i = 0; i < ga.length; i++) { m[i * 4] = ga[i]; e[i * 2] = 1; e[i * 2 + 1] = pa[i * 3 + 1]; }
+    geo.setAttribute('aMat', new Float32BufferAttribute(m, 4));
+    geo.setAttribute('aExt', new Float32BufferAttribute(e, 2));
+  }
   return geo;
 }
 

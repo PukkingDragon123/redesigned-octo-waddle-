@@ -82,8 +82,8 @@ export class Story {
       await Promise.race([
         Promise.all([
           ...['300 96px', '400 96px', 'italic 400 96px'].map((f) => document.fonts?.load(`${f} "Cormorant Garamond"`)),
-          ...['400 96px', '500 96px'].map((f) => document.fonts?.load(`${f} "Cinzel"`)),
-          document.fonts?.load('700 96px "Cinzel Decorative"'),
+          document.fonts?.load('400 96px "Almendra SC"'),
+          document.fonts?.load('400 96px "Almendra Display"'),
         ]),
         new Promise((r) => setTimeout(r, 2500)),
       ]);

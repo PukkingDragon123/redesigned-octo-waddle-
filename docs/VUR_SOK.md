@@ -152,6 +152,49 @@ A "lines" builder sweeps the existing shaders for this. It owns:
 
 The story, moves and underwater builders apply the rule to their own work.
 
+### 0.7 A nature documentary of a life, hatched in a whirlpool (newest)
+User: *"make the cinematic cooler, feel like a nature documentary show: you are being hatched; your species is
+born from an embryo-like egg in the middle of a whirlpool; the males guard while the female lays the egg and
+finds food; and make all fauna and creatures super detailed, polished models that look really good and
+realistic, not just everywhere."*
+- **Lore:** each season the herd returns to a whirlpool nursery, the Spiral Maelstrom, a slow sea vortex.
+  - The female lays a single embryo-like egg in its calm eye: translucent, glowing, the curled embryo visible
+    inside, a heartbeat pulse. She then leaves to find food.
+  - The males circle and guard the egg against predators.
+  - The calf hatches, swims out of the egg and rises to its first breath.
+- **Where it plays:** ACT I opens with your hatching. In ACT III you are the male who guards the egg in the
+  maelstrom while your mate lays it and goes to feed; then your calf hatches.
+- **Documentary language:**
+  - Camera: long-lens observational shots, slow pans, aerial drone moves, macro close-ups, time-lapse and slow
+    motion.
+  - Text: lower-third captions naming places and species (with invented scientific names), and sparse
+    narrator subtitles.
+  - No real broadcaster's name or branding.
+- **Creatures:** every creature gets a super-detailed, polished, realistic model (silhouette, anatomy, eyes,
+  skin, scales, membranes, animation). They live where they would really live, in believable numbers, not
+  sprinkled everywhere.
+- **Title:** the SKYSONG logo is the custom spiral logotype (hand-drawn spiral S's, the O as Vur Sok's ringed
+  world, Almendra letters). The rest of the lettering is Almendra.
+
+Builders:
+
+| Role | Owns |
+|---|---|
+| doc (story) | src/game/Story.js, Cinematics.js, src/game/life/, Menu.js, CameraRig.js, SongGame.js, src/creatures/WhaleTypes.js, src/audio/moods.js, index.html |
+| maelstrom | src/world/Ocean.js, new src/creatures/egg/, src/dev/hatch.js |
+| fauna | src/creatures/Ecosystem.js, eco/, bugs/, Falcon.js, falcon/, src/game/Activities.js, src/dev/ecosystem.js, src/dev/underwater.js, src/dev/bugs.js, src/dev/falcon.js |
+| whale detail | src/creatures/whale/, Whale.js, WhaleAnimator.js, WhaleModel.js, whaleShaders.js, src/dev/whale.js, src/dev/fly.js |
+
+Maelstrom API, which doc builds against with defensive fallbacks:
+- `game.ocean.setWhirlpool(id, { center, radius, depth, spin })` and `game.ocean.clearWhirlpool(id)`. The vortex
+  dips the surface into a spiral funnel with foam arms, and `heightAt` / `normalAt` include it.
+- `new WhaleEgg(game, opts)` from `src/creatures/egg/WhaleEgg.js`, with:
+  - `.group`, added to the scene by the egg itself;
+  - `.position`, `.update(dt)`, `.setGlow(k)`, `.setPulse(rate)` and `.crack(k 0..1)`;
+  - `.hatch()`, which bursts the shell and leaves fragments, fluid and bubbles;
+  - `.embryo`, the curled calf inside, which can twitch with `.kick()`;
+  - `.dispose()`.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

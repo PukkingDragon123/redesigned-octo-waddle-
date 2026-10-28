@@ -8,7 +8,7 @@
     <meta name="description" content="A cinematic 3D fantasy adventure: live the whole life of a flying whale on Vur Sok, from your first migration as a calf to the Oasis, to courtship, a newborn of your own, and your rest as the elder of the herd." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cinzel:wght@400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Almendra+Display&family=Almendra+SC&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
     <style>
       :root {
         --bg: #0b0f1e;
@@ -61,7 +61,7 @@
       #cine .card.low { top: auto; bottom: 15vh; transform: none; }
       #cine .card.on { opacity: 1; }
       #cine .card .kicker {
-        font: 500 clamp(11px, 1.35vw, 17px) "Cinzel", "Trajan Pro", Georgia, serif;
+        font: 400 clamp(11px, 1.35vw, 17px) "Almendra SC", Georgia, serif;
         letter-spacing: .62em; text-indent: .62em; color: #e3c98f; opacity: .92;
       }
       #cine .card .kicker::before, #cine .card .kicker::after {
@@ -72,12 +72,12 @@
       #cine .card .kicker::after { transform: scaleX(-1) translateY(1px) rotate(1.5deg); }
       #cine .card .kicker:empty { display: none; }
       #cine .card .title {
-        font: 400 clamp(30px, 6.4vw, 92px) "Cinzel", "Trajan Pro", Georgia, serif;
-        letter-spacing: .14em; text-indent: .14em; margin: .22em 0 .18em; line-height: 1.08;
+        font: 400 clamp(30px, 6.4vw, 92px) "Almendra Display", "Almendra SC", Georgia, serif;
+        letter-spacing: .05em; text-indent: .05em; margin: .22em 0 .18em; line-height: 1.08;
         transition: letter-spacing 7s cubic-bezier(.2,.6,.3,1);
       }
-      #cine .card.on .title { letter-spacing: .24em; text-indent: .24em; }
-      #cine .card .title.logo { font-family: "Cinzel Decorative", "Cinzel", Georgia, serif; font-weight: 700; }
+      #cine .card.on .title { letter-spacing: .11em; text-indent: .11em; }
+      #cine .card .title.logo { font-family: "Almendra Display", "Almendra SC", Georgia, serif; font-weight: 400; }
       #cine .card .line {
         font: italic 300 clamp(15px, 2.1vw, 30px) "Cormorant Garamond", Georgia, serif;
         letter-spacing: .06em; color: #efe6d6; opacity: .9;
@@ -85,7 +85,7 @@
       #cine .card .line:empty, #cine .card .title:empty { display: none; }
       #cine .skip {
         position: absolute; right: 3.2vw; bottom: 3.6vh; opacity: 0; transition: opacity .5s ease;
-        font: 400 clamp(10px, 1vw, 13px) "Cinzel", Georgia, serif; letter-spacing: .4em; color: #d8cfbe;
+        font: 400 clamp(10px, 1vw, 13px) "Almendra SC", Georgia, serif; letter-spacing: .4em; color: #d8cfbe;
       }
       #cine .skip.on { opacity: .75; }
       #cine .skip i { display: block; height: 6px; margin-top: 4px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M0.5 5.4 C 9 4.6, 20 5.9, 33 5.0 S 57 3.9, 72 4.8 S 99 5.9, 110 4.6 C 114 4.1, 117 3.9, 119.5 4.3 C 116 5.0, 112 5.8, 104 6.0 C 90 6.4, 80 5.6, 66 5.9 S 38 6.6, 24 6.1 S 6 5.9, 0.5 5.4 Z' fill='%23e3c98f'/%3E%3C/svg%3E") center / 100% 100% no-repeat; transform-origin: left; transform: scaleX(0); }

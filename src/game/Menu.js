@@ -7,11 +7,11 @@ import {
 import { damp, clamp, lerp, smoothstep } from '../core/math.js';
 import { CONTROL_LINES } from '../core/Input.js';
 
-// Lettering: Cinzel Decorative for the SKYSONG logo, Cinzel (carved Roman capitals) for the menu
-// lines, Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
+// Lettering: hand-lettered Almendra (Almendra Display for the SKYSONG logo, Almendra SC for the menu
+// lines), Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
 export const FONTS = {
-  logo: '"Cinzel Decorative", "Cinzel", Georgia, "Times New Roman", serif',
-  caps: '"Cinzel", "Trajan Pro", Georgia, "Times New Roman", serif',
+  logo: '"Almendra Display", "Almendra SC", Georgia, "Times New Roman", serif',
+  caps: '"Almendra SC", "Almendra", Georgia, "Times New Roman", serif',
   italic: '"Cormorant Garamond", "Cormorant", Georgia, "Times New Roman", serif',
 };
 const FONT = FONTS.caps;
@@ -165,7 +165,7 @@ export class Menu {
     this.anchorQ = new Quaternion();
     this.onAction = opts.onAction || (() => {});
     this.hasSave = opts.hasSave || (() => false);
-    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 700, spacing: 0.2, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
+    this.title = new TextItem('SKYSONG', 8.4, { size: 150, weight: 400, spacing: 0.12, font: FONTS.logo, tint: new Vector3(1, 0.95, 0.84) });
     this.subtitle = new TextItem('a whole life across the seas of Vur Sok', 2.7, { size: 72, italic: true, weight: 400, spacing: 0.05 });
     this.group.add(this.title.mesh, this.subtitle.mesh);
     this.dist = 34;
@@ -225,7 +225,7 @@ export class Menu {
     // under the title on the main and pause pages, vertically centred elsewhere
     const top = page === 'main' || page === 'pause' ? 0 : (entries.length - 1) * gap * 0.5;
     entries.forEach(([label, action], i) => {
-      const it = new TextItem(label, h * (small ? 0.92 : 0.86), { size: small ? 60 : 80, weight: small ? 400 : 500, spacing: small ? 0.06 : 0.16, dim: action === null, font: small ? FONTS.italic : FONT });
+      const it = new TextItem(label, h * (small ? 0.92 : 0.86), { size: small ? 60 : 80, weight: 400, spacing: small ? 0.06 : 0.12, dim: action === null, font: small ? FONTS.italic : FONT });
       it.action = action;
       it.mesh.position.set(0, top - i * gap, 0);
       it.baseY = top - i * gap;

@@ -159,12 +159,18 @@ export class Whale {
   /** Animate (call after step). */
   animate(dt, camPos) {
     const d = camPos ? this.pos.distanceTo(camPos) : 0;
-    // level of detail for fur and facial animation: about one shell per pixel of fur
-    // height on screen (mane fur is longer), so layers never separate at silhouettes
+    const m = this.model;
+    // geometry LOD by projected size: the hero mesh only when the whale fills the view
+    const px = (this.L * Whale.pxPerRad) / Math.max(d, 0.5);
+    const q = this.furQuality ?? 1;
+    m.setLOD?.(px > 1700 ? 0 : px > 260 ? 1 : 2);
+    // shell fur: about one shell per pixel of fur height on screen (the mane is longer), so the
+    // layers never separate at silhouettes; locks thin out with distance (they are shuffled)
     const furFar = this.isCalf ? 160 : 620;
-    const furPx = (this.model.u.uFurLen.value * 1.6 * Whale.pxPerRad) / Math.max(d, 0.5);
-    const max = this.model.maxShells * (this.furQuality ?? 1);
-    this.model.setFurShells(d < furFar && furPx > 0.5 ? Math.ceil(clamp(furPx * 1.5, 4, max)) : 0);
+    const furPx = (m.u.uFurLen.value * 1.8 * Whale.pxPerRad) / Math.max(d, 0.5);
+    const max = m.maxShells * q;
+    m.setFurShells(d < furFar && furPx > 0.5 ? Math.ceil(clamp(furPx * 1.5, 4, max)) : 0);
+    m.setLocks?.(px > 120 ? clamp((px - 120) / 700, 0.12, 1) * clamp(q * 1.2, 0.3, 1) : 0);
     this.lod = d < (this.isCalf ? 60 : 250) ? 0 : d < (this.isCalf ? 200 : 900) ? 1 : 2;
     const dr = this.drive;
     const s = this._animState || (this._animState = {});

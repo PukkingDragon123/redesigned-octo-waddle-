@@ -320,7 +320,7 @@ void main() {
   s.spec = 0.25;
   s.gloss = 0.8;
   // inside the egg the daylight arrives dimmed through membrane and fluid (the hatched calf gets it all)
-  vec3 col = stylizedLight(s) * mix(0.3, 0.8, 1.0 - uFade * step(0.5, uInside));
+  vec3 col = stylizedLight(s) * mix(0.2, 0.8, 1.0 - uFade * step(0.5, uInside));
   // backlit by the glow at the egg's heart: warm translucent rims around a darker form
   vec3 V = normalize(uCamPos - vWorld);
   float fr = pow(1.0 - max(dot(N, V), 0.0), 2.2);

@@ -443,13 +443,16 @@ void main() {
       shore = smoothstep(0.75, 0.0, wz) * (0.45 + 0.55 * churn) * uFoamCtl.z;
       cover += shore;
     }
-    float foamA = smoothstep(1.0 - cover, 1.25 - cover * 0.6, bubbles * 0.7 + lace * 0.45) * min(cover * 3.0, 1.0);
+    // coverage eats into the bubble pattern: sparse specks, then lace, then solid foam
+    float pat = clamp((bubbles * 0.6 + lace * 0.4 - 0.3) * 2.0, 0.0, 1.0);
+    float thr = 1.0 - min(cover, 1.2);
+    float foamA = smoothstep(thr - 0.12, thr + 0.06, pat) * smoothstep(0.0, 0.12, cover);
     foamA = clamp(foamA, 0.0, 1.0) * (1.0 - farK * 0.6);
     vec3 foamLit = uSunColor * (max(dot(N, uSunDir), 0.0) * 0.8 + 0.2) * mix(0.35, 1.0, shadow) + uSkyAmbient * 0.9;
     foamLit += uMoonColor * uNight * 0.5;
     vec3 foamCol = foamLit * mix(0.78, 0.95, bub2);
     col = mix(col, foamCol * (1.0 - f) + C * f, foamA);
-    dbg = vec4(bubbles * 0.7 + lace * 0.45, 1.0 - cover, 0.0, 0.0);
+    dbg = vec4(foamA, cover, pat, 0.0);
 
     // night: plankton flare where the water is churned
     float glow = (simGlow * 1.2 + crestFoam * 0.25 + shore * 0.5 + simFoam * 0.3) * uWaterParams.z;

@@ -235,7 +235,7 @@ export function lathe(spec, mesh = new RockMesh()) {
       const s = spec.strata ? spec.strata(th, y) : y;
       const ao = spec.cavity ? spec.cavity(th, y, r) : 1;
       row[j] = mesh.add(x, y, z, s, ao, tag);
-      if (i === ys.length - 1) ringPts.push({ x, y, z, theta: th, r });
+      if (i === ys.length - 1) ringPts.push({ x, y, z, theta: th, r, ox: Math.cos(th), oz: Math.sin(th) });
     }
     if (i === ys.length - 1) rim = ringPts;
     rows.push(row);

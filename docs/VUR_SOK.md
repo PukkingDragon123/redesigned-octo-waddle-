@@ -121,6 +121,9 @@ can eat, interact with etc; make it have like skip to you more grown too; make t
 cycle of this creature: singing, mating, birthing and rest; make it super cool, interactive, not boring, and
 polish; have some text, cinematic, but make it feel cinematic."*
 
+**Length: the whole game is about 30 minutes** from New Game to the final title, cinematics included.
+That means ACT I (the first migration) runs about 16-18 minutes and Acts II-IV about 4 minutes each.
+
 Three builders work on this in parallel:
 
 | Role | Owns |

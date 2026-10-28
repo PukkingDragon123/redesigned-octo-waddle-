@@ -1,14 +1,16 @@
 # SKYSONG
 
-*A cinematic 3D fantasy adventure about being a tiny flying-whale calf on its first migration
-across Vur Sok, an ocean planet of spiral islands.*
+*A cinematic 3D fantasy adventure about the whole life of a flying whale on Vur Sok, an ocean
+planet of spiral islands: from a calf on its first migration to an elder at rest. About half an
+hour from first breath to the last song.*
 
 You wake at sunrise in a lagoon beside your mother, in a herd of enormous horned, fluffy
 flying whales. The great migration to the legendary **Oasis** is about to begin. Fly low over
 the sea with your family through the Spiral Reach, dive with them to feast in the shoals,
 play in the Coil Forest, sing the herd song at golden hour, cross the night under a spiral
 galaxy, survive a violent storm and the hunt of a gigantic falcon, then find your way
-through the fog into the Oasis atoll and its Mother Tree.
+through the fog into the Oasis atoll and its Mother Tree. Then the seasons turn: you grow up,
+find a mate, bring a calf of your own into the world, and lead the herd as its elder.
 
 The whole world is painted: soft Tiny Glade-like light, brush-stroke shading, hand-painted
 whales with ink-drawn contours, moving alien plants and realistic rock.
@@ -83,9 +85,14 @@ menu is the only place text ever appears.
 
 ## The journey
 
+The game is one life in four acts. Cinematic moments and title cards carry it; hold any key,
+button or touch for a moment to skip a cinematic.
+
+**ACT I · The Calf**: your first migration with your mother and the herd.
+
 | Chapter | Light | What happens |
 |---|---|---|
-| Dawn Lagoon | sunrise | Waking in a lagoon, following your mother, learning to fly |
+| Dawn Lagoon | sunrise | The season's migration begins: the elder calls, the herd wakes, you learn to fly |
 | The Spiral Reach | morning | Spiral sea stacks, waterfalls into the sea, call and answer, the Spiral Arch |
 | The Feasting Shoals | noon | The adults blow a spiral bubble net; your mother dives, lunges, and takes you down to feast |
 | The Coil Forest | afternoon | Giant coil trees and alien meadows; playmates invite you to a chase |
@@ -94,9 +101,19 @@ menu is the only place text ever appears.
 | The Storm | storm | Gales, 9 m seas, rain, lightning; a downdraft tears you away |
 | The Falcon | stormy dawn | A huge shadow, a hunt, a living shelter of whales |
 | The Fog Wall | whiteout | Flying blind through sea fog, following her voice |
-| The Oasis | morning | A spiral atoll, the Mother Tree, the gathering, the final song |
+| The Oasis | morning | A spiral atoll, the Mother Tree, the gathering, home |
 
-Progress is saved at each chapter. **Continue** in the title menu resumes from there.
+**ACT II · The Song of Two**: seasons turn and you are grown. At golden hour a mate answers your
+voice: sing a duet, then follow and mirror her rising spiral dance into the night.
+
+**ACT III · New Life**: in a sheltered lagoon at dawn your calf is born. Carry it up for its
+first breath, then teach it to follow, answer and feed.
+
+**ACT IV · The Elder**: years pass. You lead the herd's migration, sing the last song under the
+galaxy, and come to rest in the deep, where your body becomes a glowing garden. At dawn a new
+calf wakes beside its mother.
+
+Progress is saved at each chapter and act. **Continue** in the title menu resumes from there.
 
 ---
 
@@ -125,11 +142,14 @@ Progress is saved at each chapter. **Continue** in the title menu resumes from t
   animated alien plants, built time-sliced behind the menu.
 - **Herd and story** (`src/game`): bouncy whale-to-whale physics (`WhalePhysics.js`), social
   behaviours and the spiral bubble-net hunt (`HerdBehaviors.js`), swimming, buoyancy, breath
-  and splashes (`Swim.js`), the mother's care AI, the coroutine-scripted story director, the
-  singing game, weather, sonic booms and the floating menu.
+  and splashes (`Swim.js`), the mother's care AI, the coroutine-scripted story director and
+  the life-cycle acts (`life/`), a cinematic camera with title cards (`Cinematics.js`), tricks
+  and flying bugs (`Moves.js`, `Activities.js`, `creatures/bugs`), the singing game, weather,
+  sonic booms and the floating menu.
 - **Wildlife and falcon** (`src/creatures/Ecosystem.js`, `eco/`, `Falcon.js`): glintfin bait
-  balls, spiralback and lanternjack fish, skimmer and coilwing bird-reptiles, night
-  plankton, plus the storm falcon.
+  balls, spiralback and lanternjack fish, skimmer and coilwing bird-reptiles, night plankton;
+  reef life under the sea (kelp forests, tube corals, anemones, hermit, glass and plate crabs,
+  jelly blooms, rays, puffers and ribbon eels); plus the storm falcon.
 - **Audio** (`src/audio`): a Web Audio score synthesized at runtime (piano, celesta,
   strings, choir, harp, flute, drums and brass), adaptive moods, spatial whale voices tuned
   to the current key, and ambience: wind, rain, the sea's swell and foam, and the muffled
@@ -142,7 +162,8 @@ The visual and audio research behind all of this is in
 ### Debug parameters
 
 Add `?debug` to the URL, then optionally:
-- `&chapter=N` to jump to a chapter (0-9), `&intro` to play the opening.
+- `&chapter=N` to jump to a chapter (0-9), `&act=2|3|4` to jump to a later act (or
+  `&chapter=10|11|12`), `&intro` to play the opening.
 - `&auto` for an autopilot that follows the mother; `&dt=0.05&warp=30` to simulate ahead.
 - `&test=fly|whale|islands|world|ocean|flora|painterly|herd|ecosystem` (dev scenes in
   `src/dev/`; add `&ocean` to give a dev scene the real ocean), `&time=dawn|morning|…`.
@@ -160,3 +181,8 @@ All of these drive headless Chromium against the dev server (`npm run dev`):
 | `node tools/audio-check.mjs` | Renders every mood, voice and effect offline: no NaNs, nothing silent, gain staging |
 | `node tools/audio-game.mjs 4 40` | Runs a chapter with live audio and reports the mood, chords and audio errors |
 | `node tools/touch-check.mjs` | Phone viewport: taps New Game on the floating menu with a touch event |
+| `node tools/story-acts.mjs 2 60 [shot]` | Plays an act headless (2, 3 or 4) and reports its state |
+| `node tools/story-pace.mjs` | Measures how long each chapter and act takes with the autopilot |
+| `node tools/story-shot.mjs` | A page screenshot, so the title-card overlay shows |
+
+`EXTRA="&worldslice=4000"` makes the world build much faster in headless checks.

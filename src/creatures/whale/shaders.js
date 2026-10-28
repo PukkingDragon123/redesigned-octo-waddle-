@@ -887,6 +887,8 @@ void main() {
   vLen = aFur.x;
   vec3 alb = mix(uBelly, uBack, 0.5);
   if (uBaked > 0.5) { vec3 c = textureLod(uSkinA, aTex, 4.0).rgb; alb = c * c; }
+  // the coat follows the skin pattern but leans to the dorsal colour, so it stays rich in tone
+  alb = mix(alb, uBack, 0.3);
   // fin tufts take the fin's own upper colour (the baked skin is the body's)
   if (aFur.y > 0.5) alb = uBack * 1.2 + 0.01;
   vAlb = alb;
@@ -968,7 +970,7 @@ void main() {
   vec3 Nl = normalize(N * (0.7 + 0.5 * dome) + (B * od.x + T * od.y * 0.5) * (1.0 - dome) * 0.4);
   vec3 albedo = vAlb * mix(uFurShade, 1.0, smoothstep(0.0, 0.75, h));
   // lighter, warmer tips; each lock its own value
-  albedo = mix(albedo, albedo * uFurTip * 1.08 + vec3(0.03, 0.024, 0.014), smoothstep(0.5, 1.0, hr));
+  albedo = mix(albedo, albedo * uFurTip + vec3(0.018, 0.014, 0.008), smoothstep(0.5, 1.0, hr));
   albedo *= 0.9 + 0.2 * crnd + (sr - 0.5) * 0.06;
   // depth: light reaches the inner coat poorly (self-shadowing of the fur)
   float depthAO = mix(0.55, 1.0, smoothstep(0.0, 0.8, h)) * mix(0.9, 1.0, dome);

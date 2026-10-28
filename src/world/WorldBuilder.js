@@ -812,18 +812,18 @@ export class WorldBuilder {
   }
 
   /**
-   * Fluffy grass clumps over an island's meadows: about one painted clump per 2 m2 of meadow,
+   * Fluffy grass clumps over an island's meadows: about one painted clump per 1.4 m2 of meadow,
    * thinned where the meadow thins (the clumps overlap into a continuous soft carpet).
    */
   _grassClumps(rec, S) {
     const r = rng(rec.seed * 41 + 3);
     const meadow = (ny, y, gr) => (gr > 0.35 && ny > 0.7 && y > 2.5 ? gr * gr : 0);
     const A = S.weights(meadow);
-    const n = Math.min(9000, Math.round(A / 2.1 * (this.floraDensity ?? 1)));
+    const n = Math.min(12000, Math.round(A / 1.35 * (this.floraDensity ?? 1)));
     if (!n) return;
     const pts = ((this._grassPts ||= {})[rec.chapter] ||= []);
     for (const sm of S.sample(n, r)) {
-      const sc = lerp(0.75, 1.35, Math.pow(r(), 1.5));
+      const sc = lerp(0.9, 1.6, Math.pow(r(), 1.5));
       pts.push(sm.p.x + rec.pos.x, sm.p.y - 0.08, sm.p.z + rec.pos.z, sc, r(), r() < 0.22 ? 1 : 0);
     }
   }

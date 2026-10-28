@@ -243,6 +243,9 @@ export class Menu {
       it.opacity = 0;
     });
     this.sel = this.items.findIndex((it) => it.action);
+    // with a save, Continue is the default (a stray confirm must not start over)
+    const cont = this.items.findIndex((it) => it.action === 'continue');
+    if (cont >= 0) this.sel = cont;
     const showTitle = page === 'main' || page === 'pause';
     this.title.targetOpacity = showTitle ? 1 : 0;
     this.subtitle.targetOpacity = page === 'main' ? 0.85 : 0;
@@ -262,14 +265,24 @@ export class Menu {
     }
   }
 
+  /** Rebuild the page after a settings change, keeping the selection and each line's fade. */
+  refresh() {
+    const sel = this.sel, prev = this.items.map((it) => [it.opacity, it.glow]);
+    this.build(this.page);
+    this.items.forEach((it, i) => { if (prev[i]) [it.opacity, it.glow] = prev[i]; });
+    this.sel = sel;
+    this.game.saveSettings();
+    this.onAction('settingsChanged');
+  }
+
   activate(it) {
     if (!it || !it.action) return;
     const s = this.game.settings;
     const a = it.action;
-    const refresh = () => { const sel = this.sel; this.build(this.page); this.sel = sel; this.game.saveSettings(); this.onAction('settingsChanged'); };
+    const refresh = () => this.refresh();
     if (a === 'settings') return this.build('settings');
     if (a === 'controls') return this.build('controls');
-    if (a === 'back') return this.build(this.returnPage || 'main');
+    if (a === 'back') return this.build(this.page === 'controls' ? 'settings' : this.returnPage || 'main');
     if (a === 'quality') { const q = ['high', 'medium', 'low']; s.quality = q[(q.indexOf(s.quality) + 1) % 3]; s.autoQuality = false; return refresh(); }
     if (a === 'music') { s.music = s.music >= 0.95 ? 0 : Math.min(1, Math.round((s.music + 0.2) * 10) / 10); return refresh(); }
     if (a === 'sound') { s.sound = s.sound >= 0.95 ? 0 : Math.min(1, Math.round((s.sound + 0.2) * 10) / 10); return refresh(); }
@@ -282,7 +295,7 @@ export class Menu {
     if (!it) return;
     const s = this.game.settings;
     const a = it.action;
-    const refresh = () => { const sel = this.sel; this.build(this.page); this.sel = sel; this.game.saveSettings(); this.onAction('settingsChanged'); };
+    const refresh = () => this.refresh();
     if (a === 'music') { s.music = clamp(Math.round((s.music + dir * 0.1) * 10) / 10, 0, 1); refresh(); }
     else if (a === 'sound') { s.sound = clamp(Math.round((s.sound + dir * 0.1) * 10) / 10, 0, 1); refresh(); }
     else if (a === 'sens') { s.sensitivity = clamp(Math.round((s.sensitivity + dir * 0.25) * 100) / 100, 0.25, 2.5); refresh(); }

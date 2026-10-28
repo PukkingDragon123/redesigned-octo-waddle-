@@ -152,7 +152,7 @@ export class Whale {
     const s = clamp(out.copy(p).sub(this.pos).dot(this.fwd), -0.5 * this.L, 0.42 * this.L);
     out.copy(this.pos).addScaledVector(this.fwd, s);
     const pr = this.model.prof(T_ORIGIN + s / this.L);
-    out.addScaledVector(this.up, pr.cy);
+    out.addScaledVector(this.up, pr.cy + this.anim.bodyBob); // the root bone carries the body's bob
     return Math.max(pr.hw, pr.top, pr.bot);
   }
 

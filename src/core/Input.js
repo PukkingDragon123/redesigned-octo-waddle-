@@ -7,7 +7,7 @@ const KEYMAP = {
   left: ['KeyA', 'ArrowLeft'],
   right: ['KeyD', 'ArrowRight'],
   up: ['Space', 'ArrowUp'],
-  down: ['KeyC', 'ControlLeft', 'ControlRight', 'ArrowDown'],
+  down: ['KeyC', 'ArrowDown'], // not Ctrl: Ctrl+W/R/Q mid-flight would close or reload the tab
   surge: ['ShiftLeft', 'ShiftRight'],
   rollLeft: ['KeyQ'],
   rollRight: ['KeyE'],
@@ -47,6 +47,7 @@ export class Input {
     this.gpPrev = new Array(17).fill(0);
     this.gpAxes = [0, 0, 0, 0];
     this.usingGamepad = false;
+    this.gamepadBlocked = false;
     this.settings = { invertY: false, sensitivity: 1.0 };
     this.enabled = true;
     this.lastActivity = performance.now();
@@ -136,7 +137,11 @@ export class Input {
       const now = performance.now();
       for (const t of e.changedTouches) {
         const boom = this.touches.size === 0 && now - lastEnd < 280;
-        this.touches.set(t.identifier, { x: t.clientX, y: t.clientY, x0: t.clientX, y0: t.clientY, t0: now, boom });
+        // menu: began while the menu was up; gesture: began with other fingers already down
+        this.touches.set(t.identifier, {
+          x: t.clientX, y: t.clientY, x0: t.clientX, y0: t.clientY, t0: now, boom,
+          menu: !this.lockWanted, gesture: this.touches.size > 0,
+        });
         if (boom && this.lockWanted) press(2);
         setPointer(t);
       }
@@ -172,14 +177,16 @@ export class Input {
         const dx = t.clientX - tr.x0, dy = t.clientY - tr.y0;
         const quick = now - tr.t0 < 250;
         if (tr.boom) release(2);
-        if (!this.lockWanted && quick && Math.hypot(dx, dy) < 24) {
-          // a tap in the menu: point and click
+        if (!this.lockWanted && tr.menu && !tr.gesture && quick && Math.hypot(dx, dy) < 24) {
+          // a one-finger tap begun in the menu: point and click (lifting the three-finger
+          // pause tap must not click the menu it just opened)
           setPointer(t);
           this.mousePressed |= 1;
         } else if (this.lockWanted && quick && this.touches.size === 0 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 2) {
           this.rollFlick = Math.sign(dx);
         }
-        if (this.touches.size === 0 && quick) lastEnd = now;
+        // only a tap arms the double-tap boom (not a roll flick, not a menu tap)
+        if (this.touches.size === 0 && quick && this.lockWanted && Math.hypot(dx, dy) < 24) lastEnd = now;
       }
       sync();
     };
@@ -211,10 +218,14 @@ export class Input {
   }
 
   update() {
-    // Gamepad polling
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    // Gamepad polling (getGamepads throws when a permissions policy blocks 'gamepad', e.g. in an
+    // iframe: stop asking rather than fail every frame)
+    let pads = [];
+    if (!this.gamepadBlocked) {
+      try { pads = navigator.getGamepads ? (navigator.getGamepads() || []) : []; } catch (e) { this.gamepadBlocked = true; }
+    }
     let pad = null;
-    if (pads) for (const p of pads) if (p && p.connected) { pad = p; break; }
+    for (const p of pads) if (p && p.connected) { pad = p; break; }
     for (let i = 0; i < this.gpButtons.length; i++) this.gpPrev[i] = this.gpButtons[i];
     if (pad) {
       for (let i = 0; i < this.gpButtons.length; i++) {
@@ -296,8 +307,8 @@ export class Input {
     if (!this.enabled) return 0;
     return this.mouseDY * 0.0022 * this.settings.sensitivity * (this.settings.invertY ? -1 : 1);
   }
-  get stickLookX() { return this.enabled ? this.gpAxes[2] : 0; }
-  get stickLookY() { return this.enabled ? this.gpAxes[3] * (this.settings.invertY ? -1 : 1) : 0; }
+  get stickLookX() { return this.enabled ? this.gpAxes[2] * this.settings.sensitivity : 0; }
+  get stickLookY() { return this.enabled ? this.gpAxes[3] * this.settings.sensitivity * (this.settings.invertY ? -1 : 1) : 0; }
 
   get rollLeftPressed() { return this.enabled && (this.keyPressed('rollLeft') || this.gpPressed(GP.LB) || this.rollFlick < 0); }
   get rollRightPressed() { return this.enabled && (this.keyPressed('rollRight') || this.gpPressed(GP.RB) || this.rollFlick > 0); }

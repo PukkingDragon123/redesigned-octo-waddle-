@@ -134,6 +134,24 @@ Three builders work on this in parallel:
 
 Everything else belongs to the lead. Never edit files you do not own; put needed changes in your report.
 
+### 0.6 Hand-drawn lines, less blur (newest rule, applies to everyone)
+User: *"never use straight line in game for like the crack or texture, make everything feel hand-drawn, and make
+the blur effect less"*.
+- **No ruler-straight lines anywhere:** cracks, joints, strata, plate seams, scars, ink contours, ripples, and
+  procedural textures (cell or Voronoi edges, stripes, bands).
+  - Every line wobbles like a hand-drawn stroke: domain-warp the coordinates that make it, vary its width along
+    its length, taper its ends, break it into strokes, and let it overshoot or fade a little.
+  - Organic curves over polygons.
+- **Less blur:** keep depth of field light and the far softening subtle; never smear what the player looks at;
+  keep fog and underwater haze clear enough to read shapes. The DOF presets have been toned down.
+
+A "lines" builder sweeps the existing shaders for this. It owns:
+- src/world/shaders/, src/world/Islands.js, Spirals.js, Painted.js, Grass.js, Trees.js, Flora.js, Clouds.js;
+- src/render/materials.js, src/render/shaders/common.js, src/render/painterly/;
+- src/creatures/whale/ (its shaders and skin bake).
+
+The story, moves and underwater builders apply the rule to their own work.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

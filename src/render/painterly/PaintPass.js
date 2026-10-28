@@ -388,12 +388,12 @@ export const PAINT_DEFAULTS = {
 
 export const DOF_PRESETS = {
   off: { amount: 0 },
-  // gameplay: only the far distance softens a little (focus follows the subject)
-  gameplay: { amount: 1, autoFocus: true, sharp: 0.5, farRamp: 0.45, far: 2.6, near: 0, nearRamp: 1, tilt: 0 },
-  // title menu: miniature-like, focus on the herd, islands and sky soft, gentle tilt bands
-  title: { amount: 1, autoFocus: true, sharp: 0.22, farRamp: 0.6, far: 5.5, near: 3.0, nearRamp: 0.7, tilt: 1.6, tiltCenter: 0.5, tiltBand: 0.18 },
-  // cinematic close moments: shallow, strong separation
-  cinematic: { amount: 1, autoFocus: true, sharp: 0.2, farRamp: 0.5, far: 4.2, near: 3.5, nearRamp: 0.5, tilt: 0 },
+  // gameplay: everything stays crisp; only the haziest distance softens a touch
+  gameplay: { amount: 1, autoFocus: true, sharp: 0.9, farRamp: 0.3, far: 0.9, near: 0, nearRamp: 1, tilt: 0 },
+  // title menu: a light miniature hint, the herd sharp, the far islands just softened
+  title: { amount: 1, autoFocus: true, sharp: 0.45, farRamp: 0.5, far: 2.0, near: 1.0, nearRamp: 0.8, tilt: 0.5, tiltCenter: 0.5, tiltBand: 0.24 },
+  // cinematic close moments: gentle separation, the background still readable
+  cinematic: { amount: 1, autoFocus: true, sharp: 0.4, farRamp: 0.5, far: 1.7, near: 1.2, nearRamp: 0.6, tilt: 0 },
 };
 
 export class PaintPass {

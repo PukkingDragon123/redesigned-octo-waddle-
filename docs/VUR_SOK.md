@@ -5,6 +5,87 @@ from a living ocean, some still forming. The herd of winged whales flies low ove
 dive beneath the surface to feast on fish. This document is the shared design and interface contract for
 everyone building it. Read it fully before touching code.
 
+## 0. Latest user direction (newest; overrides anything below and any task prompt that conflicts)
+
+The user added two requests while the build was running. Where a task prompt says otherwise (for example
+"No fur"), this section wins.
+
+### 0.1 Whales: fluffy fur, Monster Hunter horns, tulkun-level detail
+User: *"The whale have fur more fluffy have horns to monster hunter style design / avatar level detail"*,
+with the tulkun data-file page from *Avatar: The Way of Water* as the reference.
+- **Fur stays and gets fluffier.** Do not remove the shell fur: upgrade it. `setFurShells(n)` / `maxShells`
+  must really work, and Whale.animate's fur LOD (projected size) must keep working. The fur should be thick,
+  long, soft and wind-blown, with clumping, curl, tapered strand tips, lighter tips and translucent rim light
+  against the sun. It reacts to wind, flight inertia and bumps.
+  - Where it grows: a lion-like mane over the nape, throat and shoulders; a dorsal ridge of fur between the
+    back plates running down to the tail stock; tufts at the wing roots and along each wing's leading edge;
+    a fringe on the tail stock and flukes.
+  - The calf is the fluffiest, with soft down all over.
+  - Keep the face around the eyes, the crest interior, the plate tops, the wing membranes and the throat
+    bellows mostly bare, so the skin detail reads.
+  - Fur colour follows the skin pattern.
+- **Horns, Monster Hunter style.**
+  - Shape: a pair of big swept-back horns rising from the skull behind the upper eyes, curving back and
+    out over the shoulders.
+  - Material: ridged keratin with growth rings, chips and cracks; a dark base fading to pale worn tips.
+  - Smaller secondary horns and spikes run along the brow, cheek and jaw.
+  - The big horns double as the hollow voice resonance horns: vents along their undersides flare when
+    the whale sings or charges the boom.
+  - Variants:
+
+    | Whale | Horns |
+    |---|---|
+    | Alpha | Largest, with one tip snapped off |
+    | Elder | Huge, gnarled, heavily ringed and curling |
+    | Mother | Elegant and smooth |
+    | Other adults | Each different: straight, curled, forward-swept |
+    | Calf | Soft rounded nubs |
+
+- **Tulkun-level detail**, from the reference:
+  - **Back:** massive armoured back plates, thick and cracked like slate, with seams and a fine network of
+    pale streak lines across the dark skin.
+  - **Sensor crest:** a big crest on the head that rises like a fin and flares open to show a red-pink
+    fleshy interior lined with sensor pits. This is now the main singing organ: it flares and vibrates
+    when the whale hums, sings and charges the sonic boom, together with the horn vents and the throat
+    bellows.
+  - **Eyes:** FOUR small eyes, two on each side of the head, with golden-amber irises. Each whale has its
+    own dark eye-patch markings. The eyes stay small relative to the body.
+    - Keep `eyes.R` / `eyes.L` as the primary pair the game drives.
+    - Add the second pair as `eyes.R2` / `eyes.L2`, following the same lids, gaze and pupil.
+  - **Fins:** six in total: the long front wing flippers, a smaller rear pair and the flukes.
+  - **Skin:**
+    - Strong countershading: a dark back and a pale belly.
+    - Bold white bars along the flank behind the head, and ventral pleats.
+    - Wet glossy skin with mottling and scars.
+  - **Sensor whips:** barbels trailing beneath the mouth that move with the wind.
+- Still true: real-whale anatomy (a rorqual / humpback / tulkun mix), the alpha's torn wing and scars, the
+  other variants, and small eyes.
+
+### 0.2 Painterly world, alien plants, realistic rocks, Tiny Glade-like shading
+User: *"Make game look more like a painting and less tree more alien plant moving and rocks looks super
+detail realistic add shaders like tiny glades etc"*
+- **Rendering like Tiny Glade.**
+  - Lighting: soft warm light, soft wide-penumbra shadows, ambient occlusion in creases (screen-space AO
+    plus baked cavity AO), warm bounce light from sunlit ground, sky-tinted shade, and gentle depth of
+    field in the distance.
+  - Post filter: a painterly pass (an anisotropic Kuwahara / brush filter subtle enough to keep detail),
+    canvas grain, soft vignette, and grading toward harmonious painted palettes.
+- **Fewer trees, more moving alien plants.** Replace most trees with animated alien flora. Keep a few trees
+  as accents; the Mother Tree stays.
+  - Giant spiral fiddleheads that coil and uncoil.
+  - Tube and bell plants that pulse and breathe.
+  - Anemone-like fronds that sway and close up when whales pass.
+  - Kelp-like ribbon plants streaming in the wind.
+  - Glassy fan corals on the shores.
+  - Spore puffballs.
+- **Rocks: super detailed and realistic**, the realistic anchor in the painted world.
+  - Triplanar macro, meso and micro detail normals, and strata that follow the spiral.
+  - Cavity and crevice AO, and sharp edge wear.
+  - Lichen and moss in the crevices.
+  - A wet dark band at the waterline, with barnacles and algae in the tidal zone.
+- Owners: ocean (PostFX, the lighting in common.js) and world (plants, rocks, materials.js). The lead runs a
+  follow-up pass for whatever the first build did not cover.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and
@@ -103,7 +184,8 @@ Keep every API the game uses: `new WhaleModel(genome)`; `group`; `bones` with th
 `boneAbs`; `meshes` (shadow casters) and `castShadows(shadows)`; `prof(t) -> { hw, top, bot, cy, z }`;
 `eyes.{R,L}.{ mesh, u.uLids, u.uGaze, u.uPupil }`; `fins.{R,L}`, `flukes`, `rear`; `u` uniforms the animator drives
 (`uSac, uThroat, uVib, uGill, uBreath, uAirflow, uInertia`, add more); `L`; the geometry cache.
-`setFurShells(n)` and `maxShells` stay callable (no-ops are fine if fur is gone).
+`setFurShells(n)` and `maxShells` must keep working: the fur stays and gets fluffier (section 0.1).
+Eyes: `eyes.R` / `eyes.L` stay the primary pair; the second pair is `eyes.R2` / `eyes.L2` (section 0.1).
 Whale (entity) keeps `nearestOnBody(p, out)` (body-axis collision proxy) and its physics API.
 WhaleAnimator must add:
 - `anim.bump(worldDir, strength)`: a body squash-and-stretch / jiggle response on a spring (strength 0..2),

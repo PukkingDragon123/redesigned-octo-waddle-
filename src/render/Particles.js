@@ -45,7 +45,7 @@ void main() {
     float th0 = seed * 6.2831;
     ax = sp > 0.05 ? normalize(sd) : vec2(cos(th0), sin(th0));
     if (kind > 6.5) ax = vec2(-ax.y, ax.x);
-    len = kind < 3.5 ? clamp(1.0 + sp * 0.03 / max(s, 0.03), 1.0, 3.2) : max(aParam.z, 1.0);
+    len = kind < 3.5 ? clamp(1.0 + sp * 0.02 / max(s, 0.03), 1.0, 2.4) : max(aParam.z, 1.0);
   } else if (kind > 3.5 && kind < 4.5) {
     ax = vec2(1.0, 0.0); // bubbles keep their highlight up and to the left
   } else {

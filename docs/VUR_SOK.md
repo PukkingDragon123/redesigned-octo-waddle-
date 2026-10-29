@@ -251,6 +251,17 @@ little weird. Make the whale eat and be able to be hostile, and remove crabs."*
 - **Hunting:** the whale can hunt, bite and eat, and can be hostile to other creatures, which react with fear.
 - **No crabs.**
 
+### 0.11 Follow your mother and eat; more to do; more stunning (newest)
+User: *"Game felt boring. Make the game even more stunning and more things to do. Make it so you need to
+follow your mom and eat."*
+- **Needs:** the calf gets hungry and must eat. Staying near the mother matters: her slipstream and warmth
+  help, and straying is lonely and dangerous. When the calf is hungry she leads it to food. There is no fail
+  state, only felt consequences, all shown without text or HUD.
+- **More to do with the mother:** she teaches the calf wordlessly through copy-mom moves, hunting lessons,
+  sheltering from threats, discoveries and play.
+- **More stunning:** a beauty pass on light, depth, clouds, underwater and night. Keep it crisp, with no
+  added blur.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

@@ -111,7 +111,7 @@ export function buildKelp() {
   const m = new Mk();
   const NS = 11;
   const pts = [], rad = [];
-  for (let i = 0; i < NS; i++) { pts.push([0, 0, 0]); rad.push(0.07 - 0.035 * (i / (NS - 1))); }
+  for (let i = 0; i < NS; i++) { pts.push([0, 0, 0]); rad.push(0.1 - 0.05 * (i / (NS - 1))); }
   // stalk rings stay at y = 0: the shader places each ring at t * H on the bent spine
   {
     const sides = 4, base = m.count;
@@ -128,18 +128,20 @@ export function buildKelp() {
       m.quad(base + i * sides + s, base + i * sides + s1, base + (i + 1) * sides + s1, base + (i + 1) * sides + s);
     }
   }
-  const NB = 14;
+  // a lush frond: many long, broad ribbon blades streaming up the stipe (not leaves on a stick);
+  // every other blade carries a gas bladder (keeps the triangle count near what it was)
+  const NB = 24;
   for (let k = 0; k < NB; k++) {
-    const t = k === NB - 1 ? 1 : 0.1 + (k / (NB - 1)) * 0.86;
+    const t = k === NB - 1 ? 1 : 0.06 + (k / (NB - 1)) * 0.9;
     const th = k * 2.4;
     const dx = Math.cos(th), dz = Math.sin(th);
-    const crown = k >= NB - 2;
+    const crown = k >= NB - 3;
     // bladder at the base of the blade
-    const br = crown ? 0.045 : 0.06;
-    ellipsoid(m, [dx * 0.1, 0.02, dz * 0.1], [br, br * 1.6, br], 5, 3, (p) => [[2, t, 0, 0], [0, 0, 0, k]]);
+    const br = crown ? 0.05 : 0.07;
+    if (k % 2 === 0 || crown) ellipsoid(m, [dx * 0.1, 0.02, dz * 0.1], [br, br * 1.6, br], 5, 3, (p) => [[2, t, 0, 0], [0, 0, 0, k]]);
     // blade: out and up, then streaming
-    const L = crown ? 2.6 : 1.6 + (k % 3) * 0.3;
-    const W = crown ? 0.13 : 0.15;
+    const L = crown ? 3.4 : 2.3 + (k % 3) * 0.45;
+    const W = crown ? 0.22 : 0.27 + (k % 2) * 0.05;
     const NA = 7;
     const base = m.count;
     for (let i = 0; i <= NA; i++) {

@@ -837,7 +837,7 @@ void main() {
     bool tir = dot(T, T) < 1e-4;
     float F = tir ? 1.0 : seaFresnel(max(T.y, 0.0));
     vec3 Tp = exp(-uWaterAbsorb * dist);
-    vec3 fogc = waterFogColor(I, max(uSeaLevel - P.y, 0.0) * 0.5 + max(uSeaLevel - uCamPos.y, 0.0) * 0.5);
+    vec3 fogc = waterFogColor(I, max(uSeaLevel - P.y, 0.0) * 0.5 + max(uSeaLevel - uCamPos.y, 0.0) * 0.5) * waterFarTint(dist);
     vec3 through = vec3(0.0);
     if (!tir) {
       // through the window: the scene above, displaced by the tilt of the surface

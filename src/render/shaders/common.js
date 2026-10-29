@@ -373,12 +373,20 @@ vec3 waterSubmerge(vec3 col, vec3 P) {
 /** In-scattered light of the water column toward the viewer along rd, at a given depth. */
 vec3 waterFogColor(vec3 rd, float depth) {
   float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-  vec3 c = uWaterTint * mix(0.3, 1.7, up * up * up);
+  // the water column reads in planes: a luminous green-cyan toward the surface, the level view
+  // fading through clear blue, and below it a deep, darker, purer blue (never one flat teal)
+  vec3 c = uWaterTint * (0.14 + 1.5 * pow(up, 2.4));
+  c *= mix(vec3(0.42, 0.68, 1.12), vec3(1.0), smoothstep(0.12, 0.62, up));
+  c *= mix(vec3(1.0), vec3(1.05, 1.04, 0.94), smoothstep(0.55, 1.0, up));
   vec3 sr = waterSunRefract();
   float toward = pow(max(dot(rd, -sr), 0.0), 5.0);
   float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);
   c += uWaterTint * toward * 2.2 * sunUp;
   return c * exp(-uWaterAbsorb * max(depth, 0.0) * 0.55);
+}
+/** Hue of the water column at long range: distance takes the green-cyan out, leaving deep blue. */
+vec3 waterFarTint(float dist) {
+  return mix(vec3(1.0), vec3(0.52, 0.74, 1.08), smoothstep(5.0, 65.0, dist));
 }
 /** Metres of water between the camera and P (camera under the surface). */
 float waterPathLength(vec3 P, float dist) {
@@ -398,7 +406,7 @@ vec3 underwaterFog(vec3 col, vec3 P) {
   col = mix(col, uFogColor, 1.0 - exp(-air * uFogParams.x * 2.0));
   vec3 T = exp(-uWaterAbsorb * dw);
   float midDepth = max(uSeaLevel - (uCamPos.y + rd.y * dw * 0.5), 0.0);
-  return col * T + waterFogColor(rd, midDepth) * (1.0 - T);
+  return col * T + waterFogColor(rd, midDepth) * waterFarTint(dw) * (1.0 - T);
 }
 
 vec3 airFog(vec3 col, vec3 P) {

@@ -91,10 +91,11 @@ void main() {
 const RAYBLUR = /* glsl */ `
 uniform sampler2D tSrc;
 uniform vec3 uSunScreen;
+uniform float uLen;
 varying vec2 vUv;
 void main() {
   const int N = 40;
-  vec2 delta = (vUv - uSunScreen.xy) * (0.92 / float(N));
+  vec2 delta = (vUv - uSunScreen.xy) * (uLen / float(N));
   vec2 uv = vUv;
   vec3 acc = vec3(0.0);
   float w = 1.0;
@@ -155,7 +156,7 @@ void main() {
     float r1 = 1.0 - abs(n1 * 2.0 - 1.0), r2 = 1.0 - abs(n2 * 2.0 - 1.0);
     float shaft = pow(r1, 9.0) * 0.8 + pow(r2, 12.0) * 0.6;
     // beams blur out with depth below the surface that focused them
-    shaft = mix(shaft, 0.12, smoothstep(4.0, 40.0, depth));
+    shaft = mix(shaft, 0.045, smoothstep(5.0, 45.0, depth));
     // sunlight down to the sample, then back along the view: red is gone within metres
     acc += shaft * exp(-uWaterAbsorb * (depth * 1.2 + t)) * dt;
   }
@@ -324,8 +325,8 @@ void main() {
   // under water: a luminous veil of in-scattered light lifts the deep shadows (never murky mud)
   if (uUnderwater > 0.0) {
     float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    vec3 veil = uWaterTint * (0.9 + 0.6 * smoothstep(0.7, 0.0, vUv.y)) + uShaftCol * 6.0;
-    col += veil * 0.18 * uUnderwater * smoothstep(0.25, 0.0, lum);
+    vec3 veil = uWaterTint * (0.45 + 0.75 * smoothstep(0.15, 1.0, vUv.y)) + uShaftCol * 4.0;
+    col += veil * 0.12 * uUnderwater * smoothstep(0.2, 0.0, lum);
   }
   col *= uExposure * (1.0 + uFlash * 0.35) * uWB;
   // contrast in log space around mid grey, before the curve (film-like: no crushed darks)
@@ -391,7 +392,7 @@ export class PostFX {
     });
     this.rayBlur = new FullscreenPass({
       vertexShader: FS_VERT, fragmentShader: RAYBLUR,
-      uniforms: { tSrc: { value: null }, uSunScreen: { value: new Vector3() } },
+      uniforms: { tSrc: { value: null }, uSunScreen: { value: new Vector3() }, uLen: { value: 0.92 } },
     });
     this.composite = new FullscreenPass({
       vertexShader: FS_VERT, fragmentShader: COMPOSITE,
@@ -540,10 +541,13 @@ export class PostFX {
       const v = this._v.copy(sr).multiplyScalar(100).add(camera.position).project(camera);
       this.rayBlur.uniforms.uSunScreen.value.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, 1);
       this.rayBlur.uniforms.tSrc.value = this.rayA.texture;
+      // a short smear along the beams: they stay crisp curtains instead of a glow
+      this.rayBlur.uniforms.uLen.value = 0.45;
       this.rayBlur.render(renderer, this.rayB);
+      this.rayBlur.uniforms.uLen.value = 0.92;
       this.composite.uniforms.tRays.value = this.rayB.texture;
       // scattering of the sunlight toward the eye (the per-channel loss is already in the shafts)
-      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.021 * (1 - G.uStorm.value * 0.7));
+      this.composite.uniforms.uShaftCol.value.copy(G.uSunColor.value).multiplyScalar(0.05 * (1 - G.uStorm.value * 0.7));
     } else if (this.raysEnabled && this.composite.uniforms.uSunScreen.value.z > 0.001) {
       this.rayMask.uniforms.tSrc.value = src;
       this.rayMask.uniforms.tDepth.value = sceneRT.depthTexture;

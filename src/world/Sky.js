@@ -293,7 +293,7 @@ void main() {
   vec3 col;
   if (uUnderwater > 0.5) {
     // under the surface everything not drawn is water
-    col = waterFogColor(rd, max(uSeaLevel - uCamPos.y, 0.0) + max(-rd.y, 0.0) * 40.0);
+    col = waterFogColor(rd, max(uSeaLevel - uCamPos.y, 0.0) + max(-rd.y, 0.0) * 40.0) * waterFarTint(1e4);
   } else if (rd.y < 0.0 && uCamPos.y > uSeaLevel) {
     // the open sea past the end of the ocean mesh, out to the horizon
     float t = (uCamPos.y - uSeaLevel) / max(-rd.y, 1e-5);

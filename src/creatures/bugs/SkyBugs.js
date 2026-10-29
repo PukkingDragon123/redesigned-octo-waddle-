@@ -14,13 +14,14 @@ import { G } from '../../render/Globals.js';
 import { UNIFORMS, NOISE, LIGHTING } from '../../render/shaders/common.js';
 
 const TAU = Math.PI * 2;
+const smoothstep01 = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /** Species definitions (sizes in metres; the calf is 4.2 m long). */
 export const BUG_SPECIES = {
   moth: {
     slots: 12, block: 32, size: 0.62, flap: 9, amp: 0.8, base: 0.3, minPx: 2.2,
     bodyW: 0.1, bodyL: 0.42, wing: [1.0, 0.85, 0.82, 0.8],
-    colA: 0xffb060, colB: 0x6a5cff, glow: 0xffc870, glowDay: 0.35, glowNight: 2.4,
+    colA: 0xf0a868, colB: 0x7c68b8, glow: 0xffc870, glowDay: 0.35, glowNight: 2.4,
     flee: 6.5, fleeR: 6.5, catchR: 1.9, energy: 0.03, wake: 1, shape: 0, drawDist: 520,
   },
   gnat: {
@@ -44,6 +45,7 @@ ${LIGHTING}
 attribute vec4 aP; // xyz position, w size multiplier
 attribute vec4 aD; // xyz heading, w phase
 attribute vec4 aS; // x flap rate, y excitement (fleeing), z variant, w alpha
+attribute vec4 aX; // x streak (being sucked in), y roll (spin), z flap amplitude (glide 0..1), w -
 uniform float uSize, uFlap, uAmp, uBase, uMinPx, uBodyW, uBodyL;
 uniform vec4 uWing;
 varying vec2 vUv;
@@ -55,6 +57,8 @@ varying vec3 vFogCol;
 varying vec3 vN;
 varying vec3 vV;
 varying vec2 vVar;
+varying float vBlur;
+varying float vStreak;
 void main() {
   vec3 f = aD.xyz;
   float fl = length(f);
@@ -63,6 +67,13 @@ void main() {
   float rl = length(r);
   r = rl > 1e-3 ? r / rl : vec3(1.0, 0.0, 0.0);
   vec3 u = cross(f, r);
+  // spinning as it is sucked in: roll the body frame about its heading
+  float cr = cos(aX.y), sr = sin(aX.y);
+  vec3 r0 = r;
+  r = r0 * cr + u * sr;
+  u = u * cr - r0 * sr;
+  vStreak = aX.x;
+  vBlur = 0.0;
   vec3 toC = uCamPos - aP.xyz;
   float dist = max(length(toC), 0.05);
   vec3 V = toC / dist;
@@ -80,20 +91,32 @@ void main() {
     side = sl > 1e-3 ? side / sl : r;
     // the wide quad (antennae, legs) shrinks back to the body's own when far: no wasted fill
     vec2 pq = mix(position.xz, clamp(position.xz, -1.0, 1.0), vFar);
-    lp = side * pq.x * uBodyW * (1.0 + vFar * 2.0) + f * pq.y * uBodyL;
+    // sucked in: the glow streaks out behind it
+    float tail = pq.y < 0.0 ? 1.0 + aX.x * 7.0 : 1.0;
+    lp = side * pq.x * uBodyW * (1.0 + vFar * 2.0) + f * pq.y * uBodyL * tail;
     vN = V;
     vUv = pq;
   } else {
     float hind = part > 2.5 ? 1.0 : 0.0;
     float sgn = position.x < 0.0 ? -1.0 : 1.0;
     float span = abs(position.x);
-    float a = uBase + sin(ph - hind * 0.7) * uAmp * (1.0 - 0.15 * hind) * (1.0 + aS.y * 0.4);
-    // wings fold back a little on the downstroke
-    float sweep = (0.12 + 0.12 * sin(ph)) * span;
+    // the stroke: amplitude eases down to a held V when gliding; the hindwings lag the forewings
+    float flapK = aX.z;
+    float wph = ph - hind * 0.7;
+    float a = uBase + (1.0 - flapK) * 0.45 + sin(wph) * uAmp * flapK * (1.0 - 0.15 * hind) * (1.0 + aS.y * 0.4);
+    // figure-of-eight: the tip sweeps forward and back at twice the beat, and the wing feathers
+    // (pitches) through each stroke, leading edge down on the downstroke
+    float sweep = ((0.12 + 0.12 * sin(wph)) + 0.16 * sin(2.0 * wph) * flapK) * span;
+    float feather = cos(wph) * 0.55 * flapK;
     float sx = mix(uWing.x, uWing.z, hind), sz = mix(uWing.y, uWing.w, hind);
     span *= sx * (1.0 - vFar * 0.6);
-    lp = r * sgn * span * cos(a) + u * span * sin(a) + f * (position.z * sz - sweep);
-    vN = normalize(-r * sgn * sin(a) + u * cos(a));
+    vec3 sd = r * sgn * cos(a) + u * sin(a);
+    vec3 wn = -r * sgn * sin(a) + u * cos(a);
+    vec3 cd = f * cos(feather) - wn * sin(feather);
+    lp = sd * span + cd * position.z * sz - f * sweep;
+    vN = normalize(cross(cd, sd));
+    // motion blur: the faster the wing sweeps, the more it smears into a translucent fan
+    vBlur = clamp(uFlap * aS.x * uAmp * flapK * abs(cos(wph)) / 24.0, 0.0, 0.85);
     vUv = vec2(abs(position.x), position.z + (hind > 0.5 ? 0.95 : 0.3));
   }
   vPart = part;
@@ -109,6 +132,7 @@ void main() {
 
 const FRAG = /* glsl */ `
 ${UNIFORMS}
+${NOISE}
 uniform vec3 uColA, uColB, uGlowCol;
 uniform float uGlowDay, uGlowNight, uShape, uBodyW, uBodyL;
 varying vec2 vUv;
@@ -120,6 +144,8 @@ varying vec3 vFogCol;
 varying vec3 vN;
 varying vec3 vV;
 varying vec2 vVar;
+varying float vBlur;
+varying float vStreak;
 float ell(vec2 p, vec2 c, vec2 r) { vec2 q = (p - c) / r; return dot(q, q); }
 float seg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
 // a limb or antenna: two bent segments (a knee), width w tapering to the tip; returns coverage
@@ -152,9 +178,10 @@ float insect(vec2 n, vec3 cA, vec3 cB, float var, out vec3 col, out float emis, 
     float dS = min(seg(sn, vec2(0.04, 0.9), vec2(0.17, 1.35)), seg(sn, vec2(0.17, 1.35), vec2(0.42, 1.72)));
     float barbs = smoothstep(0.075, 0.03, dS) * smoothstep(0.55, 0.9, sin((sn.y * 1.0 + sn.x * 0.6) * 90.0)) * smoothstep(0.95, 1.2, n.y);
     ant = max(sh, barbs * 0.55);
-    legs = max(max(limb(sn, vec2(0.14, 0.52), vec2(0.36, 0.66), vec2(0.47, 0.86), 0.018),
-                   limb(sn, vec2(0.16, 0.42), vec2(0.4, 0.36), vec2(0.52, 0.2), 0.018)),
-                   limb(sn, vec2(0.14, 0.3), vec2(0.34, 0.08), vec2(0.42, -0.16), 0.018));
+    // legs tucked up under the thorax in flight, the hind pair trailing along the abdomen
+    legs = max(max(limb(sn, vec2(0.12, 0.55), vec2(0.25, 0.62), vec2(0.2, 0.42), 0.016),
+                   limb(sn, vec2(0.15, 0.42), vec2(0.27, 0.3), vec2(0.2, 0.08), 0.016)),
+                   limb(sn, vec2(0.13, 0.3), vec2(0.24, 0.05), vec2(0.15, -0.3), 0.016));
   } else if (uShape < 1.5) {
     // spiral gnat: a round glowing abdomen, a hunched thorax, long trailing legs
     head = ell(n, vec2(0.0, 0.62), vec2(0.18, 0.16));
@@ -163,7 +190,8 @@ float insect(vec2 n, vec3 cA, vec3 cB, float var, out vec3 col, out float emis, 
     abd = ell(n, vec2(0.0, -0.25), vec2(0.32 + wob, 0.48));
     ring = smoothstep(0.8, 0.97, abs(sin((n.y + wob) * 18.0))) * step(n.y, 0.1);
     ant = limb(sn, vec2(0.05, 0.74), vec2(0.18, 1.0), vec2(0.34, 1.2), 0.02);
-    legs = max(limb(sn, vec2(0.18, 0.34), vec2(0.5, 0.3), vec2(0.62, -0.1), 0.02), limb(sn, vec2(0.16, 0.24), vec2(0.4, -0.2), vec2(0.5, -0.8), 0.02));
+    // long legs held back and dangling under the glowing belly, like a crane fly's
+    legs = max(limb(sn, vec2(0.16, 0.34), vec2(0.36, 0.2), vec2(0.4, -0.35), 0.018), limb(sn, vec2(0.14, 0.24), vec2(0.3, -0.25), vec2(0.34, -0.95), 0.018));
   } else {
     // skitterfly: dragonfly-like, huge wraparound eyes, a long segmented abdomen
     head = ell(n, vec2(0.0, 0.88), vec2(0.075, 0.05));
@@ -175,7 +203,8 @@ float insect(vec2 n, vec3 cA, vec3 cB, float var, out vec3 col, out float emis, 
     float sj = fract((n.y + wob * 0.3) * 9.0);
     ring = smoothstep(0.82, 0.96, sj) * step(n.y, 0.56);
     ant = limb(sn, vec2(0.02, 0.92), vec2(0.04, 0.97), vec2(0.07, 1.0), 0.006);
-    legs = max(limb(sn, vec2(0.05, 0.74), vec2(0.11, 0.8), vec2(0.13, 0.9), 0.008), limb(sn, vec2(0.05, 0.66), vec2(0.12, 0.64), vec2(0.15, 0.72), 0.008));
+    // a dragonfly's basket of legs folded forward under the thorax
+    legs = max(limb(sn, vec2(0.04, 0.74), vec2(0.08, 0.8), vec2(0.06, 0.86), 0.007), limb(sn, vec2(0.04, 0.66), vec2(0.09, 0.66), vec2(0.07, 0.76), 0.007));
   }
   float aa = max(fwidth(n.y), 1e-4) * 6.0;
   float mH = smoothstep(1.0, 1.0 - aa * 4.0, head), mE = smoothstep(1.0, 1.0 - aa * 4.0, eye);
@@ -241,37 +270,87 @@ void main() {
     float far = vFar * max(smoothstep(1.0, 0.55, d), exp(-d * d * 3.0));
     if (far > a) {
       col = mix(cB * 0.25, cA * 0.7, 0.5 + 0.5 * q.y);
-      emis = (1.0 - min(d, 1.0)) * (uShape > 0.5 && uShape < 1.5 ? 1.6 : 0.7) + vFar * 0.9;
+      // far: a soft glint that twinkles as the wings catch the light
+      float tw = 0.75 + 0.35 * sin(uTime * 7.0 + var * 40.0);
+      emis = ((1.0 - min(d, 1.0)) * (uShape > 0.5 && uShape < 1.5 ? 1.6 : 0.7) + vFar * 0.9) * tw;
       a = far;
+    }
+    // being sucked into a mouth: the glow streaks out behind, thin and tapering
+    if (vStreak > 0.01 && q.y < 0.3) {
+      float tl = clamp(-q.y / 1.25, 0.0, 1.0);
+      float sw = exp(-q.x * q.x * mix(2.5, 14.0, tl)) * (1.0 - tl) * smoothstep(0.3, -0.1, q.y) * vStreak;
+      if (sw > 0.01) {
+        col = mix(col, cA, sw * (1.0 - a));
+        emis = max(emis, sw * 2.2);
+        a = max(a, sw * 0.85);
+      }
     }
   } else {
     float hind = vPart > 2.5 ? 1.0 : 0.0;
     vec2 p = vUv; // x: span 0..1, y: chord 0..1
     float d;
     float vein = 0.0;
+    float edgeSoft = 0.18 + vBlur * 0.35;
     if (uShape < 0.5) {
-      // lumen moth: broad rounded forewings with a glowing eye spot, tailed hindwings
-      p = wob(p, 0.012);
+      // lumen moth: a falcate forewing (curved costa, hooked apex, scalloped outer margin) and a
+      // rounded, tailed hindwing; scale dust, a wavy postmedian line, a marginal band of pale
+      // dots between the veins, and the glowing eye spots
+      vec2 pw = wob(p, 0.01);
+      vec2 R = hind < 0.5 ? vec2(0.0, 0.72) : vec2(0.0, 0.85);
+      vec2 rp = pw - R;
+      float th = atan(rp.y, rp.x);
+      float rr = length(rp);
+      float rad;
       if (hind < 0.5) {
-        d = ell(p, vec2(0.52, 0.42 + p.x * 0.12), vec2(0.56, 0.4));
-        float eye = length((p - vec2(0.62, 0.5)) / vec2(1.0, 1.15));
-        emis = smoothstep(0.13, 0.07, eye) * (0.6 + 0.4 * smoothstep(0.05, 0.0, eye)) * 2.2 + smoothstep(0.75, 1.0, d) * 0.55;
-        col = mix(cB, cA, smoothstep(0.1, 0.9, p.x));
-        col = mix(col, vec3(0.08, 0.05, 0.12), smoothstep(0.16, 0.12, eye) * smoothstep(0.07, 0.1, eye));
+        rad = 1.04 * smoothstep(0.42, 0.05, th) * smoothstep(-1.5, -0.65, th) + 0.0;
+        rad = mix(rad, 1.06, smoothstep(0.1, 0.0, abs(th + 0.06)) * 0.4); // the hooked apex
+        rad = max(rad, 0.62 * smoothstep(-1.62, -1.05, th) * step(th, -0.6));
       } else {
-        d = min(ell(p, vec2(0.36, 0.62), vec2(0.4, 0.38)), ell(p, vec2(0.52 + (0.1 - p.y) * 0.4, 0.18), vec2(0.07, 0.22)));
-        col = mix(cA, cB, 0.4 + 0.4 * p.x);
-        emis = smoothstep(0.6, 1.0, d) * 0.5 + smoothstep(0.35, 0.0, p.y) * 0.9;
+        rad = 0.84 * smoothstep(0.25, -0.1, th) * smoothstep(-1.75, -1.0, th);
+        rad += 0.3 * smoothstep(0.12, 0.0, abs(th + 1.3)) ; // the tail
       }
-      // veins: wobbly brush strokes fanning from the root, fading before the edge
-      float va = atan(p.y - 0.5, p.x) * 11.0 + sin(p.x * 8.0 + p.y * 5.0) * 0.9 + sin(p.x * 23.0) * 0.25;
-      vein = smoothstep(0.9, 1.0, sin(va)) * 0.28 * smoothstep(0.05, 0.25, p.x) * (1.0 - smoothstep(0.45, 0.9, d));
-      vein += contour(d, p, 0.1) * 0.55;
+      // scalloped margin between the vein tips
+      rad *= 1.0 - 0.035 * (1.0 - abs(sin(th * 9.0 + 0.4)));
+      d = rad > 0.05 ? rr / rad : 9.0;
+      // venation: radial veins from the root, branching past the discal cell, hand-wobbled
+      float vw = th * 7.5 / 3.1416 + sin(rr * 7.0 + th * 3.0) * 0.18 + sin(rr * 19.0 + var * 5.0) * 0.05;
+      float v1 = smoothstep(0.075 * (1.3 - rr), 0.0, abs(fract(vw) - 0.5)) * smoothstep(0.06, 0.2, rr);
+      float v2 = smoothstep(0.06 * (1.3 - rr), 0.0, abs(fract(vw * 2.0 + 0.5) - 0.5)) * smoothstep(0.42, 0.6, rr);
+      float cell = abs(length((pw - vec2(0.32, hind < 0.5 ? 0.6 : 0.62)) / vec2(0.2, 0.11)) - 1.0);
+      float v3 = smoothstep(0.12, 0.0, cell) * 0.7;
+      vein = max(max(v1, v2 * 0.7), v3) * 0.38 * (1.0 - smoothstep(0.88, 1.0, d));
+      // ground colour: violet at the root, warm amber outward, with dusty scale texture
+      float dust = fbm2(pw * 34.0 + var * 7.0);
+      col = mix(cB * 0.9, cA, smoothstep(0.15, 0.85, rr)) * (0.82 + 0.3 * dust);
+      // the wavy postmedian line and a darker marginal band with pale dots between the veins
+      float pm = abs(rr - 0.62 - 0.04 * sin(th * 11.0 + var * 3.0));
+      col = mix(col, cB * 0.35, smoothstep(0.03, 0.0, pm) * 0.75);
+      float band = smoothstep(0.8, 0.86, d);
+      col = mix(col, cB * 0.45, band * 0.6);
+      float dots = smoothstep(0.35, 0.15, length(vec2(fract(vw) - 0.5, (d - 0.9) * 6.0)));
+      col = mix(col, cA * 1.25 + 0.1, dots * band);
+      // the eye spot: a dark ring around a glowing iris with a pale pupil highlight
+      vec2 ec = hind < 0.5 ? vec2(0.6, 0.52) : vec2(0.4, 0.55);
+      float er = hind < 0.5 ? 0.13 : 0.085;
+      float eye = length((pw - ec) / vec2(1.0, 1.15)) / er;
+      col = mix(col, vec3(0.06, 0.04, 0.09), smoothstep(1.15, 1.0, eye) * smoothstep(0.62, 0.78, eye));
+      col = mix(col, cA * 1.2, smoothstep(0.7, 0.55, eye));
+      emis = smoothstep(0.72, 0.4, eye) * (0.7 + 0.3 * smoothstep(0.3, 0.0, eye)) * 2.2 + smoothstep(0.84, 1.0, d) * 0.3 + dots * band * 0.5;
+      vein += contour(d, pw, 0.08) * 0.6;
     } else if (uShape < 1.5) {
-      // spiral gnat: little clear wings, all shimmer
+      // spiral gnat: little clear wings, a dark costa along the leading edge, three veins, all shimmer
       d = ell(p, vec2(0.5, hind > 0.5 ? 0.6 : 0.45), vec2(0.5, 0.32));
-      col = mix(cA, vec3(1.0), 0.4);
-      emis = 0.4;
+      vec2 q = wob(p, 0.015);
+      float cy = hind > 0.5 ? 0.6 : 0.45;
+      vein = smoothstep(0.05, 0.0, abs(q.y - cy - 0.28 + q.x * q.x * 0.12)) * 0.8;
+      for (int k = 0; k < 3; k++) {
+        float fk = float(k);
+        vein = max(vein, smoothstep(0.03, 0.0, abs(q.y - cy - 0.14 + fk * 0.12 - q.x * (0.1 + fk * 0.06))) * smoothstep(0.05, 0.2, q.x) * 0.5);
+      }
+      vein *= 0.5 * (1.0 - smoothstep(0.8, 1.0, d));
+      float irid = 0.5 + 0.5 * sin(dot(normalize(vN), vV) * 9.0 + p.x * 6.0 + var * 6.0);
+      col = mix(mix(cA, vec3(1.0), 0.45), cB * 1.2, irid * 0.5);
+      emis = 0.25 + irid * 0.2;
     } else {
       // skitterfly: long narrow dragonfly wings, iridescent, a dark pterostigma near the tip
       d = ell(p, vec2(0.5, hind > 0.5 ? 0.62 : 0.4), vec2(0.52, 0.42));
@@ -284,10 +363,11 @@ void main() {
       col = mix(col, vec3(0.06, 0.08, 0.14), smoothstep(0.05, 0.02, length((p - vec2(0.86, 0.55)) / vec2(1.0, 2.5))));
       emis = smoothstep(0.7, 1.0, d) * 0.6 + irid * 0.25;
     }
-    a = smoothstep(1.0, 0.82, d);
-    col *= 1.0 - vein;
+    a = smoothstep(1.0, 1.0 - edgeSoft, d);
+    // the veins blur away with the beat; the membrane smears into a translucent fan
+    col *= 1.0 - vein * (1.0 - vBlur * 0.8);
     // wings are thin: translucent toward the light, fading out when far (the body glow takes over)
-    a *= (uShape > 0.5 && uShape < 1.5 ? 0.35 : 0.9) * (1.0 - vFar);
+    a *= (uShape > 0.5 && uShape < 1.5 ? 0.4 : 0.88) * (1.0 - vFar) * (1.0 - vBlur * 0.6);
   }
   if (a < 0.004) discard;
   float dusk = smoothstep(0.3, -0.05, uSunDir.y);
@@ -337,7 +417,13 @@ export class SkyBugs {
     this.stats = { ms: 0, msAvg: 0, drawn: 0, sim: 0, eaten: 0 };
     this.mouthWant = 0; // 0..1: a live bug is right in front of the first eater's mouth
     this.nearest = Infinity;
-    this.onCatch = null; // (kind, x, y, z, swarm) for the first eater
+    this.onCatch = null; // (kind, x, y, z, swarm) for the first eater: a bug reached the mouth
+    this.onSuck = null;  // (kind, x, y, z) a bug started being drawn into the mouth
+    this.reach = 0;      // 0..1 how close the nearest bug in front of the mouth is (opens it wider)
+    this.focus = new Vector3(); // where the bugs in front of the mouth are (eyes and head turn to it)
+    this.focusW = 0;     // 0..1 how many / how close
+    this.sucking = 0;    // bugs on their way into the mouth
+    this.slow = 1;       // suction duration multiplier (the dev scene's slow motion)
     const scene = opts.scene || game.engine.sceneT;
     for (const name of Object.keys(BUG_SPECIES)) {
       const def = BUG_SPECIES[name];
@@ -346,9 +432,11 @@ export class SkyBugs {
       const aP = new InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(DynamicDrawUsage);
       const aD = new InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(DynamicDrawUsage);
       const aS = new InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(DynamicDrawUsage);
+      const aX = new InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(DynamicDrawUsage);
       geo.setAttribute('aP', aP);
       geo.setAttribute('aD', aD);
       geo.setAttribute('aS', aS);
+      geo.setAttribute('aX', aX);
       geo.instanceCount = 0;
       const mat = new ShaderMaterial({
         vertexShader: VERT, fragmentShader: FRAG,
@@ -368,11 +456,15 @@ export class SkyBugs {
       mesh.name = `bugs-${name}`;
       scene.add(mesh);
       const K = {
-        name, def, cap, mesh, geo, aP, aD, aS,
+        name, def, cap, mesh, geo, aP, aD, aS, aX, attrs: [aP, aD, aS, aX],
         pos: new Float32Array(cap * 3), off: new Float32Array(cap * 3), offV: new Float32Array(cap * 3),
         head: new Float32Array(cap * 3), seed: new Float32Array(cap * 4), fade: new Float32Array(cap),
         alive: new Uint8Array(cap), respawn: new Float32Array(cap), fleeCd: new Float32Array(cap),
         excite: new Float32Array(cap), seaY: new Float32Array(cap), init: new Uint8Array(cap),
+        // suction into a mouth: progress (<0 none), its duration, the start offset from the mouth
+        suck: new Float32Array(cap).fill(-1), suckDur: new Float32Array(cap), rel: new Float32Array(cap * 3),
+        // flight: dart timers, flap amplitude (gliding), roll
+        dartT: new Float32Array(cap), flapK: new Float32Array(cap).fill(1), roll: new Float32Array(cap),
         glowCol: new Color(def.glow), colA: new Color(def.colA),
       };
       let s = 12345 + name.length * 977;
@@ -432,6 +524,9 @@ export class SkyBugs {
       K.fleeCd[i] = 0;
       K.excite[i] = 0;
       K.init[i] = 0;
+      K.suck[i] = -1;
+      K.flapK[i] = 1;
+      K.dartT[i] = 1 + K.seed[i * 4] * 4;
       K.off[i * 3] = K.off[i * 3 + 1] = K.off[i * 3 + 2] = 0;
       K.offV[i * 3] = K.offV[i * 3 + 1] = K.offV[i * 3 + 2] = 0;
       K.seaY[i] = S.seaY;
@@ -495,6 +590,12 @@ export class SkyBugs {
     const bx = eater ? eater.body.x : 0, by = eater ? eater.body.y : 0, bz = eater ? eater.body.z : 0;
     const fx = eater ? eater.fwd.x : 0, fy = eater ? eater.fwd.y : 0, fz = eater ? eater.fwd.z : 1;
     const openR = eater ? 5 + Math.min(eater.speed, 20) * 0.45 : 0;
+    // the eater's up (for the suction's curving path): world up made perpendicular to fwd
+    let ux = -fx * fy, uy = 1 - fy * fy, uz = -fz * fy;
+    const ul = Math.hypot(ux, uy, uz) || 1;
+    ux /= ul; uy /= ul; uz /= ul;
+    let sucking = 0, reachD = Infinity, fw = 0, fsx = 0, fsy = 0, fsz = 0;
+    const maxSuck = 9;
     let drawn = 0, sim = 0;
     for (const k in this.kinds) this.kinds[k].n = 0;
     for (const S of this.swarms) {
@@ -522,8 +623,49 @@ export class SkyBugs {
           if (K.respawn[i] > 0 || S.dying || S.shape === 'ring') continue;
           K.alive[i] = 1;
           K.fade[i] = 0;
+          K.suck[i] = -1;
           K.off[i3] = K.off[i3 + 1] = K.off[i3 + 2] = 0;
           K.offV[i3] = K.offV[i3 + 1] = K.offV[i3 + 2] = 0;
+        }
+        // ---- drawn into a mouth: a curving, accelerating spiral; spinning, shrinking, streaking ----
+        if (K.suck[i] >= 0) {
+          let e = K.suck[i] + dt / (K.suckDur[i] * this.slow);
+          if (!eater || e >= 1) {
+            // it reached the mouth: eaten
+            K.suck[i] = -1;
+            K.alive[i] = 0;
+            K.respawn[i] = 7 + k1 * 8;
+            S.eaten++;
+            this.stats.eaten++;
+            if (eater && this.onCatch) this.onCatch(S.kind, mx, my, mz, S);
+            continue;
+          }
+          K.suck[i] = e;
+          sucking++;
+          const ee = e * e * (1.6 - 0.6 * e); // eases in: a gentle tug, then a rush
+          const th = (k2 < 0.5 ? -1 : 1) * (1.6 + k3 * 1.4) * ee;
+          const c = Math.cos(th), sn = Math.sin(th);
+          const rx = K.rel[i3], ry = K.rel[i3 + 1], rz = K.rel[i3 + 2];
+          // Rodrigues: rotate the start offset about the mouth's forward axis
+          const dfv = fx * rx + fy * ry + fz * rz;
+          const cx2 = fy * rz - fz * ry, cy2 = fz * rx - fx * rz, cz2 = fx * ry - fy * rx;
+          const shrink = 1 - ee;
+          const arc = Math.sin(Math.PI * e) * Math.hypot(rx, ry, rz) * 0.22;
+          const qx = mx + (rx * c + cx2 * sn + fx * dfv * (1 - c)) * shrink + ux * arc;
+          const qy = my + (ry * c + cy2 * sn + fy * dfv * (1 - c)) * shrink + uy * arc;
+          const qz = mz + (rz * c + cz2 * sn + fz * dfv * (1 - c)) * shrink + uz * arc;
+          const inv = 1 / Math.max(dt, 1e-4);
+          const hx = (qx - K.pos[i3]) * inv, hy = (qy - K.pos[i3 + 1]) * inv, hz = (qz - K.pos[i3 + 2]) * inv;
+          K.head[i3] = hx; K.head[i3 + 1] = hy; K.head[i3 + 2] = hz;
+          K.pos[i3] = qx; K.pos[i3 + 1] = qy; K.pos[i3 + 2] = qz;
+          K.roll[i] += dt * (6 + 22 * ee) * (k2 < 0.5 ? -1 : 1);
+          const n = K.n++;
+          const P = K.aP.array, D = K.aD.array, A = K.aS.array, X = K.aX.array, n4 = n * 4;
+          P[n4] = qx; P[n4 + 1] = qy; P[n4 + 2] = qz; P[n4 + 3] = (0.8 + 0.4 * k2) * (1 - 0.7 * ee);
+          D[n4] = hx; D[n4 + 1] = hy; D[n4 + 2] = hz; D[n4 + 3] = ph;
+          A[n4] = 1.6; A[n4 + 1] = 1; A[n4 + 2] = k1; A[n4 + 3] = S.fade * Math.min(1, (1 - e) * 6);
+          X[n4] = smoothstep01(0.1, 0.7, e); X[n4 + 1] = K.roll[i]; X[n4 + 2] = 1; X[n4 + 3] = 0;
+          continue;
         }
         // ---- formation target ----
         let x, y, z;
@@ -564,6 +706,18 @@ export class SkyBugs {
         // ---- flee offset (a damped spring back to the formation) ----
         let ox = K.off[i3], oy = K.off[i3 + 1], oz = K.off[i3 + 2];
         let vx = K.offV[i3], vy = K.offV[i3 + 1], vz = K.offV[i3 + 2];
+        // now and then a bug darts off on its own and drifts back (skitterflies dart hardest)
+        K.dartT[i] -= dt;
+        if (K.dartT[i] <= 0) {
+          const h = Math.sin(t * 12.9898 + i * 78.233) * 43758.5453, r1 = h - Math.floor(h);
+          const ang = r1 * TAU, kick = def.shape === 2 ? 7 : def.shape === 1 ? 2.5 : 2.2;
+          vx += Math.cos(ang) * kick; vz += Math.sin(ang) * kick; vy += (r1 - 0.4) * kick * 0.5;
+          K.dartT[i] = (def.shape === 2 ? 1.5 : 2.5) + k1 * 5 + r1 * 2;
+          K.excite[i] = Math.max(K.excite[i], 0.35);
+        }
+        // moths glide on held wings between bursts; skitterflies hold still to hover-hunt
+        const glide = def.shape === 0 ? Math.sin(t * (0.35 + k3 * 0.3) + ph * TAU) > 0.55 : def.shape === 2 && Math.sin(t * 0.8 + k2 * 9) > 0.7;
+        K.flapK[i] += ((glide && K.excite[i] < 0.3 ? 0.12 : 1) - K.flapK[i]) * Math.min(1, dt * 4);
         vx += (-ox * 1.6 - vx * 1.5) * dt;
         vy += (-oy * 1.6 - vy * 1.5) * dt;
         vz += (-oz * 1.6 - vz * 1.5) * dt;
@@ -588,16 +742,26 @@ export class SkyBugs {
           const mx2 = px - mx, my2 = py - my, mz2 = pz - mz;
           const m2 = mx2 * mx2 + my2 * my2 + mz2 * mz2;
           if (m2 < nearest) nearest = m2;
-          if (m2 < openR * openR && (mx2 * fx + my2 * fy + mz2 * fz) > -1.2) want = 1;
-          if (eater.open > 0.3 && m2 < catchR2 * (0.6 + 0.4 * eater.open) * (1 + Math.min(eater.speed, 20) * 0.03)) {
-            K.alive[i] = 0;
-            K.respawn[i] = 7 + k1 * 8;
-            S.eaten++;
-            this.stats.eaten++;
-            if (this.onCatch) this.onCatch(S.kind, px, py, pz, S);
+          const ahead = mx2 * fx + my2 * fy + mz2 * fz;
+          if (m2 < openR * openR && ahead > -1.2) {
+            want = 1;
+            // what the eyes lock on: the bugs ahead, the nearest weighted most
+            const w = 1 / (1 + m2 * 0.08);
+            fw += w; fsx += px * w; fsy += py * w; fsz += pz * w;
+            if (ahead > 0 && m2 < reachD) reachD = m2;
+          }
+          // within reach of an open mouth: it is caught in the suction
+          const suckR2 = catchR2 * 2.6 * (0.6 + 0.4 * eater.open) * (1 + Math.min(eater.speed, 20) * 0.04);
+          if (eater.open > 0.3 && m2 < suckR2 && ahead > -0.6 && sucking < maxSuck) {
+            K.suck[i] = 0;
+            K.suckDur[i] = (def.shape === 0 ? 0.42 : def.shape === 1 ? 0.26 : 0.34) * (0.85 + 0.3 * k3);
+            K.rel[i3] = mx2; K.rel[i3 + 1] = my2; K.rel[i3 + 2] = mz2;
             K.off[i3] = ox; K.off[i3 + 1] = oy; K.off[i3 + 2] = oz;
-            K.offV[i3] = vx; K.offV[i3 + 1] = vy; K.offV[i3 + 2] = vz;
-            continue;
+            K.offV[i3] = 0; K.offV[i3 + 1] = 0; K.offV[i3 + 2] = 0;
+            K.pos[i3] = px; K.pos[i3 + 1] = py; K.pos[i3 + 2] = pz;
+            K.excite[i] = 1;
+            sucking++;
+            if (this.onSuck) this.onSuck(S.kind, px, py, pz);
           }
         }
         K.off[i3] = ox; K.off[i3 + 1] = oy; K.off[i3 + 2] = oz;
@@ -622,6 +786,8 @@ export class SkyBugs {
         P[n4] = px; P[n4 + 1] = py; P[n4 + 2] = pz; P[n4 + 3] = 0.8 + 0.4 * k2;
         D[n4] = hx; D[n4 + 1] = hy * 0.5; D[n4 + 2] = hz; D[n4 + 3] = ph;
         A[n4] = 0.8 + 0.4 * k3 + K.excite[i] * 0.5; A[n4 + 1] = K.excite[i]; A[n4 + 2] = k1; A[n4 + 3] = K.fade[i] * S.fade;
+        const X = K.aX.array;
+        X[n4] = 0; X[n4 + 1] = 0; X[n4 + 2] = K.flapK[i]; X[n4 + 3] = 0;
       }
     }
     for (const k in this.kinds) {
@@ -629,7 +795,8 @@ export class SkyBugs {
       K.geo.instanceCount = K.n;
       drawn += K.n;
       if (K.n > 0) {
-        for (const a of [K.aP, K.aD, K.aS]) {
+        for (let ai = 0; ai < 4; ai++) {
+          const a = K.attrs[ai];
           a.clearUpdateRanges?.();
           a.addUpdateRange?.(0, K.n * 4);
           a.needsUpdate = true;
@@ -638,6 +805,11 @@ export class SkyBugs {
     }
     this.mouthWant = want;
     this.nearest = Math.sqrt(nearest);
+    this.sucking = sucking;
+    // anticipation: the mouth opens wider as the nearest bug ahead comes within reach
+    const rd = Math.sqrt(reachD);
+    this.reach = eater && reachD < Infinity ? 1 - Math.min(1, Math.max(0, (rd - 2) / Math.max(openR - 2, 1))) : 0;
+    if (fw > 0) { this.focus.set(fsx / fw, fsy / fw, fsz / fw); this.focusW = Math.min(1, fw * 0.6); } else this.focusW = 0;
     const ms = performance.now() - t0;
     this.stats.ms = ms;
     this.stats.msAvg = this.stats.msAvg * 0.95 + ms * 0.05;

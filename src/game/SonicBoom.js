@@ -1,43 +1,24 @@
-// Sonic booms from the throat resonator: an expanding pressure shell that refracts the air
-// (screen-space lens ring), blows clouds apart (they slowly reform), bursts mist, shakes the
-// camera, scatters creatures and knocks back the falcon. Adults' booms are far larger and can
-// be synchronised into one enormous protective wave.
-import { Mesh, SphereGeometry, ShaderMaterial, Vector3, Vector4, AdditiveBlending, Color } from 'three';
+// Sonic booms from the throat resonator: a pressure wave that blows clouds apart (they slowly reform),
+// bursts out as a painted 2D effect (a soft flash and a few hand-drawn arcs and strokes of wind, never a
+// perfect ring or a lens circle), shakes the camera, scatters creatures and knocks back the falcon.
+// Adults' booms are far larger and can be synchronised into one enormous protective wave.
+import { Vector3 } from 'three';
 import { G } from '../render/Globals.js';
-import { UNIFORMS } from '../render/shaders/common.js';
 import { clamp, lerp, smoothstep } from '../core/math.js';
 
-const SHELL_VERT = /* glsl */ `
-${UNIFORMS}
-varying vec3 vN;
-varying vec3 vW;
-void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vW = wp.xyz;
-  vN = normalize(mat3(modelMatrix) * normal);
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`;
-const SHELL_FRAG = /* glsl */ `
-${UNIFORMS}
-uniform float uAlpha;
-uniform vec3 uTint;
-varying vec3 vN;
-varying vec3 vW;
-void main() {
-  vec3 V = normalize(uCamPos - vW);
-  float f = pow(1.0 - abs(dot(normalize(vN), V)), 3.0);
-  float a = f * uAlpha;
-  gl_FragColor = vec4(uTint * a, 0.0);
-}
-`;
+const _f = new Vector3();
+const _u = new Vector3();
+const _w = new Vector3();
+const _d = new Vector3();
+const _hz = new Vector3();
+const TAU = Math.PI * 2;
 
 export class SonicBooms {
   constructor(game) {
     this.game = game;
     this.active = [];
     this.slot = 0;
-    this.shellGeo = new SphereGeometry(1, 48, 24);
+    this._em = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 1, sizeEnd: 1, alpha: 1, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.02, stretch: 4 };
     this.hooks = [];
     this.charge = null; // {pos (Vector3), amount}
   }
@@ -52,27 +33,9 @@ export class SonicBooms {
     const i = this.slot++ % G.uBooms.value.length;
     G.uBooms.value[i].set(center.x, center.y, center.z, g.time);
     G.uBoomParams.value[i].set(radius, strength, speed, 0);
-    const mat = new ShaderMaterial({
-      vertexShader: SHELL_VERT, fragmentShader: SHELL_FRAG,
-      uniforms: Object.assign({}, G, { uAlpha: { value: 0.5 }, uTint: { value: new Color(opts.tint ?? 0xe8f0ff) } }),
-      transparent: true, depthWrite: false, blending: AdditiveBlending,
-    });
-    const shell = new Mesh(this.shellGeo, mat);
-    shell.position.copy(center);
-    shell.frustumCulled = false;
-    shell.renderOrder = 35;
-    g.engine.sceneT.add(shell);
-    const b = { center: center.clone(), t: 0, radius, speed, power, shell, hitFalcon: false, source: opts.source };
+    const b = { center: center.clone(), t: 0, radius, speed, power, hitFalcon: false, source: opts.source };
     this.active.push(b);
-    // mist burst
-    const n = Math.round(Math.min(20 + radius * 0.6, 140));
-    for (let k = 0; k < n; k++) {
-      const d = new Vector3(Math.random() - 0.5, (Math.random() - 0.5) * 0.7, Math.random() - 0.5).normalize();
-      g.mist.emit({
-        pos: center.clone().addScaledVector(d, radius * 0.05), vel: d.multiplyScalar(speed * lerp(0.25, 0.6, Math.random())),
-        life: lerp(1.2, 2.6, Math.random()), size: Math.min(radius * 0.06 + 1, 12), sizeEnd: Math.min(radius * 0.18 + 3, 28), alpha: 0.5, drag: 1.6, kind: 0,
-      });
-    }
+    this._paint(center, radius, speed, power);
     // camera shake by proximity
     const camD = g.engine.camera.position.distanceTo(center);
     g.cameraRig.addShake(clamp(1.2 - camD / (radius * 2.5), 0, 1) * (0.4 + power * 0.4));
@@ -84,38 +47,28 @@ export class SonicBooms {
     const g = this.game;
     const cam = g.engine.camera;
     const shocks = g.engine.post.composite.uniforms.uShock.value;
-    for (const s of shocks) s.set(0, 0, 0, 0);
-    let k = 0;
+    for (let k = 0; k < shocks.length; k++) shocks[k].set(0, 0, 0, 0);
     for (let i = this.active.length - 1; i >= 0; i--) {
       const b = this.active[i];
       b.t += dt;
       const r = b.speed * b.t;
       const life = b.radius / b.speed;
       const fade = 1 - smoothstep(life * 0.5, life * 1.05, b.t);
-      b.shell.scale.setScalar(Math.max(0.1, r));
-      b.shell.material.uniforms.uAlpha.value = 0.35 * fade * (0.6 + 0.4 * b.power);
       b.front = r;
       const F = this.falcon;
       if (b.knockFalcon && !b.hitFalcon && F && F.mode !== 'hidden' && F.mode !== 'knockback' && F.pos.distanceTo(b.center) < r + F.radius) {
         b.hitFalcon = true;
         F.knockback(b.center, b.knockFalcon);
       }
-      // screen-space lens ring
-      if (k < shocks.length && fade > 0.01) {
-        const v = b.center.clone().project(cam);
+      // the wave passing over the camera: a soft full-screen pulse (no lens ring: it read as a circle)
+      if (fade > 0.01) {
         const dist = cam.position.distanceTo(b.center);
-        if (v.z < 1 && dist > r * 0.8) {
-          const tanH = Math.tan((cam.fov * Math.PI) / 360);
-          const sr = r / (dist * tanH) * 0.5;
-          shocks[k++].set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, sr, fade * clamp(b.power, 0.3, 1.6));
-        } else if (dist <= r * 1.1 && dist >= r * 0.6) {
-          // the wave passes over the camera: a full-screen pulse
-          g.engine.post.composite.uniforms.uPulse.value = Math.max(g.engine.post.composite.uniforms.uPulse.value, fade * 0.8);
+        if (dist <= r * 1.1 && dist >= r * 0.6) {
+          const pu = g.engine.post.composite.uniforms.uPulse;
+          pu.value = Math.max(pu.value, fade * 0.6);
         }
       }
       if (b.t > life * 1.1) {
-        g.engine.sceneT.remove(b.shell);
-        b.shell.material.dispose();
         this.active.splice(i, 1);
       }
     }
@@ -124,9 +77,64 @@ export class SonicBooms {
     // charging haze at the throat
     const haze = g.engine.post.composite.uniforms.uHaze.value;
     if (this.charge && this.charge.amount > 0.02) {
-      const v = this.charge.pos.clone().project(cam);
+      const v = _hz.copy(this.charge.pos).project(cam);
       if (v.z < 1) haze.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, 0.08 + this.charge.amount * 0.14, this.charge.amount);
       else haze.set(0, 0, 0, 0);
     } else haze.set(0, 0, 0, 0);
+  }
+
+  /**
+   * The boom as a painted burst: a soft flash at the throat and a few hand-drawn arcs of wind flung
+   * outward (uneven angles, radii and lengths, so it never closes into a ring), with a handful of
+   * straight-ish speed strokes between them. Laid out across the view so it reads on screen.
+   */
+  _paint(center, radius, speed, power) {
+    const g = this.game, E = this._em;
+    if (!g.mist) return;
+    const cam = g.engine.camera;
+    cam.getWorldDirection(_f);
+    _u.set(0, 1, 0).cross(_f);
+    if (_u.lengthSq() < 1e-6) _u.set(1, 0, 0);
+    _u.normalize();
+    _w.copy(_f).cross(_u).normalize();
+    const camD = Math.max(1, cam.position.distanceTo(center));
+    const width = clamp(radius * 0.022, 0.12, 5) * clamp(camD / 25, 0.6, 1.6);
+    const out = speed * 0.32;
+    // soft flash: a few overlapping painted glow dots, quick
+    if (g.glow) {
+      for (let k = 0; k < 4; k++) {
+        E.pos.copy(center).addScaledVector(_u, (Math.random() - 0.5) * radius * 0.04).addScaledVector(_w, (Math.random() - 0.5) * radius * 0.04);
+        E.vel.set(0, 0, 0);
+        E.life = 0.22 + Math.random() * 0.12; E.size = clamp(radius * 0.05, 0.6, 14) * (0.7 + Math.random() * 0.5); E.sizeEnd = E.size * 1.6;
+        E.alpha = 0.55; E.drag = 0; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
+        E.color[0] = 1; E.color[1] = 0.96; E.color[2] = 0.88;
+        g.glow.emit(E);
+      }
+    }
+    const arcs = Math.round(clamp(5 + power * 3, 5, 10));
+    const a0 = Math.random() * TAU;
+    for (let k = 0; k < arcs; k++) {
+      const a = a0 + ((k + (Math.random() - 0.5) * 0.7) / arcs) * TAU;
+      _d.copy(_u).multiplyScalar(Math.cos(a)).addScaledVector(_w, Math.sin(a)).addScaledVector(_f, (Math.random() - 0.5) * 0.3).normalize();
+      const sp = out * lerp(0.6, 1.05, Math.random());
+      E.pos.copy(center).addScaledVector(_d, radius * lerp(0.04, 0.1, Math.random()));
+      E.vel.copy(_d).multiplyScalar(sp);
+      E.life = lerp(0.45, 0.75, Math.random()); E.size = width * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 1.5;
+      E.alpha = 0.75; E.drag = 2.4; E.gravity = 0; E.kind = 7; E.fadeIn = 0.02;
+      E.stretch = lerp(3.5, 6, Math.random());
+      E.color[0] = 0.97; E.color[1] = 0.99; E.color[2] = 1.0;
+      g.mist.emit(E);
+      // a speed stroke between this arc and the next
+      if (Math.random() < 0.7) {
+        const b = a + (TAU / arcs) * lerp(0.35, 0.65, Math.random());
+        _d.copy(_u).multiplyScalar(Math.cos(b)).addScaledVector(_w, Math.sin(b)).normalize();
+        E.pos.copy(center).addScaledVector(_d, radius * lerp(0.06, 0.14, Math.random()));
+        E.vel.copy(_d).multiplyScalar(sp * 1.1);
+        E.life = lerp(0.35, 0.55, Math.random()); E.size = width * 0.55; E.sizeEnd = E.size * 0.8;
+        E.alpha = 0.6; E.kind = 6; E.stretch = lerp(6, 10, Math.random());
+        g.mist.emit(E);
+      }
+    }
+    E.stretch = 4;
   }
 }

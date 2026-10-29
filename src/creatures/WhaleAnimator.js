@@ -7,6 +7,9 @@
 // Organs: the throat bellows, the sensor crest, the horn vents, the sonic dome, the blowholes and
 // the heat flush all follow the voice (hum, sing, charge), breathing and feeding.
 // Face: blinks, saccades, gaze, pupils, lids and brows over all four eyes.
+// Eating (bugs, fish): focus(pos, w) eyes and head on prey, the jaw on a spring (snap(): a quick shut
+// with a bounce, held a beat, then it reopens), gulp(k): a swallow that travels throat -> neck ->
+// chest -> flank sacs as a bulge, a little chew, cheeks puffed; then a contented shimmy and smile.
 import { Vector3, Quaternion, Matrix4, Euler } from 'three';
 import { Spring, SpringVec3, clamp, lerp, smoothstep, damp, TAU, rng } from '../core/math.js';
 import { G as GLOBALS } from '../render/Globals.js';
@@ -42,6 +45,8 @@ const SPINE = ['spine1', 'spine2', 'tail1', 'tail2', 'tail3', 'fluke'];
 const SPINE_W = [0.12, 0.3, 0.55, 0.8, 1.0, 1.15];
 
 const env = (u, a, r) => smoothstep(0, a, u) * (1 - smoothstep(1 - r, 1, u));
+// a tent bump of the swallowed bolus at position p around c (width w)
+const tent = (p, c, w) => (p <= 1 ? Math.max(0, 1 - Math.abs(p - c) / w) : 0);
 
 export class WhaleAnimator {
   constructor(model, seed = 1) {
@@ -117,6 +122,24 @@ export class WhaleAnimator {
     this.blowK = 0;
     this.blowStrength = 0;
 
+    // eating: jaw spring, snap hold, the swallowed bolus, chew, savour shimmy, prey focus
+    this.jawS = new Spring(0, this.calf ? 4.2 : 2.6, 0.55);
+    this.snapHold = 0;      // s the jaw stays shut after a snap
+    this.snapK = 0;         // 1 at a snap, decays (head nod, cheek puff)
+    this.lastSnap = -9;
+    this.bolusP = 1.2;      // where the swallowed bolus is: 0 throat .. 1 flank sacs (>1 none)
+    this.bolusA = 0;        // its size
+    this.gulpQ = 0;         // a gulp queued behind the snap
+    this.chew = 0;          // chew envelope
+    this.chewT = 0;
+    this.savor = 0;         // contented shimmy envelope
+    this.savorT = 0;
+    this.cheek = 0;         // puffed cheeks (throat swell at the head end)
+    this.focusP = new Vector3();
+    this.focusW = 0;        // 0..1 eyes and head locked on prey (decays unless refreshed)
+    this.focusWT = 0;
+    this.reach = 0;         // 0..1 prey coming within reach: the mouth opens wider
+
     this.prevVel = new Vector3();
     this.accel = new Vector3();
     this._invQ = new Quaternion();
@@ -190,6 +213,57 @@ export class WhaleAnimator {
   }
 
   /**
+   * Prey in view: eyes and head turn to `pos` with weight w (0..1), the mouth opens wider with
+   * `reach` (0..1, prey coming within reach). Call every frame while it lasts; it fades by itself.
+   */
+  focus(pos, w = 1, reach = 0) {
+    if (pos) this.focusP.copy(pos);
+    this.focusWT = Math.max(this.focusWT, clamp(w, 0, 1));
+    this.reach = Math.max(this.reach, clamp(reach, 0, 1));
+  }
+
+  /**
+   * The jaw snaps shut on a morsel (overshoot and settle), holds a beat, then reopens if the mouth
+   * still wants to be open. Snaps closer together than the jaw can travel merge into one (no jitter).
+   * Returns true when a fresh snap started.
+   */
+  snap(strength = 1) {
+    const k = clamp(strength, 0.2, 1.5);
+    const t = this.time;
+    if (t - this.lastSnap < 0.32 && this.snapHold > 0) {
+      // already shut: hold a little longer, chew a little more
+      this.snapHold = Math.max(this.snapHold, 0.1);
+      this.chew = Math.min(1, this.chew + 0.3);
+      return false;
+    }
+    this.lastSnap = t;
+    this.snapHold = 0.13 + 0.05 * k;
+    this.jawS.impulse(-(this.calf ? 9 : 5) * k);
+    this.snapK = Math.min(1.2, this.snapK + 0.8 * k);
+    this.cheek = Math.min(1.2, this.cheek + 0.7 * k);
+    // the whole head bites forward and nods
+    this.sHeadPitch.impulse(1.6 * k);
+    this.sJolt.impulse(2 * k);
+    this.sFinFlare.impulse(2 * k);
+    return true;
+  }
+
+  /** Swallow: a bulge travels down the throat into the chest and flank sacs, a small chew first. */
+  gulp(strength = 1) {
+    const k = clamp(strength, 0.1, 1.5);
+    if (this.bolusP > 1) { this.bolusP = -0.12; this.bolusA = k; } else {
+      // a second morsel joins the first: it grows, and slides back up a little (no restart pop)
+      this.bolusA = Math.min(1.5, Math.max(this.bolusA, k) + k * 0.25);
+      this.bolusP = Math.min(this.bolusP, 0.25);
+    }
+    this.chew = Math.min(1, this.chew + 0.6);
+    this.chewT = 0;
+    // then delight: smiling eyes, a little shimmy of contentment
+    this.delightT = Math.min(this.delightT > 0 ? this.delightT : 9, 0.35);
+    this.savor = Math.min(1, this.savor + 0.55 * k + 0.2);
+  }
+
+  /**
    * s: {
    *   vel (world Vector3), quat (world Quaternion), angVel {yaw,pitch,roll} (rad/s),
    *   effort 0..1, glide 0..1, climb -1..1, mouth 0..1, feed 0..1, hum 0..1, charge 0..1,
@@ -228,6 +302,27 @@ export class WhaleAnimator {
     let mouthT = Math.max(s.mouth ?? 0, this.feed * 0.85, this.hum * 0.12, this.sing * 0.22, this.surprise * 0.25);
     if (this.mouthKick) { mouthT = 1; this.mouthKick = Math.max(0, this.mouthKick - dt * 3); }
     this.mouth = damp(this.mouth, mouthT, this.calf ? 9 : 4, dt);
+    // eating clocks: focus fades unless refreshed; the bolus travels; chew and shimmy decay
+    this.focusW = damp(this.focusW, this.focusWT, this.focusWT > this.focusW ? 6 : 2.5, dt);
+    this.focusWT = 0;
+    this.reachS = damp(this.reachS ?? 0, this.reach, 7, dt);
+    this.reach = 0;
+    this.snapHold = Math.max(0, this.snapHold - dt);
+    this.snapK = Math.max(0, this.snapK - dt * 3.2);
+    this.cheek = Math.max(0, this.cheek - dt * 1.6);
+    if (this.bolusP <= 1) {
+      this.bolusP += dt * (this.calf ? 1.25 : 0.7);
+      if (this.bolusP > 1) { this.bolusP = 1.2; this.bolusA = 0; }
+    }
+    this.chewT += dt;
+    this.chew = Math.max(0, this.chew - dt * 1.4);
+    this.savorT += dt;
+    this.savor = Math.max(0, this.savor - dt * 0.7);
+    const bp = this.bolusP, ba = this.bolusA;
+    this.bThroat = ba * tent(bp, 0.08, 0.3) * 0.8 + this.cheek * 0.3;
+    this.bNeck = ba * tent(bp, 0.4, 0.28);
+    this.bChest = ba * tent(bp, 0.68, 0.3);
+    this.bSac = ba * tent(bp, 0.94, 0.26);
 
     // acceleration in world space (fur and hair inertia, fin lag)
     if (dt > 0) {
@@ -314,6 +409,10 @@ export class WhaleAnimator {
     if (this.jigLookT > 0) {
       this.jigLookT -= dt;
       lookAt = _v2.copy(this._pos).addScaledVector(this.jigLook, 30);
+    } else if (this.focusW > 0.05) {
+      // prey: the eyes lock on and the head follows (blended with whatever else it looked at)
+      if (lookAt) lookAt = _v2.copy(lookAt).lerp(this.focusP, this.focusW);
+      else lookAt = this.focusW > 0.3 ? this.focusP : null;
     }
     if (lookAt && s.worldPos) {
       _v.copy(lookAt).sub(s.worldPos).applyQuaternion(this._invQ);
@@ -332,6 +431,16 @@ export class WhaleAnimator {
 
     // ---- gesture pose (additive channels) -----------------------------------------------
     const gp = this._gesturePose(G, gu, dt);
+    // eating: a contented shimmy after a swallow, a curious head tilt toward prey, the snap's nod
+    const sav = this.savor * this.savor * (3 - 2 * this.savor);
+    if (sav > 0.001) {
+      const st = this.savorT;
+      for (let i = 0; i < 6; i++) gp.spineYaw[i] += Math.sin(st * 11.0 - i * 0.85) * 0.07 * SPINE_W[i] * sav;
+      gp.rootRoll += Math.sin(st * 5.5) * 0.06 * sav;
+      gp.smile = Math.max(gp.smile, sav);
+    }
+    gp.headRoll += -this.lookYaw * 0.3 * this.focusW;
+    gp.headPitch += this.snapK * 0.05;
 
     // ---- spine: a whale's dorso-ventral wave, growing toward the flukes ------------------
     const tailAmp = P.tailA * (0.35 + eff * 0.9) * (1 - this.sleep * 0.7) * (1 - glideMix * 0.6) * (1 - this.dive * 0.5);
@@ -380,8 +489,21 @@ export class WhaleAnimator {
       const st = sq * 0.5;
       root.scale.set(1 - sq * nx + st * (1 - nx), 1 - sq * ny + st * (1 - ny), 1 - sq * nz + st * (1 - nz));
     } else root.scale.set(1, 1, 1);
-    // jaw
-    b.jaw.rotation.set(this.mouth * P.jawMax + gp.jaw, 0, 0);
+    // the swallow's bulge in the girth of the neck and chest (children compensate, so the head,
+    // eyes and wings keep their size)
+    const gN = 1 + this.bNeck * 0.11, gC = 1 + this.bChest * 0.09;
+    chest.scale.set(gC, gC, 1);
+    neck.scale.set(gN / gC, gN / gC, 1);
+    head.scale.set(1 / gN, 1 / gN, 1);
+    if (b.finR1) { b.finR1.scale.set(1 / gC, 1 / gC, 1); b.finL1.scale.set(1 / gC, 1 / gC, 1); }
+    // jaw: a spring toward the wanted opening (wider as prey comes within reach); a snap holds it
+    // shut a beat and it bounces off the closed lips (overshoot and settle); a little chew after
+    const jawWant = this.snapHold > 0 ? 0 : this.mouth * P.jawMax * (1 + this.reachS * 0.35);
+    let jx = this.jawS.update(dt, jawWant);
+    if (jx < -0.01) { jx = this.jawS.x = -0.01; if (this.jawS.v < 0) this.jawS.v *= -0.38; }
+    const chew = this.chew * this.chew * Math.max(0, Math.sin(this.chewT * 17.0)) * P.jawMax * 0.16;
+    b.jaw.rotation.set(jx + chew + gp.jaw, 0, 0);
+    this.jawAngle = jx + chew;
 
     // ---- wings ---------------------------------------------------------------------------
     const amp = this.amp;
@@ -433,11 +555,13 @@ export class WhaleAnimator {
     const u = m.u;
     const climb = s.climb ?? 0;
     const voice = Math.max(this.hum * 0.55, this.sing, this.charge);
-    u.uSac.value = clamp(P.sacBase + breath * 0.18 + climb * 0.25 + this.sing * 0.2 - this.dive * 0.25, 0, 1.2);
+    // the swallowed bolus: throat (pleats) -> neck -> chest -> the flank sacs
+    const bThroat = this.bThroat, bNeck = this.bNeck, bSac = this.bSac;
+    u.uSac.value = clamp(P.sacBase + breath * 0.18 + climb * 0.25 + this.sing * 0.2 - this.dive * 0.25 + bSac * 0.45, 0, 1.4);
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 6.0);
     const songPulse = 0.5 + 0.5 * Math.sin(this.time * 2.1);
     // throat bellows: swell with the voice, balloon when charging or lunge-feeding
-    u.uThroat.value = clamp(this.hum * (0.4 + 0.1 * pulse) + this.charge * 1.05 + this.sing * (0.35 + 0.15 * songPulse) + this.feed * 0.45 + gp.throat, 0, 1.5);
+    u.uThroat.value = clamp(this.hum * (0.4 + 0.1 * pulse) + this.charge * 1.05 + this.sing * (0.35 + 0.15 * songPulse) + this.feed * 0.45 + gp.throat + bThroat * 0.55 + bNeck * 0.25 + this.cheek * 0.12, 0, 1.5);
     u.uVib.value = clamp(this.hum * 0.35 + this.charge * 1.1 + this.sing * 0.2, 0, 1.4);
     u.uGill.value = clamp(this.feed + this.tired * 0.3, 0, 1);
     u.uBreath.value = breath * (this.calf ? 1 : 0.6) * (1 + this.tired);
@@ -633,6 +757,8 @@ export class WhaleAnimator {
     mix4(this.sing * 0.7, 0.14, -0.14, -0.35, 0.45);        // singing: half-closed, rapt
     mix4(this.charge, 0.2, -0.32, -0.25, 0.3);              // charging: a hard squint
     mix4(this.tired * 0.5, 0.12, -0.24, -0.45, 0.25);
+    mix4(this.focusW * 0.4 * (1 - happy), 0.36, -0.3, -0.5, 0.36);  // prey in sight: eager, wide-eyed
+    mix4(this.snapK * 0.5, 0.18, -0.12, -0.45, 0.4);         // the bite: a squeeze of the eyes
     mix4(Math.max(this.fear, this.surprise, gp.eyesWide), 0.62, -0.62, -0.6, 0.2); // wide
     mix4(Math.max(this.sleep, gp.eyesClosed), -0.04, -0.08, -0.2, 0.25);
     const L = this.lids;
@@ -651,7 +777,7 @@ export class WhaleAnimator {
     }
 
     // pupils: open and round when happy or in dim light, pinpoint when frightened
-    const pT = this.basePupil * (1 + happy * 0.12 + this.sing * 0.1 - this.fear * 0.45 - this.surprise * 0.3 + this.excite * 0.1 + this.sleep * 0.2);
+    const pT = this.basePupil * (1 + happy * 0.12 + this.sing * 0.1 - this.fear * 0.45 - this.surprise * 0.3 + this.excite * 0.1 + this.sleep * 0.2 + this.focusW * 0.22);
     this.pupil = damp(this.pupil, pT, 6, dt);
 
     // gaze: toward the look target with micro-saccades

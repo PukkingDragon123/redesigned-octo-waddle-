@@ -1,7 +1,11 @@
 // Things to do while flying, told only through the world (no HUD, no score):
 //  - flying bugs to catch and eat (src/creatures/bugs/SkyBugs.js): swarms placed along the route by
-//    chapter and time of day, recycled as the herd moves on; the mouth opens by itself near them,
-//    each catch sparkles, chimes up the chord with the combo, and gives energy;
+//    chapter and time of day, recycled as the herd moves on. Eating, step by step: the calf's eyes
+//    and head lock on the swarm and its mouth opens wider as bugs come within reach; bugs in reach
+//    are drawn in along a curving, spinning path, shrinking, their glow streaking; the jaw snaps
+//    shut as each arrives (merged when they come fast); a gulp travels down the throat, a little
+//    chew; then a contented shimmy, smiling eyes, a soft coo and glow motes from the mouth corners.
+//    Each catch chimes up the chord with the combo and gives energy;
 //  - reactions to the calf's moves (src/game/Moves.js): playmates copy slaps, rolls and breaches,
 //    the mother answers spouts and calls out when the calf is having fun;
 //  - playmate races through living rings of lumen moths along the route;
@@ -27,6 +31,7 @@ const _v2 = new Vector3();
 const _v3 = new Vector3();
 const _mouth = new Vector3();
 const _tan = new Vector3();
+const _corner = new Vector3();
 
 export class Activities {
   constructor(game, story) {
@@ -34,6 +39,13 @@ export class Activities {
     this.story = story;
     this.bugs = new SkyBugs(game);
     this.bugs.onCatch = (kind, x, y, z, S) => this.onCatch(kind, x, y, z, S);
+    this.bugs.onSuck = (kind, x, y, z) => this.onSuck(kind, x, y, z);
+    // eating: the morsels in the mouth waiting to be swallowed, the motes to puff out, the coo
+    this.morsel = 0;
+    this.biteT = -9;
+    this.motes = 0;
+    this.moteT = 0;
+    this.cooT = -99;
     this.joy = 0;
     this.intensity = 0; // 0..1 how lively the music could be (Story may blend it in)
     this.combo = 0;
@@ -64,6 +76,8 @@ export class Activities {
     this.bugs.clear();
     this.joy = 0;
     this.combo = 0;
+    this.morsel = 0;
+    this.motes = 0;
     this.reactions.length = 0;
     this.endRace(false);
     this.raceCd = 45;
@@ -90,9 +104,13 @@ export class Activities {
     E.open = playing ? calf.anim.mouth ?? calf.drive.mouth : 0;
     this.bugs.update(dt, playing ? E : null);
     if (playing && this.bugs.mouthWant > 0 && calf.drive.charge <= 0) {
-      calf.drive.mouth = Math.max(calf.drive.mouth, 1);
-      calf.drive.feed = Math.max(calf.drive.feed, 0.45);
+      // anticipation: eyes and head on the swarm, the mouth opening wider as they come in reach
+      const reach = this.bugs.reach;
+      calf.drive.mouth = Math.max(calf.drive.mouth, 0.7 + 0.3 * reach);
+      calf.drive.feed = Math.max(calf.drive.feed, 0.3 + 0.2 * reach);
+      calf.anim.focus?.(this.bugs.focus, this.bugs.focusW, reach);
     }
+    this._eating(dt, calf);
     // joy decays; it lights the calf up
     this.joy = Math.max(0, this.joy - dt * 0.05 * (1 + this.joy));
     if (this.moves) this.moves.joy = this.joy;
@@ -105,6 +123,51 @@ export class Activities {
   }
 
   // ---- bugs -------------------------------------------------------------------------------------
+  /** A bug got caught in the suction: a faint glint where it was plucked from the air. */
+  onSuck(kind, x, y, z) {
+    const E = this._em, col = this._col[kind], calf = this.herd.calf;
+    E.pos.set(x, y, z);
+    E.vel.copy(calf.vel).multiplyScalar(0.8);
+    E.life = 0.35; E.size = kind === 'gnat' ? 0.14 : 0.26; E.sizeEnd = 0.02; E.alpha = 0.8;
+    E.drag = 3; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
+    E.color[0] = col[0] * 1.3; E.color[1] = col[1] * 1.3; E.color[2] = col[2] * 1.3;
+    this.game.glow?.emit(E);
+  }
+
+  /** The bite, the swallow and the contented afterglow (see the header). */
+  _eating(dt, calf) {
+    const g = this.game, now = g.time;
+    // swallow a beat after the jaw shuts on the last morsel
+    if (this.morsel > 0 && now - this.biteT > 0.16) {
+      calf.anim.gulp?.(Math.min(1.3, 0.45 + this.morsel));
+      this.motes += this.morsel > 0.5 ? 3 : 2;
+      this.moteT = 0.25;
+      this.morsel = 0;
+      // a soft contented coo now and then (not on every gnat)
+      if (now - this.cooT > 5 && this.story.state === 'play') {
+        this.cooT = now;
+        this.schedule(calf, 0.45, 'coo');
+      }
+    }
+    // a few glow motes escape from the corners of the mouth after the swallow
+    if (this.motes > 0) {
+      this.moteT -= dt;
+      if (this.moteT <= 0) {
+        this.moteT = 0.11;
+        this.motes--;
+        const side = this.motes % 2 ? 1 : -1;
+        _corner.copy(calf.pos).addScaledVector(calf.fwd, calf.L * 0.44).addScaledVector(calf.right, side * calf.L * 0.07).addScaledVector(calf.up, -calf.L * 0.025);
+        const E = this._em, col = this._col.moth;
+        E.pos.copy(_corner);
+        E.vel.copy(calf.vel).multiplyScalar(0.85).addScaledVector(calf.right, side * (0.6 + Math.random() * 0.6)).addScaledVector(calf.up, 0.3 + Math.random() * 0.5);
+        E.life = 0.9 + Math.random() * 0.5; E.size = 0.13; E.sizeEnd = 0.03; E.alpha = 0.9;
+        E.drag = 1.8; E.gravity = -0.25; E.kind = 1; E.fadeIn = 0.05;
+        E.color[0] = col[0] * 1.4; E.color[1] = col[1] * 1.4; E.color[2] = col[2] * 1.4;
+        g.glow?.emit(E);
+      }
+    }
+  }
+
   onCatch(kind, x, y, z, S) {
     const g = this.game, st = this.story, calf = this.herd.calf, def = BUG_SPECIES[kind];
     this.caught[kind]++;
@@ -114,15 +177,20 @@ export class Activities {
     calf.energy = Math.min(1, calf.energy + def.energy);
     calf.drive.happy = Math.max(calf.drive.happy, 0.85);
     this.joy += kind === 'gnat' ? 0.025 : 0.07;
-    // sparkle and vanish
+    // the snap: the jaw shuts on it (snaps that come fast merge, the jaw never jitters)
+    const k = kind === 'gnat' ? 0.45 : kind === 'skitter' ? 0.9 : 1;
+    calf.anim.snap?.(k);
+    this.morsel += kind === 'gnat' ? 0.12 : 0.4;
+    this.biteT = now;
+    // a small flash of its glow at the lips
     const E = this._em, col = this._col[kind];
-    const n = kind === 'gnat' ? 4 : 9;
+    const n = kind === 'gnat' ? 2 : 4;
     for (let i = 0; i < n; i++) {
       E.pos.set(x, y, z);
-      E.vel.set((Math.random() - 0.5) * 3, (Math.random() - 0.2) * 3, (Math.random() - 0.5) * 3).addScaledVector(calf.vel, 0.6);
-      E.life = 0.5 + Math.random() * 0.6; E.size = kind === 'gnat' ? 0.18 : 0.32; E.sizeEnd = 0.04; E.alpha = 1;
-      E.drag = 2.5; E.gravity = -0.3; E.kind = 1; E.fadeIn = 0.01;
-      E.color[0] = col[0] * 1.6; E.color[1] = col[1] * 1.6; E.color[2] = col[2] * 1.6;
+      E.vel.set((Math.random() - 0.5) * 1.2, (Math.random() - 0.2) * 1.2, (Math.random() - 0.5) * 1.2).addScaledVector(calf.vel, 0.9);
+      E.life = 0.3 + Math.random() * 0.3; E.size = kind === 'gnat' ? 0.14 : 0.24; E.sizeEnd = 0.03; E.alpha = 1;
+      E.drag = 3; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
+      E.color[0] = col[0] * 1.5; E.color[1] = col[1] * 1.5; E.color[2] = col[2] * 1.5;
       g.glow?.emit(E);
     }
     if (now - this.lastCatchSfx > 0.08) {
@@ -332,6 +400,11 @@ export class Activities {
           break;
         case 'chirp':
           st.voiceCall?.(w, 'chirp');
+          w.drive.happy = 1;
+          break;
+        case 'coo':
+          // a soft contented hum after a mouthful
+          st.voiceCall?.(w, 'coo');
           w.drive.happy = 1;
           break;
         case 'roll':

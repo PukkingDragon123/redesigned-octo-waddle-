@@ -34,7 +34,7 @@ export class Moves {
     this.depth = -99;
     this.count = { slap: 0, flick: 0, spout: 0, bubbles: 0, loop: 0, dash: 0, diveBomb: 0, breach: 0, corkscrew: 0, splashdown: 0 };
     this._ev = { name: '', power: 0, pos: new Vector3(), zone: 'air', chain: 0 };
-    this._em = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 1, alpha: 0.6, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.05 };
+    this._em = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 1, alpha: 0.6, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.05, stretch: 4 };
     this._savedMaxPitch = null;
   }
 
@@ -150,9 +150,10 @@ export class Moves {
       this.sfx('bubbles', p, 0.7);
       this.emit('kick', 0.6, p);
     } else {
-      // in the air: a fluke flick that kicks the calf forward with a ring of mist
+      // in the air: a fluke flick that kicks the calf forward, a couple of wind strokes off the flukes
       w.vel.addScaledVector(w.fwd, 5).addScaledVector(w.up, 1.2);
-      this._ring(p, w.fwd, 14, 3.5, 0.45);
+      this._windStroke(p, 0.5, 0.75, 0.4);
+      this._windStroke(p, -0.5, 0.75, 0.4);
       this.sfx('whoosh', p, 0.5, { pitch: 1.3 });
       this.emit('flick', 0.5, p);
     }
@@ -176,12 +177,15 @@ export class Moves {
     const k = this.zone === 'surface' ? 1.7 : 0.9;
     const p = w.blow ? w.blow(g, k) : w.pos;
     if (this.zone === 'surface') {
-      // a tall column with a fine rainbow-white crown
+      // a tall column of painted vapour puffs with a crown of drawn droplets falling back
       const E = this._em;
       for (let i = 0; i < 18; i++) {
+        const drop = i % 3 === 0;
         E.pos.copy(p);
-        E.vel.copy(w.up).multiplyScalar(9 + Math.random() * 6).add(_v2.set((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2)).addScaledVector(w.vel, 0.6);
-        E.life = 1.8 + Math.random(); E.size = 0.3; E.sizeEnd = 2.2 + Math.random() * 1.5; E.alpha = 0.4; E.drag = 1.5; E.gravity = 1.2; E.kind = 3; E.fadeIn = 0.05;
+        E.vel.copy(w.up).multiplyScalar(9 + Math.random() * 6).add(_v2.set((Math.random() - 0.5) * (drop ? 4 : 2), 0, (Math.random() - 0.5) * (drop ? 4 : 2))).addScaledVector(w.vel, 0.6);
+        if (drop) { E.life = 1.2 + Math.random() * 0.6; E.size = 0.12 + Math.random() * 0.08; E.sizeEnd = 0.08; E.alpha = 0.85; E.drag = 0.4; E.gravity = 9; E.kind = 3; }
+        else { E.life = 1.6 + Math.random(); E.size = 0.4; E.sizeEnd = 2.0 + Math.random() * 1.4; E.alpha = 0.42; E.drag = 1.5; E.gravity = 1.2; E.kind = 0; }
+        E.fadeIn = 0.05;
         E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
         g.mist?.emit(E);
       }
@@ -235,9 +239,8 @@ export class Moves {
     } else {
       const sp = w.vel.length();
       w.vel.addScaledVector(w.fwd, Math.max(0, Math.min(14, 32 - sp)));
-      this.cur = { name: 'dash', t: 0, dur: 0.7 };
+      this.cur = { name: 'dash', t: 0, dur: 0.7, streakAcc: 0 };
       if (this.zone === 'under') { this._bubbles(p, 30, 1.5); this.sfx('bubbles', p, 0.8, { pitch: 0.8 }); }
-      else this._ring(p, w.fwd, 18, 6, 0.5);
       this.sfx('dash', w.pos, 0.9);
       g.cameraRig?.addShake?.(0.12);
       this.emit('dash', 1, w.pos);
@@ -361,6 +364,17 @@ export class Moves {
     if (c.name === 'dash') {
       w.ctl.thrust = 1;
       w.drive.effort = 1;
+      // in the air: a few short hand-drawn wind streaks trail off the wingtips while the surge lasts
+      if (this.zone !== 'under' && c.t < 0.45) {
+        c.streakAcc += dt * 9;
+        while (c.streakAcc > 1) {
+          c.streakAcc -= 1;
+          const side = Math.random() < 0.5 ? 'R' : 'L';
+          const m = w.model;
+          if (m.wingTipPos) m.wingTipPos(side, _v3); else _v3.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
+          this._windStroke(_v3, 0, 0.85, 0.5);
+        }
+      }
       if (c.t > c.dur) this.cur = null;
       return;
     }
@@ -398,11 +412,13 @@ export class Moves {
     const under = this.zone === 'under';
     while (this.trailAcc > 1) {
       this.trailAcc -= 1;
+      const star = Math.random() < 0.22;
       const side = Math.random() < 0.5 ? 'R' : 'L';
       if (m.wingTipPos) m.wingTipPos(side, E.pos); else E.pos.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
       E.vel.copy(w.vel).multiplyScalar(0.1).add(_v.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6));
-      E.life = 0.9 + Math.random() * 0.6; E.size = 0.16 + Math.random() * 0.12; E.sizeEnd = 0.05; E.alpha = 0.8;
-      E.drag = 1.2; E.gravity = under ? -0.5 : 0.3; E.kind = 1; E.fadeIn = 0.02;
+      // mostly soft painted dots, now and then a little four-point star
+      E.life = 0.9 + Math.random() * 0.6; E.size = star ? 0.3 + Math.random() * 0.15 : 0.16 + Math.random() * 0.12; E.sizeEnd = 0.05; E.alpha = star ? 0.9 : 0.8;
+      E.drag = 1.2; E.gravity = under ? -0.5 : 0.3; E.kind = star ? 2 : 1; E.fadeIn = 0.02;
       const warm = Math.random();
       E.color[0] = lerp(0.55, 1.0, warm); E.color[1] = lerp(0.85, 0.82, warm); E.color[2] = lerp(1.0, 0.55, warm);
       g.glow.emit(E);
@@ -417,7 +433,7 @@ export class Moves {
       const a = Math.random() * TAU, rr = Math.random();
       E.pos.set(p.x + Math.cos(a) * 1.2 * rr, p.y + 0.2, p.z + Math.sin(a) * 1.2 * rr);
       E.vel.set(Math.cos(a) * (1.5 + 4 * rr) * k, (4 + 8 * Math.random()) * up * Math.min(1.6, 0.5 + k * 0.6), Math.sin(a) * (1.5 + 4 * rr) * k);
-      const drop = i % 3 === 0;
+      const drop = i % 2 === 0; // half drawn droplets (a crown of teardrops), half painted spray puffs
       E.life = 0.9 + Math.random() * 0.7; E.size = drop ? 0.12 + 0.1 * k : 0.4 + 0.4 * k; E.sizeEnd = drop ? 0.1 : 1.4 + 1.8 * k;
       E.alpha = drop ? 0.9 : 0.55; E.drag = drop ? 0.2 : 0.6; E.gravity = drop ? 9 : 6; E.kind = drop ? 3 : 0; E.fadeIn = 0.03;
       E.color[0] = 0.95; E.color[1] = 0.98; E.color[2] = 1.0;
@@ -438,21 +454,20 @@ export class Moves {
     }
   }
 
-  /** A ring of mist blown outward in the plane facing `axis` (a shock ring behind a dash). */
-  _ring(p, axis, n, speed, alpha) {
-    const g = this.game, E = this._em;
+  /**
+   * One short hand-drawn wind stroke at p, travelling with the calf (keep 0..1 of its speed) and
+   * drifting a little to the side (side -1..1 along w.right), so it trails behind and tapers away.
+   */
+  _windStroke(p, side, keep, alpha) {
+    const g = this.game, w = this.w, E = this._em;
     if (!g.mist) return;
-    _v2.set(0, 1, 0).cross(axis);
-    if (_v2.lengthSq() < 1e-6) _v2.set(1, 0, 0);
-    _v2.normalize();
-    _v3.copy(axis).cross(_v2).normalize();
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * TAU;
-      E.vel.copy(_v2).multiplyScalar(Math.cos(a) * speed).addScaledVector(_v3, Math.sin(a) * speed).addScaledVector(axis, -speed * 0.3);
-      E.pos.copy(p).addScaledVector(E.vel, 0.08);
-      E.life = 0.9 + Math.random() * 0.4; E.size = 0.4; E.sizeEnd = 1.8; E.alpha = alpha; E.drag = 2.2; E.gravity = 0; E.kind = 0; E.fadeIn = 0.03;
-      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-      g.mist.emit(E);
-    }
+    E.pos.copy(p).addScaledVector(w.fwd, -0.4 - Math.random() * 0.6);
+    E.vel.copy(w.vel).multiplyScalar(keep).addScaledVector(w.right, side * 1.5 + (Math.random() - 0.5) * 0.6).addScaledVector(w.up, (Math.random() - 0.5) * 0.6);
+    E.life = 0.4 + Math.random() * 0.25; E.size = 0.09 + Math.random() * 0.06; E.sizeEnd = E.size * 0.8;
+    E.alpha = alpha; E.drag = 0.6; E.gravity = 0; E.kind = 6; E.fadeIn = 0.02;
+    E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+    E.stretch = 7 + Math.random() * 5;
+    g.mist.emit(E);
+    E.stretch = 4;
   }
 }

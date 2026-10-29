@@ -262,6 +262,21 @@ follow your mom and eat."*
 - **More stunning:** a beauty pass on light, depth, clouds, underwater and night. Keep it crisp, with no
   added blur.
 
+### 0.12 QTE cutscenes, a first bond, unlocked abilities; no blinking specks (newest)
+User: *"Remove the weird blinking particle when you fly. Make the game have QTE cutscenes, super cinematic.
+You need to kick yourself free from the egg, your mom hugs you and feeds you first, and you need to stick
+to her: she gets panicked and puts you in her mouth. Add more QTE cutscenes, like unlocking your vocal
+abilities etc."*
+- **No blinking specks in flight.** Distant bugs are steady specks. Wind lines come only with real speed
+  and fade in and out softly.
+- **QTEs are wordless.** Their cues are hand-drawn rings and strokes: press, mash, hold and steer. Any
+  action input works, and they never show letters or button names. There is no fail state: a miss softens
+  the outcome or retries gently.
+- **Birth sequence:** kick free of the egg; the mother's first hug; the first feeding from her mouth.
+- **Danger scene:** stick to your mother. When she panics she carries the calf in her mouth until the
+  danger passes.
+- **Abilities:** voice and other abilities are unlocked through short QTE cutscenes during Act I.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

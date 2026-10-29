@@ -6,6 +6,7 @@
 import { Vector3 } from 'three';
 import { clamp, smoothstep, TAU, wrapAngle, dirFromYawPitch } from '../core/math.js';
 import { seaHeight, spoutColumn } from './Swim.js';
+import { fx } from '../fx/FX.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -107,6 +108,12 @@ export class Moves {
     this._breach(dt, depth, sea);
     this._run(dt, sea, depth);
     this._trails(dt);
+    // the air lines follow this calf's flight: denser in dives, dashes and tricks
+    if (g.engine) {
+      const c = this.cur;
+      const boost = c && (c.name === 'diveBomb' || c.name === 'dash') ? 1 : c && c.name === 'loop' ? 0.6 : this.breach.air ? 0.4 : 0;
+      fx(g).wind.track(w, this.zone, boost);
+    }
     // slow motion runs on real time
     if (this.slowT > 0) {
       this.slowT -= g.dtReal ?? dt;
@@ -461,17 +468,7 @@ export class Moves {
       E.color[0] = 0.96; E.color[1] = 0.98; E.color[2] = 1.0;
       g.mist.emit(E);
     }
-    // the mist the spray leaves hanging over the impact, drifting off downwind
-    const m = Math.round(3 + 4 * Math.min(k, 2.5));
-    for (let i = 0; i < m; i++) {
-      const a = Math.random() * TAU;
-      E.pos.set(p.x + Math.cos(a) * R * 0.7, p.y + 0.3 + Math.random() * R, p.z + Math.sin(a) * R * 0.7);
-      E.vel.set(Math.cos(a) * 1.2 + fx * 2, (0.8 + Math.random() * 1.8) * Math.sqrt(k), Math.sin(a) * 1.2 + fz * 2);
-      E.life = 2 + Math.random() * 1.6; E.size = 0.5 * R; E.sizeEnd = (1.6 + Math.random()) * R;
-      E.alpha = 0.22; E.drag = 1.2; E.gravity = 0.3; E.kind = 0; E.fadeIn = 0.12;
-      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-      g.mist.emit(E);
-    }
+    // (the crown, foam and the rest of the water are src/fx/Splash.js, through ocean.splash)
   }
 
   /** A burst of air: bubbles of many sizes (mostly millimetres, a few big wobbling ones). */
@@ -489,18 +486,10 @@ export class Moves {
     }
   }
 
-  /**
-   * A wisp of condensation in a wingtip vortex at p, left hanging in the air (it hardly moves with
-   * the calf) so a line of them reads as a faint trail; side drifts it along w.right.
-   */
+  /** A wingtip vortex at p (formerly a vapour wisp): now it only feeds the wind lines' trails. */
   _tipVapour(p, side, alpha = 0.14) {
-    const g = this.game, w = this.w, E = this._em;
-    if (!g.mist) return;
-    E.pos.copy(p).addScaledVector(w.fwd, -0.3 - Math.random() * 0.4);
-    E.vel.copy(w.vel).multiplyScalar(0.06).addScaledVector(w.right, side * 0.8 + (Math.random() - 0.5) * 0.4).addScaledVector(w.up, (Math.random() - 0.5) * 0.3);
-    E.life = 0.6 + Math.random() * 0.5; E.size = 0.06 + Math.random() * 0.04; E.sizeEnd = 0.35 + Math.random() * 0.2;
-    E.alpha = alpha; E.drag = 1.2; E.gravity = 0; E.kind = 0; E.fadeIn = 0.04;
-    E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-    g.mist.emit(E);
+    // the wingtip vortices are drawn as trails by src/fx/WindLines.js (no vapour puffs): a flick or
+    // a burst of speed only thickens the air lines for a moment
+    if (this.game.engine) fx(this.game).wind.boost = Math.max(fx(this.game).wind.boost, Math.min(1, alpha * 4));
   }
 }

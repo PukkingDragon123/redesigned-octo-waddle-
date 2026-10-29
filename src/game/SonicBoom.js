@@ -1,15 +1,13 @@
 // Sonic booms from the throat resonator: a pressure wave that blows clouds apart (they slowly reform),
-// shows as a real condensation flash (a thin vapour shell or cone that forms around the whale and
-// evaporates within a second, plus a pressure ripple racing over the sea below), shakes the camera,
+// shows as a burst of air lines racing out with the pressure front and a bright shock line with ring
+// waves over the sea below (no vapour puffs: docs/VUR_SOK.md 0.10), shakes the camera,
 // scatters creatures and knocks back the falcon.
 // Adults' booms are far larger and can be synchronised into one enormous protective wave.
 import { Vector3 } from 'three';
 import { G } from '../render/Globals.js';
-import { clamp, lerp, smoothstep } from '../core/math.js';
+import { clamp, smoothstep } from '../core/math.js';
+import { fx } from '../fx/FX.js';
 
-const _f = new Vector3();
-const _u = new Vector3();
-const _w = new Vector3();
 const _d = new Vector3();
 const _hz = new Vector3();
 
@@ -84,67 +82,41 @@ export class SonicBooms {
   }
 
   /**
-   * The boom made visible the way air shows it: the pressure drop condenses the humid air into a
-   * thin vapour shell for a moment (a cone opening back from the nose when a whale makes it, a
-   * sphere otherwise), dense at first and eroding away in under a second; a dark ripple of
-   * roughened water races out over the sea below.
+   * The boom made visible without any vapour: a burst of air lines racing out with the pressure
+   * front (src/fx/WindLines.js), a bright shock line and ring waves running over the sea below, and,
+   * when the boom is close to the water, a sheet of spray torn off the surface under it.
    */
   _paint(center, radius, speed, power, src) {
     const g = this.game, E = this._em;
-    if (!g.mist) return;
-    const L = src?.L ?? clamp(radius * 0.08, 3, 30);
-    const cone = !!src?.fwd;
-    if (cone) _f.copy(src.fwd); else _f.set(0, 1, 0);
-    _u.set(0, 1, 0).cross(_f);
-    if (_u.lengthSq() < 1e-6) _u.set(1, 0, 0);
-    _u.normalize();
-    _w.copy(_f).cross(_u).normalize();
-    // the shell: big enough to wrap the whale, bigger for bigger booms
-    const R = clamp(L * 0.55 + radius * 0.012, 1.5, 40);
-    // many small, faint puffs that overlap into one smooth translucent veil (a real condensation
-    // shell is thin and glassy, gone in a blink; a few big puffs read as a ball of cotton)
-    const n = Math.round(clamp(220 + power * 80, 220, 380));
-    const puff = R * (cone ? 0.12 : 0.1);
-    for (let k = 0; k < n; k++) {
-      // even coverage: a golden-angle spiral over the shell
-      const u = (k + 0.5) / n;
-      const az = k * 2.39996 + Math.random() * 0.3;
-      let along, rad;
-      if (cone) {
-        // a bell from just behind the head flaring back past the wings
-        along = -u * R * 1.5;
-        rad = R * (0.35 + 0.75 * Math.sqrt(u));
-      } else {
-        const ct = 1 - 2 * u;
-        along = ct * R;
-        rad = Math.sqrt(Math.max(0, 1 - ct * ct)) * R;
-      }
-      _d.copy(_u).multiplyScalar(Math.cos(az) * rad).addScaledVector(_w, Math.sin(az) * rad).addScaledVector(_f, along);
-      E.pos.copy(center).add(_d);
-      // it barely moves: the vapour forms in place, swells a little, and is left behind
-      _d.normalize();
-      E.vel.copy(_d).multiplyScalar(R * lerp(0.25, 0.55, Math.random()));
-      if (src?.vel) E.vel.addScaledVector(src.vel, 0.25);
-      E.life = lerp(0.3, 0.6, Math.random()) * (cone ? 1 : 1.15); E.size = puff * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 2.3;
-      E.alpha = lerp(0.09, 0.18, Math.random()) * (cone ? 1 - 0.45 * u : 1); E.drag = 4; E.gravity = 0; E.kind = 0; E.fadeIn = 0.012;
-      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-      g.mist.emit(E);
-    }
-    // the pressure ripple on the sea, if the boom is low enough to touch it
+    if (!g.engine) return;
+    const F = fx(g);
+    F.wind.burst(center, radius, speed, power);
+    // the pressure wave on the sea, if the boom is low enough to touch it
     const sea = g.ocean?.heightApprox ? g.ocean.heightApprox(center.x, center.z) : G.uSeaLevel.value;
     const h = center.y - sea;
     if (h < radius * 0.9 && h > -2) {
       const reach = Math.sqrt(Math.max(radius * radius - h * h, 1)) * 0.9;
-      for (let k = 0; k < 2; k++) {
-        E.pos.set(center.x, sea + 0.05, center.z);
-        E.vel.set(0, 0, 0);
-        E.life = clamp(reach / speed, 0.4, 3) * (1.1 + k * 0.5); E.size = Math.max(1, h * 0.3); E.sizeEnd = reach * (1 - k * 0.35);
-        E.alpha = 0.4 * clamp(1.4 - h / radius, 0.2, 1) * (1 - k * 0.4); E.drag = 0; E.gravity = 0; E.kind = 8; E.fadeIn = 0.03;
-        E.stretch = 0.14 + k * 0.08;
-        E.color[0] = 0.95; E.color[1] = 0.97; E.color[2] = 1.0;
-        g.mist.emit(E);
+      const near = clamp(1.4 - h / radius, 0.2, 1);
+      _d.set(center.x, sea, center.z);
+      g.ocean?.ringWave?.(_d, (0.6 + power * 0.6) * near, reach * 0.4);
+      // the shock front: a thin bright line racing out over the water (and a fainter echo)
+      if (g.mist) {
+        for (let k = 0; k < 2; k++) {
+          E.pos.set(center.x, sea + 0.05, center.z);
+          E.vel.set(0, 0, 0);
+          E.life = clamp(reach / speed, 0.4, 3) * (1.1 + k * 0.5); E.size = Math.max(1, h * 0.3); E.sizeEnd = reach * (1 - k * 0.35);
+          E.alpha = 0.45 * near * (1 - k * 0.4); E.drag = 0; E.gravity = 0; E.kind = 8; E.fadeIn = 0.03;
+          E.stretch = 0.05 + k * 0.05;
+          E.color[0] = 1.1; E.color[1] = 1.12; E.color[2] = 1.15;
+          g.mist.emit(E);
+        }
+        E.stretch = 4;
       }
-      E.stretch = 4;
+      // close over the water: the blast tears a sheet of spray off the surface below
+      if (h < Math.max(8, radius * 0.25)) {
+        const k = clamp(1 - h / Math.max(8, radius * 0.25), 0.2, 1);
+        F.splash.sheet(_d, clamp(2 + h * 0.4, 2, 10), (1 + 2.2 * power) * k, null, 0.85 * k);
+      }
     }
   }
 }

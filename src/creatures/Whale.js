@@ -1,4 +1,5 @@
 // A skywhale entity: model + animator + flight physics. Used by the player calf and the herd.
+import { fx } from '../fx/FX.js';
 import { Vector3, Quaternion, Euler } from 'three';
 import { WhaleModel, T_ORIGIN } from './WhaleModel.js';
 import { WhaleAnimator } from './WhaleAnimator.js';
@@ -198,8 +199,8 @@ export class Whale {
 }
 
 /**
- * A breath through the blowholes: the slits gape (animator) and a twin, bushy vapour plume rises
- * from them (game.mist). Call when the whale surfaces after a dive (Swim.js) or any time.
+ * A breath through the blowholes: the slits gape (animator) and a fine spray plume rises from them
+ * (src/fx/Splash.js). Call when the whale surfaces after a dive (Swim.js) or any time.
  * strength 0..1.5 scales the plume; returns the blowhole position used.
  */
 Whale.prototype.blow = function blow(game, strength = 1) {
@@ -207,24 +208,8 @@ Whale.prototype.blow = function blow(game, strength = 1) {
   this.anim.breathe?.(strength);
   const m = this.model;
   const at = m.blowholePos ? m.blowholePos(new Vector3()) : this.pos.clone().addScaledVector(this.fwd, this.L * 0.22).addScaledVector(this.up, this.radius);
-  const mist = g?.mist;
-  if (!mist) return at;
-  const k = this.L / 22;
-  const n = Math.round((this.isCalf ? 10 : 22) * strength);
-  for (let i = 0; i < n; i++) {
-    // two jets in a narrow V, rising fast, then billowing and drifting with the wind
-    const side = i % 2 ? 1 : -1;
-    const v = new Vector3().copy(this.up).multiplyScalar((7 + Math.random() * 6) * Math.sqrt(k) * strength)
-      .addScaledVector(this.right, side * (0.9 + Math.random() * 0.8) * Math.sqrt(k))
-      .addScaledVector(this.fwd, (Math.random() - 0.3) * 1.2 * Math.sqrt(k))
-      .addScaledVector(this.vel, 0.7)
-      .add(this.wind.clone().multiplyScalar(0.3));
-    mist.emit({
-      pos: at.clone().addScaledVector(this.right, side * 0.25 * k),
-      vel: v, life: 1.6 + Math.random() * 1.3, size: 0.25 * k + 0.1, sizeEnd: (1.6 + Math.random()) * k + 0.4,
-      alpha: 0.42 + Math.random() * 0.2, drag: 1.6, gravity: -0.4, kind: 0, fadeIn: 0.06, color: [0.96, 0.98, 1.0],
-    });
-  }
+  // a breath of fine spray atomising into a faint streak plume (src/fx/Splash.js), no puffs
+  if (g?.engine) fx(g).splash.spout(at, this, strength, true);
   return at;
 };
 

@@ -392,16 +392,8 @@ export class WhaleEgg {
           color: [1, 0.97, 0.92], alpha: drop ? 0.95 : 0.85, drag: drop ? 0.15 : 0.5, gravity: 9.8, kind: drop ? 3 : 9, fadeIn: 0.01,
         });
       }
-      // a warm cloud of fluid spilling over the water
-      for (let i = 0; i < 16; i++) {
-        const th = this._rand() * TAU;
-        v.set(Math.cos(th) * 0.8, 0.3 + this._rand() * 0.6, Math.sin(th) * 0.8);
-        mist.emit({
-          pos: this._tp(c.x + Math.cos(th) * b, Math.max(sea, c.y - b * 0.3) + 0.2, c.z + Math.sin(th) * b), vel: v,
-          life: 3 + this._rand() * 2, size: 0.8 + this._rand() * 0.6, sizeEnd: 3 + this._rand() * 2,
-          color: [1, 0.86, 0.74], alpha: 0.32, drag: 0.6, gravity: 0, kind: 0, fadeIn: 0.05,
-        });
-      }
+      // the fluid spilling over the water is foam on the sea (src/fx/Splash.js), not a cloud of puffs
+      if (this.game.ocean?.splash) this.game.ocean.splash(this._tp(c.x, sea, c.z), 0.6, b * 2.2);
       // bubbles boiling up around the submerged half
       for (let i = 0; i < 60; i++) {
         const th = this._rand() * TAU, rr = this._rand() * b * 1.4;

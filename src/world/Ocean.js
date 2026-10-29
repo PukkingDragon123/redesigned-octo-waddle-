@@ -16,6 +16,7 @@
 // whales), a LEAN-filtered sun and moon glitter path, refraction of the scene below through the
 // water column, sub-surface light through thin crests, crest / intersection / wake foam, and,
 // seen from below, Snell's window with total internal reflection.
+import { fx } from '../fx/FX.js';
 import {
   Mesh, BufferGeometry, Float32BufferAttribute, Uint32BufferAttribute, ShaderMaterial, Vector2, Vector3,
   Vector4, Matrix4, WebGLRenderTarget, HalfFloatType, RGBAFormat, LinearFilter, LinearMipmapLinearFilter,
@@ -486,6 +487,34 @@ vec4 ssr(vec3 P, vec3 R, float jit, int steps, float blur) {
   return vec4(0.0);
 }
 
+// catspaws: a gust darkens the water it roughens. The gust to come (src/fx/WindLines.js) is laid
+// out upwind of the calf, in patches drifting with the wind, so it is seen sweeping in.
+uniform vec4 uCatGust[2];
+uniform vec3 uCatOff;
+uniform vec3 uCatFocus;
+float catGust(float tau) {
+  float f = clamp(tau / 2.5, 0.0, 7.0);
+  int i = int(floor(f));
+  float w = f - float(i);
+  float a0 = 0.0, a1 = 0.0;
+  for (int k = 0; k < 8; k++) {
+    float g = k < 4 ? uCatGust[0][k] : uCatGust[1][k - 4];
+    if (k == i) a0 = g;
+    if (k == min(i + 1, 7)) a1 = g;
+  }
+  return mix(a0, a1, w);
+}
+float catspaw(vec2 p) {
+  float wsp = length(uWind.xz);
+  vec2 wd = wsp > 0.01 ? uWind.xz / wsp : uWindDir;
+  float up = dot(uCatFocus.xz - p, wd);
+  float g = up > 0.0 ? catGust(up / max(wsp * 1.15, 1.0)) : catGust(0.0) * (1.0 - smoothstep(0.0, 80.0, -up));
+  g *= 1.0 - smoothstep(250.0, 700.0, length(p - uCatFocus.xz));
+  vec2 q = (p - uCatOff.xz * 1.15) * 0.011;
+  float n = texture2D(uNoise, q).r * 0.6 + texture2D(uNoise, q * 2.7 + 0.31).a * 0.4;
+  float pat = smoothstep(0.62 - 0.22 * g, 0.86 - 0.18 * g, n);
+  return pat * smoothstep(0.08, 0.8, g) * (1.0 - uUnderwater);
+}
 void main() {
   vec2 p = vGrid;
   vec3 P = vWorld;
@@ -631,6 +660,9 @@ void main() {
   vec3 N = normalize(vec3(hz * dxz - hx * jz, J, dxz * hx - hz * jx));
   vec3 NS = normalize(vec3(hzS * dxz - hxS * jz, J, dxz * hxS - hzS * jx));
   float s2 = 0.5 * (vx + vz) + cap;
+  // a gust's catspaws: fine ripples roughen the water (duller, darker reflection)
+  float cat = catspaw(p);
+  s2 += cat * 0.02;
 
   // far away the mesh hands over to the analytic sea the sky dome draws past its edge
   float farK = smoothstep(uFoamCtl.w, uMeshEdge, length(P.xz - uCamPos.xz));
@@ -964,6 +996,12 @@ export class Ocean {
     this.engine.beforeRender.push(this._hook);
     this.setQuality(opts.quality ?? 1);
     this.updateSpectrum(true);
+    // the splash and wind-line systems (src/fx/) are built with the sea, before any precompile;
+    // the catspaws read the wind lines' gust curve, wind drift and focus
+    const W = fx(game).wind.u;
+    this.uniforms.uCatGust = W.uGustA;
+    this.uniforms.uCatOff = W.uWindOff;
+    this.uniforms.uCatFocus = W.uFocus;
   }
 
   // ------------------------------------------------------------------ wave set
@@ -1180,6 +1218,8 @@ export class Ocean {
       uWakeP: { value: Array.from({ length: 64 }, () => new Vector4()) },
       uWakeB: { value: Array.from({ length: 4 }, () => new Vector4()) },
       uWakeN: { value: new Vector4() },
+      // catspaws (shared with the wind lines once they exist, see the constructor)
+      uCatGust: { value: [new Vector4(), new Vector4()] }, uCatOff: { value: new Vector3() }, uCatFocus: { value: new Vector3() },
     });
     // wake trails of things moving at the surface (matched frame to frame by position)
     this.trails = Array.from({ length: 4 }, () => ({
@@ -1425,19 +1465,7 @@ export class Ocean {
       if (w.id === null || w.s < 0.05) continue;
       const sp = Math.abs(w.spin);
       const dir = Math.sign(w.spin) || 1;
-      // a veil of mist hanging over the funnel, drawn round with the spin
-      w._mistAcc = (w._mistAcc || 0) + dt * 5 * w.s;
-      while (w._mistAcc >= 1) {
-        w._mistAcc -= 1;
-        const q = 0.08 + Math.random() * 0.5;
-        const a = Math.random() * TAU;
-        const r = q * w.radius;
-        const x = w.x + Math.cos(a) * r, z = w.z + Math.sin(a) * r;
-        const y = this._whirlH(x, z, G.uTime.value) + 0.6 + Math.random() * 2.5;
-        const vt = sp * r * 0.5 * dir;
-        v.set(-Math.sin(a) * vt, 0.25 + Math.random() * 0.5, Math.cos(a) * vt);
-        this._pe(mist, x, y, z, v.x, v.y, v.z, 6 + Math.random() * 5, 3 + Math.random() * 4, 10 + Math.random() * 10, 1, 0.12 * w.s, 0.15, -0.02, 0, 0.35);
-      }
+      // (the veil of mist puffs over the funnel is retired, docs/VUR_SOK.md 0.10)
       // spray flicking off the churned lip of the eye
       w._lipAcc = (w._lipAcc || 0) + dt * 14 * w.s;
       while (w._lipAcc >= 1) {
@@ -1640,6 +1668,25 @@ export class Ocean {
     this._addSource(pos.x, pos.z, radius, -0.55 * s, 0.6 * s, 1.4 * s, 0);
     this._addSource(pos.x, pos.z, radius * 1.5, 0.22 * s, 0.5 * s, 0.5 * s, 1);
     this._spray(pos, s, radius, 1, dir);
+    // the water itself: a crown (or a fan) of sheet, a jet for big impacts, foam and rim spray
+    if (s >= 0.25) fx(this.game).splash.impact(pos, s, radius, dir);
+  }
+
+  /**
+   * A pressure wave touching the sea (a sonic boom): ring waves and a shiver of roughened water,
+   * with no crown and no spray.
+   */
+  ringWave(pos, strength = 1, radius = 20) {
+    const s = clamp(strength, 0, 3);
+    const rings = this.uniforms.uRings.value;
+    const now = G.uTime.value;
+    let slot = rings[0], best = Infinity;
+    for (const rg of rings) {
+      const left = rg.w * Math.max(0, 1 - (now - rg.z) / 9);
+      if (left < best) { best = left; slot = rg; }
+    }
+    slot.set(pos.x, pos.z, now, Math.min(s, 3) * Math.sqrt(Math.max(radius, 1) / 4));
+    this._addSource(pos.x, pos.z, radius * 0.5, 0.2 * s, 0.3 * s, 0.4 * s, 1);
   }
 
   /** A quick height (strongest waves only, ~0.1-0.3 m): for effects, not for physics. */
@@ -1784,7 +1831,8 @@ export class Ocean {
         v.set(wx * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2, 1.5 + Math.random() * 3 * k, wz * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2);
         const qx = px + (Math.random() - 0.5) * 4, qz = pz + (Math.random() - 0.5) * 4;
         if (i < 4) this._pe(this.game.mist, qx, py + 0.2, qz, v.x, v.y, v.z, 0.8 + Math.random() * 0.8, 0.25 + Math.random() * 0.3, 0.8 + Math.random() * 0.5, 0.95, 0.75 * k, 0.6, 9.8, 9, 0.02);
-        else this._pe(this.game.mist, qx, py + 0.3, qz, v.x, v.y, v.z, 1.6 + Math.random() * 1.4, 0.7 + Math.random() * 0.8, 3 + Math.random() * 3, 0.95, 0.2 * k, 0.9, 0.6, 0, 0.1);
+        // spume streaming downwind: fine drops carried flat by the gale (streaked by their speed)
+        else this._pe(this.game.mist, qx, py + 0.3, qz, v.x * 1.4, v.y * 0.4, v.z * 1.4, 0.8 + Math.random() * 0.8, 0.003 + Math.random() * 0.005, 0.004, 0.95, 0.8 * k, 0.25, 3.5, 3, 0.02);
       }
     }
   }
@@ -1884,14 +1932,7 @@ export class Ocean {
         drop ? 0.012 : (0.35 + Math.random() * 0.3) * Math.min(1.6, 0.5 + ss * 0.5),
         0.96, drop ? 0.95 : 0.85, drop ? 0.15 : 0.5, 9.8, drop ? 3 : 9, 0.01);
     }
-    // a thin veil of mist over the crown, drifting off downwind
-    const m = Math.round((2 + 5 * Math.min(s, 2.5)) * mistK);
-    for (let i = 0; i < m; i++) {
-      const a = Math.random() * TAU;
-      const rr = (0.5 + Math.random() * 0.5) * radius * 0.8;
-      this._pe(mist, pos.x + Math.cos(a) * rr, pos.y + 0.5, pos.z + Math.sin(a) * rr, Math.cos(a) * 1.2, (0.8 + Math.random() * 2.2) * ss, Math.sin(a) * 1.2,
-        2 + Math.random() * 1.8, radius * 0.22 * ss, radius * (0.7 + Math.random() * 0.4) * ss, 1, 0.18, 1.1, 0.3, 0, 0.12);
-    }
+    // (no veil of mist puffs any more: the crown, jet and foam sheets are src/fx/Splash.js)
     // spreading rings where the water falls back
     if (s >= 0.3) this._pe(mist, pos.x, pos.y + 0.05, pos.z, 0, 0, 0, 1.6 + s * 0.4, radius * 0.6, radius * (1.6 + s * 0.6), 1, 0.35, 0, 0, 8, 0.05, 0.1);
     if (glow && G.uWaterParams.value.z > 0.05) {

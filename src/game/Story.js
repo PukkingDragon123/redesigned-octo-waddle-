@@ -3,6 +3,7 @@
 // (flight, collisions, eating, humming, sonic booms), weather, the falcon encounter, saving,
 // and the hand-off between gameplay and cinematic cameras. Communicates only through the
 // world: no HUD, no prompts.
+import { fx } from '../fx/FX.js';
 import { Vector3, Quaternion, Color } from 'three';
 import { MigrationPath } from '../world/MigrationPath.js';
 import { WorldBuilder } from '../world/WorldBuilder.js';
@@ -1580,25 +1581,8 @@ export class Story {
     this.booms.charge = ch > 0.02 ? { pos: calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.55), amount: ch } : null;
     calf.animate(dt, g.engine.camera.position);
     g.focus.copy(calf.pos);
-    // mist trails when slicing through cloud
-    const inCloud = g.clouds.playerInCloud;
-    const sp = calf.vel.length();
-    if ((inCloud > 0.15 || calf.pos.y < 70) && sp > 3) {
-      const rate = (inCloud > 0.15 ? inCloud : 0.4) * sp * 0.25;
-      this.mistAcc = (this.mistAcc || 0) + rate * dt;
-      while (this.mistAcc > 1) {
-        this.mistAcc -= 1;
-        // the wingtips' vortices stir the cloud into curling wisps that hang behind
-        for (let side = -1; side <= 1; side += 2) {
-          const E = _pfx;
-          E.pos.copy(calf.pos).addScaledVector(calf.right, side * calf.L * 0.55).addScaledVector(calf.fwd, -calf.L * 0.1);
-          E.vel.copy(calf.vel).multiplyScalar(0.08);
-          E.life = 1.4 + Math.random() * 0.6; E.size = 0.3; E.sizeEnd = 1.8 + Math.random(); E.alpha = 0.35; E.drag = 1.2; E.gravity = 0;
-          E.kind = 0; E.fadeIn = 0.1; E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-          g.mist.emit(E);
-        }
-      }
-    }
+    // (slicing through cloud no longer leaves vapour puffs: the wind lines' wingtip trails and air
+    // streams show the flight, src/fx/WindLines.js)
     // camera
     if (playing || this.state === 'ending') {
       const opts = {};
@@ -1642,24 +1626,21 @@ export class Story {
     const g = this.game;
     const cam = g.engine.camera.position;
     this.mistT = (this.mistT || 0) + dt;
-    if (this.mistT < 0.12) return;
+    if (this.mistT < 0.9) return;
     this.mistT = 0;
+    const S = fx(g).splash;
     for (const w of this.world.waterfalls) {
       if (!w.visible) continue;
       const lip = w.userData.lip;
       if (Math.abs(lip.x - cam.x) > 600 || Math.abs(lip.z - cam.z) > 600) continue;
       const out = w.userData.out;
       const drop = w.userData.drop;
-      // churning spray where the fall meets the cloud ocean, plus a fine veil along it
-      const k = Math.random();
-      const y = lip.y - (0.55 + 0.45 * k) * drop;
+      // the fall's spray billowing up where it lands: translucent streak sheets drifting on the
+      // breeze (src/fx/Splash.js), no puffs
       const E = _pfx;
-      E.pos.copy(lip).addScaledVector(out, 4 + k * 10).add(_mOff.set((Math.random() - 0.5) * w.userData.width * 2, y - lip.y, (Math.random() - 0.5) * w.userData.width * 2));
-      E.vel.set((Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3);
-      // the fall's spray billowing up as fine vapour, eroding into wisps on the breeze
-      E.life = 4 + Math.random() * 2; E.size = w.userData.width * 1.0; E.sizeEnd = w.userData.width * (3.5 + Math.random());
-      E.alpha = 0.3; E.drag = 0.4; E.gravity = -0.05; E.kind = 0; E.fadeIn = 0.8; E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-      g.mist.emit(E);
+      E.pos.copy(lip).addScaledVector(out, 4 + Math.random() * 6);
+      E.pos.y = lip.y - drop * (0.85 + 0.1 * Math.random());
+      S.veil(E.pos, w.userData.width * 0.6, Math.max(6, drop * 0.35), 4 + Math.random() * 2, 0.7);
     }
   }
 

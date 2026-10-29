@@ -14,7 +14,9 @@ import { UNIFORMS, NOISE, LIGHTING, DEPTH } from './shaders/common.js';
 import { getNoiseTexture } from './NoiseTex.js';
 
 // Kinds (emit({ kind })):
-//  0 vapour / mist / breath / spray cloud     1 glow (bokeh disc)          2 glint (tiny bright point)
+//  0 retired: the round vapour puff is gone (docs/VUR_SOK.md 0.10). emit() drops kinds 0, 6 and 7;
+//    spouts, splashes, booms and moving air are drawn by src/fx/ (Splash, WindLines) instead
+//                                             1 glow (bokeh disc)          2 glint (tiny bright point)
 //  3 droplet (refractive sphere)              4 air bubble (under water)   5 underwater mote
 //  6, 7 legacy wind strokes: drawn as a faint vapour wisp stretched along the motion
 //  8 ring on the sea (rain splash, bubble pop, pressure ripple; stretch < 1 sets the ring width)
@@ -439,6 +441,10 @@ export class Particles {
    *      stretch (6/7: wisp length; 8: ring width as a fraction of its radius when < 1) }
    */
   emit(o) {
+    // the round vapour puff is retired (0.10): legacy puff emits (kind 0, the default, and the old
+    // wind strokes 6/7) draw nothing; the effects systems in src/fx/ replace them
+    const kd = o.kind ?? 0;
+    if (kd === 0 || kd === 6 || kd === 7) return;
     let i;
     if (this.n < this.max) i = this.n++;
     else {
@@ -457,7 +463,7 @@ export class Particles {
     this.size1[i] = o.sizeEnd ?? (o.size ?? 1) * 2;
     this.drag[i] = o.drag ?? 0.6;
     this.grav[i] = o.gravity ?? 0;
-    this.kind[i] = o.kind ?? 0;
+    this.kind[i] = kd;
     this.seed[i] = Math.random() * 10;
     this.fadeIn[i] = o.fadeIn ?? 0.15;
     this.stretch[i] = o.stretch ?? 4;

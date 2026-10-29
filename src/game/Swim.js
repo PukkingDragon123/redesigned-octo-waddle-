@@ -4,6 +4,7 @@
 // (heightAt / splash / wake) and falls back to a flat sea at y = 0.
 import { Vector3 } from 'three';
 import { clamp, smoothstep } from '../core/math.js';
+import { fx } from '../fx/FX.js';
 
 const _p = new Vector3();
 const _v = new Vector3();
@@ -133,49 +134,15 @@ function spray(game, p, w, k, up) {
     E.color[0] = 0.96; E.color[1] = 0.98; E.color[2] = 1.0; E.kind = drop ? 3 : 9; E.fadeIn = 0.01;
     game.mist.emit(E);
   }
-  for (let i = 0; i < 3 + Math.round(3 * Math.min(k, 1.5)); i++) {
-    const a = Math.random() * Math.PI * 2;
-    E.pos.set(p.x + Math.cos(a) * w.radius, p.y + 0.4, p.z + Math.sin(a) * w.radius);
-    E.vel.set(Math.cos(a) * 0.8, 0.8 + Math.random() * 1.2, Math.sin(a) * 0.8).addScaledVector(w.vel, 0.2);
-    E.life = 1.8 + Math.random() * 1.2; E.size = w.radius * 0.5; E.sizeEnd = w.radius * (1.6 + Math.random());
-    E.alpha = 0.2; E.drag = 1.2; E.gravity = 0.3; E.kind = 0; E.fadeIn = 0.1;
-    E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-    game.mist.emit(E);
-  }
+  // (the crown, jet and foam are drawn by src/fx/Splash.js through ocean.splash: no mist puffs)
 }
 
-const _sv = new Vector3();
-const _sc = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 1, alpha: 0.5, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.05 };
 /**
- * A whale's blow at the surface: a tall column of fine vapour shot up from the blowholes, slowing as
- * it rises, widening, and drifting off with the wind as it dissipates; a few fine drops fall back.
- * Height scales with the whale (a calf about 3 m, a mother about 9 m). Shared by Swim and the herd.
+ * A whale's blow at the surface: a narrow jet of fine spray shot up from the blowholes that
+ * atomises into a faint plume of streak sheets drifting off with the wind, and a little rain of
+ * drops falling back (src/fx/Splash.js). Height scales with the whale. Shared by Swim and the herd.
  */
 export function spoutColumn(g, p, w, k = 1) {
-  if (!g.mist) return;
-  const E = _sc;
-  const L = w.L || 4;
-  const sc = Math.sqrt(L / 4.2);
-  // many faint, overlapping puffs: a narrow jet at the blowhole that blooms into a bushy plume
-  // (the faster, higher puffs spread wider) and drifts off with the wind, never a stack of balls
-  const n = Math.round((w.isCalf || L < 8 ? 72 : 100) * Math.min(k, 1.5));
-  for (let i = 0; i < n; i++) {
-    const u = Math.random();
-    const speed = (3 + 13 * Math.pow(u, 0.6)) * sc * Math.min(1.2, 0.6 + k * 0.4);
-    const spread = (0.5 + 2.9 * u) * sc;
-    const a = Math.random() * 6.2832, r = Math.sqrt(Math.random());
-    E.pos.copy(p).addScaledVector(w.up, Math.random() * 0.35 * sc);
-    E.vel.copy(w.up).multiplyScalar(speed).add(_sv.set(Math.cos(a) * r * spread, 0, Math.sin(a) * r * spread)).addScaledVector(w.vel, 0.5);
-    E.life = 2.6 + Math.random() * 2.4; E.size = (0.12 + 0.18 * Math.random()) * sc; E.sizeEnd = (0.7 + 1.3 * u + 0.5 * Math.random()) * sc;
-    E.alpha = 0.16 + 0.12 * Math.random(); E.drag = 2.2 + Math.random() * 1.2; E.gravity = -0.15; E.kind = 0; E.fadeIn = 0.05;
-    E.color[0] = 0.97; E.color[1] = 0.98; E.color[2] = 1.0;
-    g.mist.emit(E);
-  }
-  for (let i = 0; i < Math.round(10 * sc); i++) {
-    E.pos.copy(p);
-    E.vel.copy(w.up).multiplyScalar((5 + 6 * Math.random()) * sc).add(_sv.set((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5)).addScaledVector(w.vel, 0.5);
-    E.life = 1.2 + Math.random() * 0.8; E.size = 0.004 + 0.006 * Math.random(); E.sizeEnd = E.size;
-    E.alpha = 0.9; E.drag = 0.4; E.gravity = 9.8; E.kind = 3; E.fadeIn = 0.01;
-    g.mist.emit(E);
-  }
+  if (!g.engine) return;
+  fx(g).splash.spout(p, w, k, false);
 }

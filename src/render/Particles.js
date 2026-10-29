@@ -193,7 +193,12 @@ void main() {
   float sceneZ = sceneDepthAt(suv);
   a *= clamp((sceneZ - vViewZ) / max(vSize * 0.5, 0.2), 0.0, 1.0);
   // fade puffs the camera is inside of, so a burst never veils the whole view
-  a *= smoothstep(0.3, 1.2, vViewZ) * smoothstep(vSize * 0.35, vSize * 1.5, vViewZ);
+  // mist puffs also fade as they grow large on screen: a big painted puff hanging over the view
+  // reads as a pale disc, not as mist
+  float nearK = kind < 0.5
+    ? smoothstep(vSize * 1.2, vSize * 4.0, vViewZ) * (1.0 - smoothstep(0.1, 0.28, vSize / max(vViewZ, 0.1)))
+    : smoothstep(vSize * 0.35, vSize * 1.5, vViewZ);
+  a *= smoothstep(0.3, 1.2, vViewZ) * nearK;
   if (a < 0.003) discard;
   if (uAdditive > 0.5) {
     col *= mix(1.0, 0.0, vFog);

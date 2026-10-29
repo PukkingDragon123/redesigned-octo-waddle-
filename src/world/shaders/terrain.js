@@ -201,7 +201,7 @@ void main() {
     // mineral colour of each bed: buff, iron-red, grey-blue, greenish, cream
     float mh = hash11(bandId * 7.13 + 1.7);
     vec3 mineral = mh < 0.22 ? vec3(1.12, 0.94, 0.8) : mh < 0.42 ? vec3(0.9, 0.95, 1.05) : mh < 0.55 ? vec3(0.95, 1.02, 0.92) : mh < 0.7 ? vec3(1.07, 1.04, 0.95) : vec3(1.0);
-    float bandTone = 0.82 + 0.32 * hard;
+    float bandTone = 0.89 + 0.2 * hard;
     // the bedding plane is an eroded notch; hard beds stand proud with a lit lip
     // some bedding planes are deep notches, most only faint partings (massive beds, thin beds)
     // (each plane's depth hashes on the bed above it, so both sides of a plane agree)
@@ -217,7 +217,8 @@ void main() {
     float sedK = sed * (0.45 + 0.55 * steep);
     // (far away a bed is a pixel or two: its colour steps calm down so the stack reads as one
     // weathered rock with strata in it, not a striped cake; up close each bed keeps its colour)
-    float bedCalm = mix(1.0, 0.5, smoothstep(0.08, 0.5, px));
+    float bedCalm = mix(1.0, 0.45, smoothstep(0.04, 0.3, px));
+    mineral = mix(vec3(1.0), mineral, 0.6); // beds differ in tone more than in hue: no candy stripes
     rock *= mix(vec3(1.0), mineral * bandTone * (1.0 - lam * 0.08 * fineF), sedK * bedCalm);
     heightB += (bedRelief + lam * 0.04 * fineF) * steep * sed * mesoF;
     crevice = max(crevice, notch * steep * sed * mesoF);

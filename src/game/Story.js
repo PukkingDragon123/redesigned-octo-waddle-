@@ -15,8 +15,11 @@ import { Menu } from './Menu.js';
 import { Script, until } from './Script.js';
 import { SongGame } from './SongGame.js';
 import { Cinematics } from './Cinematics.js';
+import { QTE } from './QTE.js';
 import { LifeCycle } from './life/LifeCycle.js';
 import { Needs } from './Needs.js';
+import { Abilities } from './Abilities.js';
+import { Bonds } from './life/Bonds.js';
 import { hatching, restoreHatching } from './life/Hatching.js';
 import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
@@ -116,12 +119,17 @@ export class Story {
     this.booms = new SonicBooms(g);
     this.song = new SongGame(this);
     this.cine = new Cinematics(this);
+    // wordless quick-time cues (src/game/QTE.js): game.qte.press / mash / hold / steer
+    g.qte = new QTE(g);
     this.life = new LifeCycle(this);
     g.cameraRig.collide = (from, to) => this.cameraHit(from, to);
     g.cameraRig.avoid = (pos, out) => this.cameraAvoid(pos, out);
     await this.loadOptional();
     // hunger and the mother's nearness (src/game/Needs.js)
     this.needs = new Needs(g, this);
+    // abilities learnt one by one in ACT I (src/game/Abilities.js); the bond with the mother (src/game/life/Bonds.js)
+    this.abilities = new Abilities(g, this);
+    this.bonds = new Bonds(g, this);
     this.player.on('hum', () => this.onCalfHum());
     this.player.on('humEnd', () => this.onCalfHumEnd());
     this.player.on('boom', (e) => this.onCalfBoom(e));
@@ -272,7 +280,7 @@ export class Story {
   }
 
   save(chapter, act = this.act, lifeDone = false) {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter, act: lifeDone ? 1 : act, completed: this.completed, t: Date.now() })); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ chapter, act: lifeDone ? 1 : act, completed: this.completed, abilities: this.abilities?.list(), t: Date.now() })); } catch (e) { /* private mode */ }
   }
 
   // ---- voices ---------------------------------------------------------------------------
@@ -426,6 +434,7 @@ export class Story {
       this.menu.dissolveAll();
       this.state = 'intro';
       this.cine.seen.clear();
+      this.abilities?.reset();
       g.engine.setLook?.('cinematic', { focusOn: this.herd.calf.pos, ease: 2 });
       this.script.run(this.intro(), 'intro');
       return;
@@ -549,6 +558,7 @@ export class Story {
     const g = this.game, herd = this.herd;
     const ch = this.path.chapters[i];
     this.chapterIndex = i;
+    this.abilities?.enterChapter(i);
     this.save(i);
     this.populateEcosystem(i);
     if (!instant) g.atmosphere.transition(ch.time, i === 0 ? 120 : 45);
@@ -596,6 +606,9 @@ export class Story {
     this.voiceCall(mom, 'answer');
     calf.drive.happy = 1;
     yield 1;
+    // the first danger: stick to her, and the safety of her mouth (src/game/life/Bonds.js)
+    herd.motherScript = null;
+    if (this.bonds) yield* this.bonds.danger();
     // the herd wakes and lifts off over the sea
     herd.motherScript = null;
     herd.mode = 'travel';
@@ -683,6 +696,8 @@ export class Story {
     herd.mode = 'travel';
     herd.targetSpeed = 17;
     yield 5;
+    // its voice: her song across the morning sea, a croak, then a true note (src/game/Abilities.js)
+    if (this.abilities) yield* this.abilities.scene('voice');
     // call and answer: the mother hums and waits for the calf's reply
     this.voiceCall(mom, 'answer');
     mom.drive.lookAt = calf.pos;
@@ -713,6 +728,8 @@ export class Story {
     herd.mode = 'travel';
     herd.targetSpeed = 14;
     yield 1;
+    // a breath at the surface: its first spout (src/game/Abilities.js)
+    if (this.abilities) yield* this.abilities.scene('spout');
     herd.mode = 'feed';
     herd.targetSpeed = 3;
     herd.feedHook = (w) => {
@@ -806,6 +823,8 @@ export class Story {
     herd.mode = 'travel';
     herd.targetSpeed = 16;
     yield 3;
+    // flukes on the water: the tail slap (src/game/Abilities.js)
+    if (this.abilities) yield* this.abilities.scene('slap');
     // a playmate comes to invite the calf into a chase
     for (let k = 0; k < Math.min(1, herd.calves.length); k++) {
       const c = herd.calves[k];
@@ -856,6 +875,8 @@ export class Story {
     yield* this.moment(function* (C) {
       yield* C.play(C.track({ subject: mom, side: [-60, -44], up: [4, 22], ahead: [0, 26], fov: [48, 54] }), 5);
     }, { rate: 0.4 });
+    // down into the glowing sea after her, and out under the galaxy: breach, loop, dash (src/game/Abilities.js)
+    if (this.abilities) yield* this.abilities.scene('acro');
     yield () => herd.s > this.path.chapters[6].start;
   }
 
@@ -884,6 +905,8 @@ export class Story {
       this.weather.strike(calf.pos.clone().add(new Vector3(-80, 160, -120)));
     }, { focus: calf, rate: 2, hold: false });
     yield 0.6;
+    // alone in the dark, its first sonic boom, which she hears (src/game/Abilities.js)
+    if (this.abilities) yield* this.abilities.scene('boom');
     this.voiceCall(mom, 'warn');
     this.audio.setIntensity?.(1);
     herd.care.mode = 'fetch';
@@ -1414,6 +1437,7 @@ export class Story {
       else if (this.state === 'paused' && this.menu.page === 'pause') this.resume();
     }
     this.script.update(dt);
+    g.qte?.update(ud);
     this.cine.update(ud);
     this.menu.update(ud);
     if (this.state === 'menu') {
@@ -1424,6 +1448,8 @@ export class Story {
     this.life.update(dt);
     this.docWatch(dt);
     this.activities?.update?.(dt);
+    this.bonds?.update(dt);
+    this.abilities?.update(dt);
     this.herd.update(dt);
     for (const w of this.herd.whales) if (w !== this.herd.calf) waterStep(w, dt, g, { onSplash: this._onSplash });
     for (const w of this.gatheringOn ? this.gathering : []) waterStep(w, dt, g);

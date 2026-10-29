@@ -99,10 +99,13 @@ export class Moves {
     this.depth = depth;
     this.zone = depth > w.radius * 0.9 ? 'under' : depth > -(w.radius * 1.6 + 1.4) ? 'surface' : 'air';
     if (enabled && inp) {
-      if (inp.slapPressed) this.slap(sea);
-      if (inp.spoutPressed) this.spout(sea);
-      if (inp.loopPressed) this.loop();
-      if (inp.dashPressed) this.dash(sea);
+      // abilities a newborn has not learnt yet are a small failed attempt (src/game/Abilities.js)
+      const A = g.story?.abilities;
+      const can = (k) => !A || A.has(k) || (A.attempt(k), false);
+      if (inp.slapPressed && can('slap')) this.slap(sea);
+      if (inp.spoutPressed && can('spout')) this.spout(sea);
+      if (inp.loopPressed && can('loop')) this.loop();
+      if (inp.dashPressed && can('dash')) this.dash(sea);
     }
     this._rolls(dt);
     this._breach(dt, depth, sea);
@@ -286,7 +289,8 @@ export class Moves {
     if (B.armed && last > -w.radius * 0.3 && depth <= -w.radius * 0.3) {
       B.armed = false;
       B.deepT = 0;
-      if (w.vel.y > 4.2) {
+      const A = g.story?.abilities;
+      if (w.vel.y > 4.2 && (!A || A.has('breach'))) {
         const k = clamp(w.vel.y / 10, 0.6, 1.6);
         w.vel.y = Math.max(w.vel.y, 8 + w.vel.y * 0.35);
         w.vel.addScaledVector(w.fwd, 2);

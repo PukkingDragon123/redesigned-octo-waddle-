@@ -63,6 +63,10 @@ export const CONTROL_LINES = {
   ],
 };
 
+// keys that steer the calf (a steer cue reads them; they never count as an act press)
+const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyC',
+  'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE', 'Escape', 'KeyP', 'Tab', 'AltLeft', 'AltRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight']);
+
 // Standard gamepad mapping indices
 const GP = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, BACK: 8, START: 9, L3: 10, R3: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
 
@@ -198,6 +202,7 @@ export class Input {
         });
         if (boom && this.lockWanted) press(2);
         this._tapT = -1; // a second finger or a second tap: not a bite
+        this.touchAct = true; // a fresh finger is an act press (the wordless QTE cues, src/game/QTE.js)
         setPointer(t);
       }
       if (this.touches.size === 3 && this.lockWanted) this.touchPause = true;
@@ -343,6 +348,7 @@ export class Input {
     this.biteTap = false;
     this.dashTap = false;
     this.touchPause = false;
+    this.touchAct = false;
   }
 
   _k(action) { return KEYMAP[action] || []; }
@@ -407,6 +413,32 @@ export class Input {
   get bitePressed() { return this.enabled && (this.keyPressed('bite') || this.gpPressed(GP.B) || this.biteTap); }
   /** Rolls queued while a roll is spinning chain into a corkscrew (the press itself is enough). */
   get rollHeld() { return this.enabled && (this.key('rollLeft') || this.key('rollRight') || this.gp(GP.LB) || this.gp(GP.RB)); }
+
+  // ---- act (the wordless QTE cues, src/game/QTE.js) ------------------------------------------
+  // Any of the obvious "do it" inputs: Space, Enter, left click, a touch, gamepad A. The cues show
+  // no key names, so the QTE also takes any other non-steering key or face button (actAny*).
+  get actPressed() {
+    return this.keysPressed.has('Space') || this.keysPressed.has('Enter') || this.keysPressed.has('NumpadEnter') ||
+      !!(this.mousePressed & 1) || !!this.touchAct || this.gpPressed(GP.A);
+  }
+  get actDown() {
+    return this.keys.has('Space') || this.keys.has('Enter') || this.keys.has('NumpadEnter') ||
+      !!(this.mouseButtons & 1) || (this.touches?.size ?? 0) > 0 || this.gp(GP.A);
+  }
+  get actReleased() {
+    return this.keysReleased.has('Space') || this.keysReleased.has('Enter') || !!(this.mouseReleased & 1) || this.gpReleased(GP.A);
+  }
+  /** act, or any other key / face button that does not steer (mashing anything works). */
+  get actAnyPressed() {
+    if (this.actPressed) return true;
+    for (const c of this.keysPressed) if (!STEER_KEYS.has(c)) return true;
+    return this.gpPressed(GP.B) || this.gpPressed(GP.X) || this.gpPressed(GP.Y) || !!(this.mousePressed & 2);
+  }
+  get actAnyDown() {
+    if (this.actDown) return true;
+    for (const c of this.keys) if (!STEER_KEYS.has(c)) return true;
+    return this.gp(GP.B) || this.gp(GP.X) || this.gp(GP.Y) || !!(this.mouseButtons & 2);
+  }
 
   get pausePressed() { return this.keyPressed('pause') || this.gpPressed(GP.START) || this.touchPause; }
 

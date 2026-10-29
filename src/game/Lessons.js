@@ -319,14 +319,18 @@ export class Lessons {
 
   _pickSeq(round) {
     const calf = this.herd.calf;
-    const pool = ['roll', 'slap', 'spout'];
+    // only what the calf has learnt (src/game/Abilities.js); a newborn copies her rolls
+    const A = this.story.abilities;
+    const pool = ['roll', 'slap', 'spout'].filter((k) => k === 'roll' || !A || A.has(k));
     // a loop needs the open air (and the calf up in it)
-    if (round > 1 && (!calf.water || calf.water.depth < -calf.radius * 3)) pool.push('loop');
+    if (round > 1 && (!A || A.has('loop')) && (!calf.water || calf.water.depth < -calf.radius * 3)) pool.push('loop');
     const seq = [];
     if (this.firstCopy) { seq.push('roll'); this.firstCopy = false; }
+    let guard = 0;
     while (seq.length < round) {
       const k = pool[Math.floor(Math.random() * pool.length)];
-      if (k === seq[seq.length - 1] || (k === 'loop' && seq.includes('loop'))) continue;
+      // (a small pool, early in life, may repeat a move rather than search forever)
+      if (++guard < 40 && (k === seq[seq.length - 1] || (k === 'loop' && seq.includes('loop')))) continue;
       seq.push(k);
     }
     return seq;

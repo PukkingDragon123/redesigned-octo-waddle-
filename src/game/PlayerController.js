@@ -90,8 +90,10 @@ export class PlayerController {
       if (inp.rollRightPressed) { if (w.barrelRoll(-1)) this.emit('roll', -1); else this.moves.queueRoll(-1); }
     }
 
-    // humming
-    const humHeld = this.enabled && inp.hum;
+    // humming (a newborn has no voice yet: a squeak, src/game/Abilities.js)
+    const A = this.game.story?.abilities;
+    let humHeld = this.enabled && inp.hum;
+    if (humHeld && A && !A.has('voice') && !this.humming) { if (!this._lockHum) A.attempt('voice'); this._lockHum = true; humHeld = false; } else if (!inp.hum) this._lockHum = false;
     if (humHeld && !this.humming) {
       this.humming = true;
       this.humTime = 0;
@@ -105,7 +107,8 @@ export class PlayerController {
 
     // sonic boom: hold to charge, release to unleash
     this.cooldown = Math.max(0, this.cooldown - dt);
-    const boomHeld = this.enabled && inp.boom && this.cooldown <= 0;
+    let boomHeld = this.enabled && inp.boom && this.cooldown <= 0;
+    if (boomHeld && A && !A.has('boom') && !this.charging) { if (!this._lockBoom) A.attempt('boom'); this._lockBoom = true; boomHeld = false; } else if (!inp.boom) this._lockBoom = false;
     if (boomHeld) {
       this.charging = true;
       this.charge = Math.min(1, this.charge + dt / 1.6);

@@ -363,9 +363,11 @@ export class Cinematics {
   update(dtReal) {
     const inp = this.game.input;
     this.swayT += dtReal;
-    if (!this.active || !this.skippable || this.story.state === 'paused' || this.story.state === 'menu') {
+    // a quick-time cue is being answered: holding or mashing then is the cue, never a skip
+    if (!this.active || !this.skippable || this.story.state === 'paused' || this.story.state === 'menu' || this.game.qte?.active) {
       this.skipT = 0;
       this.holding = false;
+      if (this.game.qte?.active) this.armed = false; // a hold carried out of a cue does not skip either
       return;
     }
     const held = inp.keys.size > 0 || inp.mouseButtons > 0 || (inp.touches && inp.touches.size > 0) ||

@@ -27,7 +27,7 @@ export const BUG_SPECIES = {
   gnat: {
     slots: 5, block: 96, size: 0.24, flap: 38, amp: 0.55, base: 0.35, minPx: 1.7,
     bodyW: 0.3, bodyL: 0.42, wing: [0.8, 0.5, 0.6, 0.45],
-    colA: 0xc8ff9a, colB: 0x6ff2d8, glow: 0xb8ff8a, glowDay: 1.4, glowNight: 2.4,
+    colA: 0xc8ff9a, colB: 0x6ff2d8, glow: 0xb8ff8a, glowDay: 0.4, glowNight: 2.0,
     flee: 3.2, fleeR: 4.5, catchR: 2.3, energy: 0.009, wake: 0.6, shape: 1, drawDist: 380,
   },
   skitter: {
@@ -270,9 +270,8 @@ void main() {
     float far = vFar * max(smoothstep(1.0, 0.55, d), exp(-d * d * 3.0));
     if (far > a) {
       col = mix(cB * 0.25, cA * 0.7, 0.5 + 0.5 * q.y);
-      // far: a soft glint that twinkles as the wings catch the light
-      float tw = 0.75 + 0.35 * sin(uTime * 7.0 + var * 40.0);
-      emis = ((1.0 - min(d, 1.0)) * (uShape > 0.5 && uShape < 1.5 ? 1.6 : 0.7) + vFar * 0.9) * tw;
+      // far: a small steady speck of its colour (no twinkle: a blinking dot in the sky read as a glitch)
+      emis = ((1.0 - min(d, 1.0)) * (uShape > 0.5 && uShape < 1.5 ? 0.8 : 0.45) + vFar * 0.35);
       a = far;
     }
     // being sucked into a mouth: the glow streaks out behind, thin and tapering

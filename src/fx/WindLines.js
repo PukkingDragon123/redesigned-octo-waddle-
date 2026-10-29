@@ -109,8 +109,10 @@ void main() {
     }
     vec3 dd = abs(an - uFocus - vec3(0.0, 2.0, 0.0)) / (0.5 * B);
     float edge = max(max(dd.x, dd.y), dd.z);
-    float life = sin(3.14159 * fract(uTime / (3.0 + 3.0 * hs(sd2 + 4.0)) + iL.w));
+    float life = smoothstep(0.0, 0.6, sin(3.14159 * fract(uTime / (6.0 + 6.0 * hs(sd2 + 4.0)) + iL.w)));
     alpha = uAmb.z * (1.0 - smoothstep(0.55, 0.95, edge)) * life * (0.6 + 0.4 * hs(sd2 + 9.0));
+    // a line joins in softly as the speed rises past its threshold, never popping on
+    alpha *= smoothstep(0.0, 0.12, uAmb.x - hs(sd2 * 7.1));
     width *= 4.0 + 1.0 * uAmb.w;
   } else if (type < 1.5) {
     // ---- gust lines low over the sea, lit by the gust that is on its way
@@ -362,7 +364,8 @@ export class WindLines {
     const storm = G.uStorm.value;
     const windS = wind ? wind.strength * (1 + wind.gust) : 3;
     // more, longer air lines the faster the calf flies (and in dives and dashes)
-    const target = clamp(0.18 + 0.7 * smoothstep(6, 30, sp) + this.boost * 0.3 + 0.25 * smoothstep(6, 16, windS) + storm * 0.3, 0, 1);
+    // none in calm cruising (stray dashes popping in and out read as blinking specks): they come with real speed
+    const target = clamp(0.8 * smoothstep(15, 32, sp) + this.boost * 0.35 + 0.2 * smoothstep(8, 16, windS) * smoothstep(10, 22, sp) + storm * 0.3, 0, 1);
     this.amb = damp(this.amb, target, 3, dt);
     this.boost = damp(this.boost, 0, 2, dt);
     u.uAmb.value.set(this.amb, 0.8 + 0.4 * smoothstep(10, 34, sp), 0.3 + 0.15 * smoothstep(10, 30, sp) + 0.08 * storm, storm);

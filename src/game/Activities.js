@@ -9,6 +9,8 @@
 //  - reactions to the calf's moves (src/game/Moves.js): playmates copy slaps, rolls and breaches,
 //    the mother answers spouts and calls out when the calf is having fun;
 //  - playmate races through living rings of lumen moths along the route;
+//  - the hunt (src/game/Hunt.js): the bite / lunge, prey that fears a hunting calf, lanternjacks and
+//    skimmers that fight back; its catches are swallowed by the same gulp as the bugs;
 //  - joy: catches and tricks build it, it decays; it shows as sparkle trails, the calf's smile,
 //    the mother's happy calls, music stingers and `intensity` (for the score; see the report).
 // Story creates it (new Activities(game, story)), calls update(dt) after updateCalf and reset().
@@ -17,6 +19,7 @@ import { clamp, lerp, smoothstep, TAU } from '../core/math.js';
 import { G } from '../render/Globals.js';
 import { SkyBugs, BUG_SPECIES } from '../creatures/bugs/SkyBugs.js';
 import { seaHeight } from './Swim.js';
+import { Hunt } from './Hunt.js';
 
 // ambient swarms per chapter: [moth, gnat, skitter]
 const DENSITY = {
@@ -66,6 +69,7 @@ export class Activities {
     for (const k of KINDS) { const c = this.bugs.kinds[k].glowCol; this._col[k] = [c.r, c.g, c.b]; }
     this.moves = story?.player?.moves || null;
     this.moves?.on((e) => this.onMove(e));
+    this.hunt = new Hunt(game, story, this);
   }
 
   rand() { return Math.random(); }
@@ -84,6 +88,7 @@ export class Activities {
     this.milestone = 0;
     this.spawnT = 0;
     this.moves?.reset?.();
+    this.hunt.reset();
   }
 
   // ---- per frame ----------------------------------------------------------------------------
@@ -110,6 +115,7 @@ export class Activities {
       calf.drive.feed = Math.max(calf.drive.feed, 0.3 + 0.2 * reach);
       calf.anim.focus?.(this.bugs.focus, this.bugs.focusW, reach);
     }
+    this.hunt.update(dt, playing);
     this._eating(dt, calf);
     // joy decays; it lights the calf up
     this.joy = Math.max(0, this.joy - dt * 0.05 * (1 + this.joy));

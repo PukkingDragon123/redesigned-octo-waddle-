@@ -1,5 +1,5 @@
 // Dev scene: under the sea of Vur Sok, from the calf's point of view.
-// ?debug&test=underwater&shot=kelp|crabs|jellies|rays|reef|night|surface|manta|mantaair|fishmacro
+// ?debug&test=underwater&shot=kelp|puffers|jellies|rays|reef|night|surface|manta|mantaair|fishmacro
 //   &shot=fishmacro&species=puffer|eel|glintfin|spiralback|lanternjack&view=side|front|top|q|under
 //   (&inflate puffs the puffer up, &dist=k scales the camera distance)
 //   manta: a close-up of a manta swimming alongside the calf (&view=side|below|front|top,
@@ -135,7 +135,7 @@ export default async function (game) {
   const reefAt = bestSpot(gardenDensity, 3, 14);
   let center = reefAt, depth = -5, radius = 16, speed = 2.6, camBack = 12, camUp = 2.5, lookAhead = 8, fov = 62;
   if (shot === 'kelp') { center = kelpAt; depth = Math.max(kelpAt.y + 4, -7); radius = 14; camBack = 10; }
-  else if (shot === 'crabs') { center = reefAt; depth = reefAt.y + 2.6; radius = 10; speed = 1.8; camBack = 8; camUp = 1.8; }
+  else if (shot === 'puffers') { center = reefAt; depth = reefAt.y + 2.6; radius = 10; speed = 1.8; camBack = 8; camUp = 1.8; }
   else if (shot === 'jellies') { center = bestSpot((x, z) => -Math.hypot(x - 90, z + 40), 12, 24); depth = -8; radius = 18; }
   else if (shot === 'rays') { center = bestSpot((x, z) => -Math.hypot(x + 80, z - 30), 10, 24); depth = -7; radius = 26; speed = 3.2; camBack = 14; camUp = 4; }
   else if (shot === 'night') { center = kelpAt; depth = Math.max(kelpAt.y + 4, -7); radius = 14; }
@@ -152,18 +152,8 @@ export default async function (game) {
   const stage = () => {
     staged = true;
     const R = eco.reef;
-    if (shot === 'crabs') {
-      // a little colony in the calf's path
-      for (let i = 0; i < 14; i++) {
-        const a = (i / 14) * Math.PI * 2, rr = 3 + (i % 4) * 2.2;
-        const x = actor.pos.x + Math.cos(a) * rr + fwd.x * 10, z = actor.pos.z + Math.sin(a) * rr + fwd.z * 10;
-        R.crabs.alive[i] = 1;
-        R.crabs.P[i * 3] = x; R.crabs.P[i * 3 + 1] = floorAt(x, z); R.crabs.P[i * 3 + 2] = z;
-        R.crabs.floor[i] = floorAt(x, z);
-        R.crabs.vr[i] = i % 3;
-        R.crabs.s[i] = [1.5, 2.0, 2.8][i % 3];
-        R.crabs.t2[i] = 0; R.crabs.a[i] = 0;
-      }
+    if (shot === 'puffers') {
+      // a few lantern puffers on the reef floor in the calf's path
       for (let i = 0; i < 6; i++) {
         const x = actor.pos.x + fwd.x * 14 + (i - 3) * 2.5, z = actor.pos.z + fwd.z * 14 + (i % 2) * 3;
         const P = R.puffers;
@@ -217,7 +207,7 @@ export default async function (game) {
   };
   game.engine.shadows.radius = 90;
 
-  let ang = shot === 'crabs' ? -0.5 : 0;
+  let ang = shot === 'puffers' ? -0.5 : 0;
   const mouth = new Vector3();
   window.__uw = () => {
     const r = eco.reef.stats;
@@ -278,7 +268,7 @@ export default async function (game) {
         return;
       }
     }
-    if (shot === 'crabs') {
+    if (shot === 'puffers') {
       pos = tmp.copy(actor.pos).addScaledVector(fwd, -camBack).add(new Vector3(fwd.z * 4, camUp, -fwd.x * 4));
       look = new Vector3().copy(actor.pos).addScaledVector(fwd, lookAhead + 4).setY(floorAt(actor.pos.x + fwd.x * 12, actor.pos.z + fwd.z * 12) + 0.6);
     } else if ((shot === 'manta' || shot === 'mantaair') && staged) {

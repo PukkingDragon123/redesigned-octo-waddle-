@@ -10,6 +10,7 @@
 // Eating (bugs, fish): focus(pos, w) eyes and head on prey, the jaw on a spring (snap(): a quick shut
 // with a bounce, held a beat, then it reopens), gulp(k): a swallow that travels throat -> neck ->
 // chest -> flank sacs as a bulge, a little chew, cheeks puffed; then a contented shimmy and smile.
+// Hunting (game/Hunt.js): lunge(k) flings the jaws to a full gape and thrusts the head, then snap().
 import { Vector3, Quaternion, Matrix4, Euler } from 'three';
 import { Spring, SpringVec3, clamp, lerp, smoothstep, damp, TAU, rng } from '../core/math.js';
 import { G as GLOBALS } from '../render/Globals.js';
@@ -139,6 +140,7 @@ export class WhaleAnimator {
     this.cheek = 0;         // puffed cheeks (throat swell at the head end)
     this.focusP = new Vector3();
     this.focusW = 0;        // 0..1 eyes and head locked on prey (decays unless refreshed)
+    this.gape = 0;          // the hunt's lunge: extra jaw opening (fades quickly)
     this.focusWT = 0;
     this.reach = 0;         // 0..1 prey coming within reach: the mouth opens wider
 
@@ -250,6 +252,16 @@ export class WhaleAnimator {
     return true;
   }
 
+  /** The hunt's lunge: the jaws fling open to a full gape for a moment and the head thrusts. */
+  lunge(strength = 1) {
+    const k = clamp(strength, 0, 1.5);
+    this.gape = Math.max(this.gape, k);
+    this.mouthKick = 1;
+    this.sHeadPitch.impulse(-1.2 * k);
+    this.sFinFlare.impulse(4 * k);
+    this.blinkT = 0;
+  }
+
   /** Swallow: a bulge travels down the throat into the chest and flank sacs, a small chew first. */
   gulp(strength = 1) {
     const k = clamp(strength, 0.1, 1.5);
@@ -310,6 +322,7 @@ export class WhaleAnimator {
     this.reachS = damp(this.reachS ?? 0, this.reach, 7, dt);
     this.reach = 0;
     this.snapHold = Math.max(0, this.snapHold - dt);
+    this.gape = Math.max(0, this.gape - dt * 2.4);
     this.snapK = Math.max(0, this.snapK - dt * 3.2);
     this.cheek = Math.max(0, this.cheek - dt * 1.6);
     if (this.bolusP <= 1) {
@@ -500,7 +513,7 @@ export class WhaleAnimator {
     if (b.finR1) { b.finR1.scale.set(1 / gC, 1 / gC, 1); b.finL1.scale.set(1 / gC, 1 / gC, 1); }
     // jaw: a spring toward the wanted opening (wider as prey comes within reach); a snap holds it
     // shut a beat and it bounces off the closed lips (overshoot and settle); a little chew after
-    const jawWant = this.snapHold > 0 ? 0 : this.mouth * P.jawMax * (1 + this.reachS * 0.35);
+    const jawWant = this.snapHold > 0 ? 0 : this.mouth * P.jawMax * (1 + this.reachS * 0.35 + this.gape * 0.55);
     let jx = this.jawS.update(dt, jawWant);
     if (jx < -0.01) { jx = this.jawS.x = -0.01; if (this.jawS.v < 0) this.jawS.v *= -0.38; }
     const chew = this.chew * this.chew * Math.max(0, Math.sin(this.chewT * 17.0)) * P.jawMax * 0.28;

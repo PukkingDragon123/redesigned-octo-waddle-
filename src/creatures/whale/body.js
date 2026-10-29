@@ -124,6 +124,10 @@ export function buildBody(A, bi, res) {
   // ---- skin loft ------------------------------------------------------------------------------
   const vid = [];
   const browC = [];
+  // the snout tip: the loft ends in a small open ring, and through it the pink mouth interior
+  // showed as a red dot at the front of the mouth; each lip closes it with its own little cap
+  let capUp = -1, capLo = -1;
+  const capC = new Vector3();
   for (const side of [1, -1]) {
     const e = P.eye;
     const sp = A.spot(e.t + e.r * 0.9, e.m + 0.16, side);
@@ -169,6 +173,12 @@ export function buildBody(A, bi, res) {
       ringS.push(j === 0 ? 0 : j === nSeg ? 1 : A.sOfTh(th, thM));
     }
     // tangent around the ring (+s direction)
+    const capRing = i === nRings - 1 && split;
+    if (capRing) {
+      // both caps meet at the middle of the mouth line, a little forward: a rounded tip, no gap
+      capC.copy(ringP[jR]).add(ringP[jL]).multiplyScalar(0.5);
+      capC.z += 0.5 * Math.min(pr.hw, pr.top + pr.bot);
+    }
     const tans = ringP.map((p, j) => {
       const a = ringP[Math.min(nSeg, j + 1)], b = ringP[Math.max(0, j - 1)];
       const d = new Vector3().subVectors(a, b);
@@ -179,7 +189,7 @@ export function buildBody(A, bi, res) {
       const s = ringS[j];
       const p = ringP[j];
       const lowerSide = j <= jR || j >= jL;
-      const mk = (kind) => {
+      const mk = (kind, at = p) => {
         const fur = furAt(A, t, s);
         const bell = bellowsAt(A, t, s);
         const sw = Math.abs(s - 0.5);
@@ -198,16 +208,18 @@ export function buildBody(A, bi, res) {
           ws = mixWeights(ws, [['jaw', 1]], jawF);
         }
         for (const b of browC) {
-          const d = p.distanceTo(b.p) / b.r;
-          if (d < 1.6 && (b.side > 0 ? p.x > 0 : p.x < 0)) ws = mixWeights(ws, [[b.side > 0 ? 'browR' : 'browL', 1]], 0.85 * Math.exp(-d * d * 1.6));
+          const d = at.distanceTo(b.p) / b.r;
+          if (d < 1.6 && (b.side > 0 ? at.x > 0 : at.x < 0)) ws = mixWeights(ws, [[b.side > 0 ? 'browR' : 'browL', 1]], 0.85 * Math.exp(-d * d * 1.6));
         }
         return acc.add({
-          p, w: ws, aTan: tans[j],
+          p: at, w: ws, aTan: tans[j],
           aTex: [s, A.texV(t)], aLoft: [t, s], aPart: 0,
           aP: [along[i], 0, 0, 0],
           aMask: [fur, bell, breath, Math.max(jawF, sac * 0.001 + (kind === 'lower' ? 1 : 0) * smoothstep(hinge - 0.01, hinge + 0.02, t))],
         });
       };
+      if (capRing && j === nSeg >> 1) capUp = mk('upper', capC);
+      if (capRing && j === 0) capLo = mk('lower', capC);
       if (split && (j === jR || j === jL)) {
         row.push({ up: mk('upper'), lo: mk('lower') });
       } else {
@@ -225,6 +237,14 @@ export function buildBody(A, bi, res) {
       const a = vid[i][j][k], b = vid[i][j + 1][k], c = vid[i + 1][j][k], d = vid[i + 1][j + 1][k];
       acc.tri(a, b, c);
       acc.tri(b, d, c);
+    }
+  }
+  if (capUp >= 0 && capLo >= 0) {
+    const tip = vid[nRings - 1];
+    for (let j = 0; j < nSeg; j++) {
+      const lower = j < jR || j >= jL;
+      const k = lower ? 'lo' : 'up';
+      acc.tri(tip[j][k], tip[j + 1][k], lower ? capLo : capUp);
     }
   }
   const skinVerts = acc.count;

@@ -97,6 +97,8 @@ export class ReptileSystem {
     this._perchOcc = new Map();
     this.stats = { birds: 0, tris: 0, near: 0 };
     this.debugPose = null;
+    this.lastKind = '';
+    this._nipT = 0; // the next moment a skimmer may dive at a hunting whale
   }
 
   // ---------------------------------------------------------------------------------------
@@ -219,6 +221,43 @@ export class ReptileSystem {
         hit = true;
       }
       if (hit) this._alarm(fl, c);
+    }
+  }
+
+  /** A hunter's bite: birds in the jaws are eaten (removed). Returns how many. */
+  biteAt(c, radius) {
+    let n = 0;
+    this.lastKind = '';
+    for (let fi = this.flocks.length - 1; fi >= 0; fi--) {
+      const fl = this.flocks[fi];
+      let here = 0;
+      for (let i = fl.birds.length - 1; i >= 0; i--) {
+        const b = fl.birds[i];
+        const rr = radius + (b.span || 1) * 0.35;
+        if (b.pos.distanceToSquared(c) > rr * rr) continue;
+        this._release(b);
+        fl.birds.splice(i, 1);
+        const k = this.birds.indexOf(b);
+        if (k >= 0) this.birds.splice(k, 1);
+        this.lastKind = b.species;
+        here++;
+      }
+      if (!here) continue;
+      n += here;
+      if (!fl.birds.length) this.flocks.splice(fi, 1);
+      else this._alarm(fl, c);
+    }
+    return n;
+  }
+
+  /** A hunter close by: flocks with a bird within `radius` take off and scatter. */
+  flush(c, radius) {
+    const r2 = radius * radius, t = this.game.time;
+    for (const fl of this.flocks) {
+      if (t - (fl.alarmT ?? -9) < 2.5) continue;
+      for (const b of fl.birds) {
+        if (b.pos.distanceToSquared(c) < r2) { this._alarm(fl, c); break; }
+      }
     }
   }
 
@@ -842,7 +881,28 @@ export class ReptileSystem {
         speed = 10; flapK = 1.15;
         if (b.t <= 0) { b.mode = 'soar'; b.t = lerp(6, 16, r()); b.circleA = r() * TAU; }
         break;
+      case 'nip': {
+        // a hunting whale in the air near the nests: dive at it, jaws open, one nip and away
+        const H = this.eco.hunter;
+        if (!H || H.under || b.t <= 0) { b.mode = 'soar'; b.t = lerp(6, 10, r()); break; }
+        tgt = _v.copy(H.pos).addScaledVector(H.up || UP, (H.L || 8) * 0.2);
+        speed = 15; flapK = 0.9; jawT = 0.65; crestT = 1; hpT = 0.25;
+        if (b.pos.distanceTo(H.pos) < (H.L || 8) * 0.4 + 1.4) {
+          this.eco._hit('skimmer', b.pos, 0.4);
+          b.kick.subVectors(b.pos, H.pos).normalize().multiplyScalar(9);
+          b.kick.y += 6;
+          b.startle = 1;
+          b.mode = 'soar';
+          b.t = lerp(8, 14, r());
+        }
+        break;
+      }
       case 'soar': {
+        // a hunting whale flying close: one of the flock may dive at it
+        const H = this.eco.hunter;
+        if (H && !H.under && H.hunting > 0.25 && t > this._nipT && H.pos.y > surf + 4 && b.pos.distanceToSquared(H.pos) < 80 * 80 && r() < dt * 0.4 * H.hunting) {
+          b.mode = 'nip'; b.t = 5; this._nipT = t + 8;
+        }
         // thermal circles over the hunting ground (or round the song)
         const c = song || (b.prey ? b.prey.center : fl.home);
         b.circleA = (b.circleA || 0) + dt * 0.28 * (b.seed > 5 ? 1 : -1);

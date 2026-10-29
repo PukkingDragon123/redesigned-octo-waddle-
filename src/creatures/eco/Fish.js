@@ -112,6 +112,7 @@ export class FishSystem {
     this.poolList = Object.values(this.pools);
     this.schools = [];
     this.jacks = [];
+    this._jackAtkT = 0; // the next moment a lanternjack may turn on a hunting whale
     this._seed = 1301;
     this.frame = 0;
     this.preds = new Float32Array(48 * 8);
@@ -877,11 +878,32 @@ export class FishSystem {
         ex += (dx / d) * k; ey += (dy / d) * k - k * 0.5; ez += (dz / d) * k;
         evade = Math.max(evade, k);
       }
-      jk.evade = Math.max(jk.evade - dt, evade > 0.2 ? 2.5 : 0);
+      jk.evade = Math.max(jk.evade - dt, evade > 0.2 && jk.state !== 'charge' ? 2.5 : 0);
       let speed = spec.cruise;
       const tgt = jk.target;
       let glowT = 0.3;
-      if (jk.evade > 0) {
+      // a whale hunting close by (eco.hunter): now and then a jack turns on it instead of fleeing
+      // (one at a time, rarely; a bite or the mother drives it off)
+      const H = this.eco.hunter;
+      if (H && H.under && H.hunting > 0.25 && jk.state !== 'charge' && time > this._jackAtkT && jk.cool <= 0) {
+        const dh = Math.hypot(px - H.pos.x, py - H.pos.y, pz - H.pos.z);
+        if (dh < 34 && r() < dt * 0.35 * H.hunting) { jk.state = 'charge'; jk.t = 4.5; jk.evade = 0; this._jackAtkT = time + 9; }
+      }
+      if (jk.state === 'charge') {
+        // lunge at the calf, lures blazing; one strike, then off
+        if (!H || jk.evade > 0) { jk.state = 'recover'; jk.t = 4; }
+        else {
+          tgt.copy(H.pos);
+          speed = spec.burst * 0.85;
+          glowT = 1;
+          const dh = Math.hypot(px - H.pos.x, py - H.pos.y, pz - H.pos.z);
+          if (dh < (H.L || 8) * 0.42 + len * 0.45) {
+            this.eco._hit('lanternjack', _v.set(px, py, pz), 0.6);
+            jk.state = 'recover'; jk.t = 5; jk.evade = 2.5; jk.cool = lerp(10, 18, r());
+            vx = -vx * 0.6; vy = -vy * 0.6 - 2; vz = -vz * 0.6;
+          } else if (jk.t <= 0) { jk.state = 'recover'; jk.t = 4; jk.cool = lerp(8, 14, r()); }
+        }
+      } else if (jk.evade > 0) {
         tgt.set(px + ex * 20, py + ey * 10 - 2, pz + ez * 20);
         speed = spec.burst * 0.6;
         if (jk.state === 'strike' || jk.state === 'stalk') { jk.state = 'recover'; jk.t = 4; }
@@ -1176,6 +1198,41 @@ export class FishSystem {
     /** How many fish (not food units) the last call took. */
     this.lastCount = fishN;
     return eaten;
+  }
+
+  /**
+   * A bite on the lanternjacks: a jack in the jaws is eaten (it slips away out of sight and comes
+   * back later, faded in); one close by is driven off. Returns how many were eaten.
+   */
+  biteJacks(pos, radius) {
+    let n = 0;
+    for (const jk of this.jacks) {
+      const sc = jk.school, S = sc.pool.S, o = jk.i * STRIDE;
+      if (sc.dormant || jk.air || S[o + 7] < 0.5) continue;
+      const len = S[o + 17];
+      const d = Math.hypot(S[o] - pos.x, S[o + 1] - pos.y, S[o + 2] - pos.z);
+      if (d < radius + len * 0.4) {
+        this._eatFx(S[o], S[o + 1], S[o + 2]);
+        // gone: it reappears at its home, deep, and fades back in
+        S[o] = sc.home.x + (jk.rng() - 0.5) * 30; S[o + 1] = Math.min(sc.home.y, sc.surf - 14); S[o + 2] = sc.home.z + (jk.rng() - 0.5) * 30;
+        S[o + 4] = S[o + 5] = S[o + 6] = 0;
+        S[o + 7] = 0;
+        jk.state = 'recover'; jk.t = 20; jk.cool = 30; jk.evade = 0;
+        n++;
+      } else if (d < radius * 3 + len) {
+        jk.state = 'recover'; jk.t = 5; jk.evade = 3;
+      }
+    }
+    return n;
+  }
+
+  /** Attacking jacks near `pos` give up and flee (the mother's warning, a big bite). */
+  driveOffJacks(pos, radius) {
+    for (const jk of this.jacks) {
+      if (jk.state !== 'charge') continue;
+      const S = jk.school.pool.S, o = jk.i * STRIDE;
+      if (Math.hypot(S[o] - pos.x, S[o + 1] - pos.y, S[o + 2] - pos.z) < radius) { jk.state = 'recover'; jk.t = 6; jk.evade = 3; }
+    }
   }
 
   /** A few silver scales flutter where a fish was taken. */

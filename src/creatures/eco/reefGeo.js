@@ -1,5 +1,5 @@
 // Procedural meshes for the reef life of Vur Sok (kelp, tube corals, anemones, spiral shells, sea
-// fans, crabs, jellies, rays, lantern puffers and ribbon eels). Every mesh carries two per-vertex
+// fans, jellies, rays, lantern puffers and ribbon eels). Every mesh carries two per-vertex
 // vec4 attributes the vertex shaders animate with (no bones):
 //   aP: x part id, y position along the organism (0 root .. 1 tip), z/w part-specific parameters
 //   aQ: a hinge / attachment point (local metres) and one more parameter
@@ -244,60 +244,6 @@ export function buildFan() {
 }
 
 // ---------------------------------------------------------------------------------------------
-/**
- * Crab (one mesh, three species by instance variant): a plated body (part 10), 6 legs (11:
- * aP.y along leg, aP.z leg index 0-2, aP.w side; aQ hinge), two claws (12: aP.z 0 arm 1 pincer,
- * aP.w side, aQ hinge), eye stalks (13), a spiral shell on the back (14, hermits only), glowing
- * joint beads (15). Faces +z, about 0.5 m across.
- */
-export function buildCrab() {
-  const m = new Mk();
-  ellipsoid(m, [0, 0.16, 0], [0.22, 0.09, 0.17], 20, 10, (p) => [[10, 0, 0, 0], [0, 0, 0, 0]]);
-  for (let side = -1; side <= 1; side += 2) {
-    // four jointed walking legs a side: coxa, a long merus up to the knee, carpus and propodus
-    // down, and a pointed dactyl; the front legs reach forward, the back ones trail
-    for (let k = 0; k < 4; k++) {
-      const z = 0.09 - k * 0.07;
-      const sw = (1.5 - k) * 0.05;
-      const root = [side * 0.19, 0.15, z];
-      const coxa = [side * 0.25, 0.2, z + sw * 0.2];
-      const knee = [side * 0.41, 0.31, z + sw * 0.8];
-      const carp = [side * 0.5, 0.22, z + sw * 1.2];
-      const prop = [side * 0.56, 0.1, z + sw * 1.5];
-      const foot = [side * 0.6, 0.0, z + sw * 1.7];
-      const pts = [root, coxa, [(coxa[0] + knee[0]) / 2, (coxa[1] + knee[1]) / 2 + 0.025, (coxa[2] + knee[2]) / 2], knee, carp, prop, foot];
-      tube(m, pts, [0.032, 0.03, 0.031, 0.026, 0.023, 0.017, 0.004], 6, (i, t) => [[11, t, k * 0.75, side], [root[0], root[1], root[2], 0]], true);
-      // joint swellings at the knee and the wrist
-      ellipsoid(m, knee, [0.034, 0.03, 0.03], 6, 3, () => [[15, 0.5, k * 0.75, side], [root[0], root[1], root[2], 0]]);
-      ellipsoid(m, carp, [0.026, 0.024, 0.024], 5, 3, () => [[15, 0.7, k * 0.75, side], [root[0], root[1], root[2], 0]]);
-    }
-    // claw: arm then a big pincer
-    const root = [side * 0.14, 0.17, 0.14];
-    const elbow = [side * 0.28, 0.24, 0.3];
-    tube(m, [root, elbow, [side * 0.24, 0.22, 0.38]], [0.04, 0.035, 0.035], 7, (i, t) => [[12, t * 0.5, 0, side], [root[0], root[1], root[2], 0]], false);
-    ellipsoid(m, [side * 0.22, 0.22, 0.45], [0.07, 0.055, 0.11], 12, 6, () => [[12, 0.8, 1, side], [root[0], root[1], root[2], 0]]);
-    // the fixed finger and the moving dactyl of the pincer, slightly gaping
-    tube(m, [[side * 0.2, 0.19, 0.5], [side * 0.18, 0.18, 0.6], [side * 0.15, 0.2, 0.66]], [0.03, 0.022, 0.006], 6, () => [[12, 1, 2, side], [root[0], root[1], root[2], 0]], true);
-    tube(m, [[side * 0.24, 0.25, 0.5], [side * 0.22, 0.27, 0.59], [side * 0.18, 0.24, 0.65]], [0.026, 0.019, 0.005], 6, () => [[12, 1, 2, side], [root[0], root[1], root[2], 0]], true);
-    // eye stalk with a glowing eye
-    tube(m, [[side * 0.06, 0.22, 0.13], [side * 0.08, 0.32, 0.16]], [0.015, 0.012], 6, () => [[13, 0.5, 0, side], [0, 0, 0, 0]], false);
-    ellipsoid(m, [side * 0.08, 0.34, 0.165], [0.028, 0.028, 0.028], 8, 5, () => [[13, 1, 1, side], [0, 0, 0, 0]]);
-    // antennae: two thin whips between the eyes
-    tube(m, [[side * 0.03, 0.2, 0.17], [side * 0.06, 0.3, 0.3], [side * 0.11, 0.33, 0.42]], [0.006, 0.004, 0.0015], 3, () => [[13, 0.5, 0, side], [0, 0, 0, 0]], true);
-  }
-  // hermit's spiral shell (hidden by the shader on other species)
-  const pts = [], rad = [];
-  for (let i = 0; i < 30; i++) {
-    const t = i / 29;
-    const th = t * 2.6 * TAU;
-    const R = 0.02 + 0.16 * t * t;
-    pts.push([Math.cos(th) * R, 0.62 - t * 0.38, -0.08 + Math.sin(th) * R]);
-    rad.push(0.015 + 0.18 * Math.pow(t, 1.5));
-  }
-  tube(m, pts, rad, 12, (i, t) => [[14, t, 0, 0], [0, 0, 0, 0]], false);
-  return m.build();
-}
-
 /**
  * Jelly: a translucent bell (part 20, aP.y 0 apex .. 1 rim), inner glowing organs (21), frilled
  * oral arms (22) and long trailing tentacles (23, aP.y along, aP.z index). Rim at y = 0, 1 m wide.

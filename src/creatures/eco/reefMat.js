@@ -12,7 +12,7 @@ import { G } from '../../render/Globals.js';
 import { UNIFORMS, NOISE, LIGHTING } from '../../render/shaders/common.js';
 import { ECO_GLSL } from './glsl.js';
 
-export const KIND = { kelp: 0, tubes: 1, anemone: 2, shell: 3, fan: 4, crab: 5, jelly: 6, ray: 7, rayFar: 7, puffer: 8, eel: 9 };
+export const KIND = { kelp: 0, tubes: 1, anemone: 2, shell: 3, fan: 4, jelly: 6, ray: 7, rayFar: 7, puffer: 8, eel: 9 };
 
 const VERT = /* glsl */ `
 ${UNIFORMS}
@@ -156,64 +156,6 @@ void main() {
   nrm = R * nrm;
   info.z = near;
   info.w = v;
-#elif KIND == 5
-  // ---- crabs: walk cycle, claw waving, hiding (hermit: into its shell, glass: burrow, plate: clamp)
-  float variant = iB.z;
-  float walkPh = iB.w;
-  float hide = iC.x, claw = iC.y, walk = iC.z;
-  vec3 p = pos;
-  bool hermit = variant < 0.5;
-  bool glass = variant > 0.5 && variant < 1.5;
-  bool plate = variant > 1.5;
-  float side = aP.w;
-  if (part > 10.5 && part < 11.5 || part > 14.5) {
-    // legs (and the joint beads that ride on them)
-    vec3 hinge = aQ.xyz;
-    vec3 rel = p - hinge;
-    if (glass) rel *= vec3(1.5, 2.2, 1.5);
-    if (plate) rel *= vec3(1.15, 1.0, 1.1);
-    float legPh = walkPh + aP.z * 2.1 + (side > 0.0 ? 3.14159 : 0.0);
-    // a sideways gait: each leg reaches out and pulls in across the body (alternating tetrapod,
-    // the leading side pulls while the trailing side pushes), with a little fore-aft swing
-    rel = rotY(sin(legPh) * 0.16 * walk) * rel;
-    rel = rotZ(side * (sin(legPh) * 0.24 - 0.04) * walk) * rel;
-    rel.y += max(0.0, cos(legPh)) * 0.07 * walk * (part > 14.5 ? 0.5 : aP.y);
-    // hiding: legs fold up under the body
-    vec3 tuck = vec3(rel.x * 0.35, -0.04 * aP.y, rel.z * 0.6);
-    rel = mix(rel, tuck, hide * (glass ? 0.3 : 1.0));
-    p = hinge + rel;
-  } else if (part > 11.5 && part < 12.5) {
-    vec3 hinge = aQ.xyz;
-    vec3 rel = p - hinge;
-    if (plate) rel *= 1.25;
-    // the claws rise and wave (a threat display), the pincer snaps
-    float lift = claw * (0.75 + 0.35 * sin(uTime * 7.0 + side * 1.3));
-    rel = rotX(-lift) * rel;
-    rel = rotY(-side * claw * 0.3 * sin(uTime * 5.0 + side)) * rel;
-    rel = mix(rel, rel * vec3(0.7, 0.5, 0.5) + vec3(0.0, -0.05, -0.06), hide);
-    p = hinge + rel;
-  } else if (part > 12.5 && part < 13.5) {
-    // eye stalks drop flat when hiding
-    p.y = mix(p.y, 0.2, hide * step(0.3, aP.y) * 0.8);
-  }
-  if (part > 9.5 && part < 10.5 && plate) p.xz *= vec2(1.3, 1.15);
-  if (part > 13.5 && part < 14.5 && !hermit) p *= 0.0;
-  // glass crabs stand tall on their long legs
-  if (glass && !(part > 10.5 && part < 11.5) && part < 14.5) p.y += 0.18;
-  if (glass && part > 14.5) p.y += 0.18;
-  if (hermit && part < 14.5) {
-    // the hermit pulls everything into the shell's mouth
-    vec3 mouth = vec3(0.0, 0.3, 0.02);
-    p = mouth + (p - mouth) * (1.0 - hide * 0.88);
-  }
-  // body bob while walking
-  p.y += sin(walkPh * 2.0) * 0.012 * walk;
-  // glass crabs burrow into the sand
-  if (glass) p.y -= hide * 0.42;
-  W = base + R * (p * iB.x);
-  nrm = R * nrm;
-  info.z = hide;
-  info.w = iC.w;
 #elif KIND == 6
   // ---- jellies: the bell contracts and relaxes, arms and tentacles trail -----------------------
   float pul = iB.z;
@@ -508,37 +450,6 @@ void main() {
   albedo = c * 0.75;
   trans = 0.8; rim = 0.8;
   emis = c * 0.12 * edge;
-#elif KIND == 5
-  float variant = vI.y;
-  float hide = vI.z;
-  if (variant < 0.5) {
-    // hermit: rusty red crab, a banded spiral shell
-    albedo = part > 13.5 && part < 14.5 ? mix(vec3(0.6, 0.48, 0.38), vec3(0.3, 0.2, 0.25), 0.5 + 0.5 * sin(vP.y * 50.0)) : vec3(0.55, 0.15, 0.08);
-    spec = 0.35;
-    if (part > 12.5 && part < 13.5 && vP.y > 0.9) emis = vec3(0.2, 1.0, 0.7);
-    if (part > 14.5) emis = vec3(0.9, 0.5, 0.2) * 0.4;
-  } else if (variant < 1.5) {
-    // glass crab: a pale translucent shell with a glowing heart
-    albedo = vec3(0.55, 0.7, 0.75);
-    trans = 1.4; rim = 1.3; spec = 0.9; gloss = 0.9;
-    float core = part < 10.5 ? exp(-dot(vLoc.xz, vLoc.xz) * 40.0) : 0.0;
-    emis = vec3(0.3, 0.8, 1.0) * (core * 1.2 + (part > 14.5 ? 0.6 : 0.0));
-    if (part > 12.5 && part < 13.5 && vP.y > 0.9) emis = vec3(1.0, 0.6, 0.9);
-  } else {
-    // armoured plate crab: dark slate plates, glowing joints
-    // plate seams as pen strokes: domain-warped, varying in width, broken here and there
-    vec2 wq = vLoc.xz * 9.0 + vec2(vnoise(vLoc.xz * 14.0 + seed * 9.0), vnoise(vLoc.zx * 13.0 + 3.0)) * 0.9;
-    float seamW = 0.06 + 0.08 * vnoise(vLoc.xz * 21.0 + 5.0);
-    float plates = smoothstep(0.0, seamW, abs(sin(wq.y * 2.4 + wq.x * 0.6 + sin(wq.x * 1.7) * 0.5)));
-    plates = max(plates, step(0.78, vnoise(vLoc.xz * 17.0 + 11.0)));
-    albedo = mix(vec3(0.05, 0.06, 0.08), vec3(0.16, 0.18, 0.22), plates);
-    spec = 0.5; gloss = 0.7;
-    vec3 jc = vec3(1.0, 0.45, 0.1);
-    if (part > 14.5) emis = jc * (0.7 + 0.8 * hide + 0.3 * sin(uTime * 3.0 + seed * 9.0));
-    if (part > 9.5 && part < 10.5) emis = jc * (1.0 - plates) * 0.35 * (1.0 + hide);
-    if (part > 12.5 && part < 13.5 && vP.y > 0.9) emis = vec3(1.0, 0.8, 0.3);
-  }
-  emis *= 1.0 + vI.w * 2.0;
 #elif KIND == 7
   // manta: countershaded (a deep slate-indigo back with pale shoulder patches drawn by hand, a
   // white belly with this one's own dark spots and five pairs of gill slits), a soft sheen,

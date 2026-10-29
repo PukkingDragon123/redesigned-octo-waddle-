@@ -18,6 +18,10 @@
 //   eco.bubbleNet(center, radius);                    // an explicit bubble net (also automatic)
 //   eco.songFocus = herd.songCenter;                  // fish form spirals, coilwings wheel
 //   eco.threat = falcon.pos;                          // birds flee, fish sound
+//   eco.hunter = { pos, up, L, hunting, under };      // a hunting whale (game/Hunt.js): prey fears it,
+//   eco.onHit = (kind, pos, strength) => {};          //   lanternjacks and skimmers may fight back
+//   eco.biteAt(mouthPos, r, owner);                   // a bite: what it caught (a reused record)
+//   eco.fleeFrom(pos, radius, strength);              // fear: schools bolt and ball, birds flush, reef hides
 // The sea surface comes from eco.ocean (default game.ocean; a flat sea at y = 0 without one).
 import { Vector3, Frustum, Matrix4, Sphere } from 'three';
 import { G } from '../render/Globals.js';
@@ -62,6 +66,18 @@ export class Ecosystem {
     /** Emit bubble curtains for nets the herd blows (set false if the herd draws its own). */
     this.netBubbles = opts.netBubbles ?? true;
     this.enabled = true;
+    /**
+     * The hunting whale (set each frame by game/Hunt.js, or null): { pos, up, L, hunting 0..1,
+     * under }. Lanternjacks may lunge at it under the sea and skimmers dive and nip it in the air.
+     */
+    this.hunter = null;
+    /** (kind, pos, strength) => {}: a lanternjack or skimmer struck the hunter. */
+    this.onHit = null;
+    this._bite = { food: 0, fish: 0, jacks: 0, birds: 0, reef: 0, kind: '' };
+    this._biteOpts = { max: 40, sparkles: 6 };
+    this._fleeQ = [];
+    for (let i = 0; i < 4; i++) this._fleeQ.push({ x: 0, y: 0, z: 0, r: 0, s: 0, s0: 0, decay: 0.8, vx: 0, vy: 0, vz: 0, life: 0 });
+    this._fleeI = 0;
     /** Move world spawns to their species' habitat (banks, reef edges, ledges, spires). */
     this.habitats = opts.habitats ?? true;
     this.habitatStats = { placed: 0, dropped: 0 };
@@ -73,7 +89,7 @@ export class Ecosystem {
     /** Night plankton in the water: flares where fish, whales and the calf stir it. */
     this.plankton = new SeaGlow(this);
     /**
-     * Reef life around the camera under the sea: kelp forests, coral gardens, crabs, jellies,
+     * Reef life around the camera under the sea: kelp forests, coral gardens, jellies,
      * rays, lantern puffers and ribbon eels (eco/Reef.js). Small ones are food (eat, nearestSwarm).
      */
     this.reef = new ReefLife(this);
@@ -441,7 +457,7 @@ export class Ecosystem {
       n = this.fish.eatAt(mouthPos, prev, mouthRadius, { max: Math.floor(rec.budget) });
       rec.budget -= this.fish.lastCount;
     }
-    // reef critters (crabs, puffers, jellies) in the mouth
+    // reef critters (puffers, jellies) in the mouth
     if (rec.budget >= 1) {
       n += this.reef.eatAt(mouthPos, mouthRadius, Math.min(3, Math.floor(rec.budget)));
       rec.budget -= this.reef.lastCount;
@@ -460,6 +476,56 @@ export class Ecosystem {
   }
 
   /**
+   * A bite (the hunting calf's lunge): everything in the jaws is eaten at once: fish of any size up
+   * to lanternjacks, skimmers and coilwings caught in the air, puffers, jellies and eels (never
+   * mantas or whales). Returns a reused record { food, fish, jacks, birds, reef, kind }.
+   */
+  biteAt(pos, radius = 1.5, owner = null) {
+    const B = this._bite;
+    B.food = 0; B.fish = 0; B.jacks = 0; B.birds = 0; B.reef = 0; B.kind = '';
+    if (!this.enabled) return B;
+    void owner;
+    const f = this.fish.eatAt(pos, null, radius, this._biteOpts);
+    if (this.fish.lastCount) { B.fish = this.fish.lastCount; B.food += f; B.kind = 'fish'; }
+    const j = this.fish.biteJacks(pos, radius);
+    if (j) { B.jacks = j; B.food += 2 * j; B.kind = 'lanternjack'; }
+    const b = this.reptiles.biteAt(pos, radius);
+    if (b) { B.birds = b; B.food += 0.8 * b; B.kind = this.reptiles.lastKind; }
+    const r = this.reef.eatAt(pos, radius, 3);
+    if (r) { B.reef = this.reef.lastCount; B.food += r; if (!B.kind) B.kind = this.reef.lastKind || 'reef'; }
+    return B;
+  }
+
+  /**
+   * Fear of a hunter at `pos`: fish bolt from it and nearby bait balls tighten, bird flocks flush,
+   * puffers inflate and eels dart; strength >= 1.5 also drives off attacking lanternjacks.
+   */
+  fleeFrom(pos, radius = 20, strength = 1) {
+    if (!this.enabled) return;
+    const q = this._fleeQ[this._fleeI];
+    this._fleeI = (this._fleeI + 1) % this._fleeQ.length;
+    q.x = pos.x; q.y = pos.y; q.z = pos.z;
+    q.r = radius; q.s = q.s0 = 1.2 * strength; q.decay = 0.9; q.life = 0.9;
+    q.vx = q.vy = q.vz = 0;
+    if (!this._transient.includes(q)) this._addTransient(q);
+    for (const sc of this.fish.schools) {
+      if (sc.species === 'lanternjack') continue;
+      const rr = sc.extent + radius;
+      if (sc.center.distanceToSquared(pos) > rr * rr) continue;
+      sc.threat = Math.min(1.2, sc.threat + 0.35 * strength);
+      sc.forceSim = true;
+    }
+    if (strength >= 1.5) this.fish.driveOffJacks(pos, radius);
+    this.reptiles.flush(pos, radius * 1.4);
+    this.reef.scare(strength);
+  }
+
+  /** A lanternjack or skimmer struck the hunter. */
+  _hit(kind, pos, strength) {
+    this.onHit?.(kind, pos, strength);
+  }
+
+  /**
    * Sonic boom / shock: fish are blown outward and flash (weakly through the surface), birds
    * scatter. The shock travels outward as a front at `speed` m/s (default matches SonicBooms:
    * 70 + 0.6 * radius); pass speed = 0 for an instant shock.
@@ -474,7 +540,7 @@ export class Ecosystem {
   nearestSwarm(pos, species = null) {
     if (species === 'reef') return this.reef.nearestFood(pos, 40);
     const f = this.fish.nearest(pos, species);
-    // under the sea, a crab, puffer or jelly close by is food too (the calf's mouth opens for it)
+    // under the sea, a puffer or jelly close by is food too (the calf's mouth opens for it)
     if (species === null) {
       const r = this.reef.nearestFood(pos, 14);
       if (r && (!f || r.dist < f.dist)) return r;

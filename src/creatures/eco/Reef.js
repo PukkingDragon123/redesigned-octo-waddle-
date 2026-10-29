@@ -6,9 +6,7 @@
 //   All of them react to whales on the GPU (uActors): kelp parts, anemones close into buds, tube
 //   corals retract and glow, fans bend away.
 // Fauna (small recycled pools simulated on the CPU around the camera):
-//   crabs (spiral-shelled hermits that duck into their shells, long-legged glass crabs that scuttle
-//   off and burrow, armoured plate crabs that rear up, wave their claws and glow), jellies (drifting
-//   blooms that pulse, flare and flee), rays (glide over the reef; curious ones swim alongside the
+//   jellies (drifting blooms that pulse, flare and flee), rays (glide over the reef; curious ones swim alongside the
 //   calf), lantern puffers (inflate into spiky balls when startled) and ribbon eels in the kelp.
 //   Small ones are food: eatAt() / nearestFood() feed Ecosystem.eat / nearestSwarm.
 // Placement uses the world's sea floor (ctx.seabed = world.seabedAt): kelp and gardens grow on
@@ -16,7 +14,7 @@
 // About ten draw calls; nothing is allocated per frame.
 import { Mesh, InstancedBufferAttribute, DynamicDrawUsage, Vector3, Vector4 } from 'three';
 import { G } from '../../render/Globals.js';
-import { buildKelp, buildTubes, buildAnemone, buildShell, buildFan, buildCrab, buildJelly, buildRay, buildPuffer, buildEel, triCount } from './reefGeo.js';
+import { buildKelp, buildTubes, buildAnemone, buildShell, buildFan, buildJelly, buildRay, buildPuffer, buildEel, triCount } from './reefGeo.js';
 import { reefMaterial, makeActors } from './reefMat.js';
 
 const TAU = Math.PI * 2;
@@ -119,7 +117,7 @@ class Pool {
   }
 }
 
-export const REEF_FOOD = { crab: 0.5, puffer: 0.6, jelly: 0.4 };
+export const REEF_FOOD = { puffer: 0.6, jelly: 0.4, eel: 0.8 };
 
 export class ReefLife {
   constructor(eco, opts = {}) {
@@ -136,7 +134,6 @@ export class ReefLife {
       anemone: new Inst(this, 'anemone', buildAnemone(), 140),
       shell: new Inst(this, 'shell', buildShell(), 80),
       fan: new Inst(this, 'fan', buildFan(), 110),
-      crab: new Inst(this, 'crab', buildCrab(), 70),
       jelly: new Inst(this, 'jelly', buildJelly(), 60, true),
       // mantas: a detailed mesh near the camera and a coarse one farther out (the last pool slot is
       // the great manta of the shallows)
@@ -146,7 +143,6 @@ export class ReefLife {
       eel: new Inst(this, 'eel', buildEel(), 18),
     };
     this.instList = Object.values(this.inst);
-    this.crabs = new Pool(this.inst.crab.max);
     this.jellies = new Pool(this.inst.jelly.max);
     this.rays = new Pool(this.inst.ray.max);
     this.puffers = new Pool(this.inst.puffer.max);
@@ -160,8 +156,11 @@ export class ReefLife {
     this._actorTurn = 0;
     this._actorHeadOk = false;
     this.food = { pos: new Vector3(), dist: Infinity, species: 'reef', kind: '', count: 1, radius: 1, depth: 0, school: null, swarm: null, reef: true };
-    this.stats = { kelp: 0, garden: 0, crabs: 0, jellies: 0, rays: 0, puffers: 0, eels: 0, draws: 0, tris: 0, eaten: 0, scatterMs: 0 };
+    this.stats = { kelp: 0, garden: 0, jellies: 0, rays: 0, puffers: 0, eels: 0, draws: 0, tris: 0, eaten: 0, scatterMs: 0 };
     this.lastEaten = 0;
+    this.lastKind = '';
+    /** 0..1 fear of a hunting whale (scare()): puffers inflate and eels dart from farther off. */
+    this.fear = 0;
     this._bloomT = -1e9;
     this._rayT = -1e9;
     this._underT = 0;
@@ -239,33 +238,6 @@ export class ReefLife {
     const a = Math.random() * TAU, r = rMin + (rMax - rMin) * Math.sqrt(Math.random());
     _v.set(this.focus.x + Math.cos(a) * r, 0, this.focus.z + Math.sin(a) * r);
     return _v;
-  }
-
-  _spawnCrab(i, rMin, rMax) {
-    const C = this.crabs, sea = G.uSeaLevel.value;
-    for (let tries = 0; tries < 5; tries++) {
-      const p = this._ring(rMin, rMax);
-      const y = this.floorAt(p.x, p.z);
-      const depth = sea - y;
-      if (depth < 1.0 || depth > 28) continue;
-      // crabs keep to the reef gardens and the kelp floor (never bare open sand)
-      if (gardenDensity(p.x, p.z) < 0.34 && kelpDensity(p.x, p.z) < 0.5) continue;
-      const v = Math.random();
-      const vr = v < 0.42 ? 0 : v < 0.72 ? 1 : 2;
-      C.alive[i] = 1;
-      C.P[i * 3] = p.x; C.P[i * 3 + 1] = y; C.P[i * 3 + 2] = p.z;
-      C.floor[i] = y;
-      C.vr[i] = vr;
-      C.s[i] = vr === 0 ? 1.0 + Math.random() * 0.9 : vr === 1 ? 1.3 + Math.random() * 1.0 : 1.8 + Math.random() * 1.5;
-      C.seed[i] = Math.random();
-      C.yaw[i] = Math.random() * TAU;
-      C.a[i] = 0; C.b[i] = 0; C.c[i] = 0; C.d[i] = 0;
-      C.t[i] = Math.random() * 4; C.t2[i] = 0;
-      C.ph[i] = Math.random() * TAU;
-      return true;
-    }
-    C.alive[i] = 0;
-    return false;
   }
 
   _spawnJelly(i, rMin, rMax, near = null) {
@@ -391,7 +363,6 @@ export class ReefLife {
   /** Fill every pool around the focus (first frame, after a jump, after clear()). */
   _fill() {
     const R = this.radius;
-    for (let i = 0; i < this.crabs.max; i++) this._spawnCrab(i, 4, R);
     for (let i = 0; i < this.jellies.max; i++) this._spawnJelly(i, 6, R);
     for (let i = 0; i < this.rays.max; i++) this._spawnRay(i, 10, R);
     for (let i = 0; i < this.puffers.max; i++) this._spawnPuffer(i, 5, R);
@@ -433,9 +404,9 @@ export class ReefLife {
     this._gatherActors(ctx);
     this._trackActor(dt);
     const t = ctx.time;
+    this.fear = Math.max(0, this.fear - dt * 0.35);
     // a few delightful moments: a jelly bloom ahead of a diving calf, a manta that comes along
     this._moments(dt, t);
-    this._crabs(dt, t);
     this._jellies(dt, t);
     this._rays(dt, t);
     this._puffers(dt, t);
@@ -495,8 +466,13 @@ export class ReefLife {
     const dx = x - a.pos.x, dy = y - a.pos.y, dz = z - a.pos.z;
     const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-3;
     _v2.set(dx / d, dy / d, dz / d);
-    // the body is long: measure from its skin, roughly
-    return Math.max(0, d - (a.L || 8) * 0.3);
+    // the body is long: measure from its skin, roughly (a hunting whale is feared from farther)
+    return Math.max(0, d - (a.L || 8) * 0.3 - this.fear * 9);
+  }
+
+  /** A whale hunts close by: the reef is afraid for a while (eco.fleeFrom). */
+  scare(strength = 1) {
+    this.fear = Math.min(1, Math.max(this.fear, 0.6 * strength));
   }
 
   _far(x, z, k = 1.12) {
@@ -549,64 +525,6 @@ export class ReefLife {
         Rr.b[i] = side;
       }
     }
-  }
-
-  _crabs(dt, t) {
-    const C = this.crabs, I = this.inst.crab;
-    const R = this.radius;
-    let n = 0;
-    for (let i = 0; i < C.max; i++) {
-      if (!C.alive[i] || this._far(C.P[i * 3], C.P[i * 3 + 2])) {
-        if (!C.ready(i, dt) || !this._spawnCrab(i, R * 0.75, R)) continue;
-      }
-      const k = i * 3;
-      const vr = C.vr[i];
-      const d = this._threat(C.P[k], C.P[k + 1], C.P[k + 2]);
-      const s = C.s[i];
-      // states: a hide (0..1), b claw display, c walk, d glow (alarm)
-      let hideT = 0, clawT = 0, walkT = 0, speed = 0, dir = 0;
-      if (d < 3 + s * 1.5) {
-        hideT = 1;
-        C.t2[i] = 2.5 + Math.random();
-      } else if (C.t2[i] > 0) {
-        C.t2[i] -= dt;
-        hideT = 1;
-      } else if (d < 9 + s * 2) {
-        // alarm: glass crabs scuttle off, plate crabs rear up and wave their claws, hermits freeze
-        if (vr === 1) { walkT = 1; speed = 1.8; dir = Math.atan2(_v2.x, _v2.z); }
-        else if (vr === 2) clawT = 1;
-        else hideT = 0.25;
-      } else {
-        // calm: wander sideways in short bursts, now and then wave a claw
-        C.t[i] -= dt;
-        if (C.t[i] <= 0) {
-          C.t[i] = 1.5 + Math.random() * 4;
-          C.d[i] = Math.random() < 0.55 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-          if (Math.random() < 0.15) C.d[i] = 2; // a claw wave
-        }
-        if (C.d[i] === 2) clawT = 0.6;
-        else if (C.d[i] !== 0) { walkT = 1; speed = 0.35 + 0.15 * vr; dir = C.yaw[i] + C.d[i] * Math.PI * 0.5; }
-      }
-      const prevHide = C.a[i];
-      C.a[i] += (hideT - C.a[i]) * Math.min(1, dt * (hideT > C.a[i] ? 7 : 1.2));
-      C.b[i] += (clawT - C.b[i]) * Math.min(1, dt * 4);
-      C.c[i] += (walkT - C.c[i]) * Math.min(1, dt * 5);
-      if (prevHide < 0.5 && C.a[i] >= 0.5) this._puff(C.P[k], C.P[k + 1] + 0.2, C.P[k + 2], vr === 1 ? 'sand' : 'bubbles', s);
-      if (speed > 0 && C.a[i] < 0.5) {
-        const dx = Math.sin(dir) * speed * dt * s * 0.6, dz = Math.cos(dir) * speed * dt * s * 0.6;
-        const nx = C.P[k] + dx, nz = C.P[k + 2] + dz;
-        const fy = this.floorAt(nx, nz);
-        if (G.uSeaLevel.value - fy > 0.8) {
-          C.P[k] = nx; C.P[k + 2] = nz; C.P[k + 1] = fy;
-          C.ph[i] += speed * dt * 14;
-        } else C.d[i] = -C.d[i];
-        // fleeing crabs turn their side to the threat (crabs run sideways)
-        if (vr === 1 && walkT > 0 && d < 20) C.yaw[i] = dir - Math.PI * 0.5;
-      }
-      I.set(n++, C.P[k], C.P[k + 1], C.P[k + 2], C.yaw[i], s, C.seed[i], vr, C.ph[i], C.a[i], C.b[i], C.c[i], Math.max(C.b[i] * 0.5, vr === 2 ? C.a[i] : 0));
-    }
-    I.commit(n);
-    this.stats.crabs = n;
   }
 
   _jellies(dt, t) {
@@ -907,16 +825,16 @@ export class ReefLife {
 
   // ---- food ------------------------------------------------------------------------------------
   /**
-   * Creatures inside the mouth sphere are eaten (crabs, puffers, jellies); they come back later
+   * Creatures inside the mouth sphere are eaten (puffers, jellies, eels); they come back later
    * somewhere out of sight. Returns food units (see REEF_FOOD).
    */
   eatAt(mouth, r, max = 4) {
     if (!this.enabled || !this.visible) return 0;
     this._food = 0;
     this._n = 0;
-    this._eatPool(this.crabs, mouth, r, max, 0.25, 0, 'crab');
     this._eatPool(this.puffers, mouth, r, max, 0.25, 0.7, 'puffer');
     this._eatPool(this.jellies, mouth, r, max, 0.45, 0, 'jelly');
+    this._eatPool(this.eels, mouth, r, max, 0.3, 0, 'eel');
     const food = this._food;
     if (food > 0) { this.stats.eaten += food; this.lastEaten = this.game.time; }
     this.lastCount = this._n;
@@ -930,10 +848,11 @@ export class ReefLife {
       const dx = Pl.P[k] - mouth.x, dy = Pl.P[k + 1] - mouth.y, dz = Pl.P[k + 2] - mouth.z;
       const R = r + rk * Pl.s[i] * (1 + Pl.a[i] * grow);
       if (dx * dx + dy * dy + dz * dz > R * R) continue;
-      this._gulpFx(Pl.P[k], Pl.P[k + 1], Pl.P[k + 2], kind !== 'crab');
+      this._gulpFx(Pl.P[k], Pl.P[k + 1], Pl.P[k + 2], true);
       Pl.alive[i] = 0; // respawns out of sight next frame
       this._food += REEF_FOOD[kind];
       this._n++;
+      this.lastKind = kind;
     }
   }
 
@@ -942,7 +861,6 @@ export class ReefLife {
     if (!this.enabled || !this.visible) return null;
     this._best = maxDist * maxDist;
     this._bi = -1;
-    this._scan(this.crabs, pos, 'crab');
     this._scan(this.puffers, pos, 'puffer');
     this._scan(this.jellies, pos, 'jelly');
     if (this._bi < 0) return null;
@@ -966,7 +884,7 @@ export class ReefLife {
   }
 
   clear() {
-    for (const Pl of [this.crabs, this.jellies, this.rays, this.puffers, this.eels]) Pl.alive.fill(0);
+    for (const Pl of [this.jellies, this.rays, this.puffers, this.eels]) Pl.alive.fill(0);
     this._scatterAt.set(1e9, 0, 1e9);
     this._bloomT = -1e9;
     this._rayT = -1e9;

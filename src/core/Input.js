@@ -18,6 +18,8 @@ const KEYMAP = {
   spout: ['KeyV'],
   loop: ['KeyZ'],
   dash: ['KeyG'],
+  // the hunt (src/game/Hunt.js)
+  bite: ['KeyB'],
   pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'NumpadEnter', 'Space'],
   menuUp: ['ArrowUp', 'KeyW'],
@@ -39,6 +41,7 @@ export const CONTROL_LINES = {
     'Q  E — barrel roll  (tap again mid-roll: corkscrew)',
     'Z — loop        G  or  double-tap Shift — dash',
     'X — tail slap        V — spout  (bubbles under water)',
+    'B — bite  (a lunge, jaws wide: hunt fish, birds and reef critters)',
     'Dive deep, then race up — breach',
     'F — hum  (hold to sing)',
     'R  or  right click — hold to gather a sonic boom, release',
@@ -46,7 +49,7 @@ export const CONTROL_LINES = {
   ],
   gamepad: [
     'Right stick — look      Left stick — steer      RT — swim',
-    'LT — slow      L3 — surge      A  B — rise and dive',
+    'LT — slow      L3 — surge      A — rise      B — bite',
     'LB  RB — barrel roll      D-pad left  or  R3 — loop',
     'D-pad down — tail slap      D-pad up — spout      D-pad right — dash',
     'X — hum      Y — hold to gather a sonic boom      Start — pause',
@@ -54,7 +57,7 @@ export const CONTROL_LINES = {
   touch: [
     'Drag — look, and swim where you look',
     'Two fingers — hum  (hold to sing);  a quick two-finger tap — spout',
-    'Flick sideways — barrel roll;  flick up — loop;  flick down — tail slap',
+    'Tap — bite;  flick sideways — barrel roll;  flick up — loop;  flick down — tail slap',
     'Double-tap — dash;  double-tap and hold — sonic boom, release',
     'Three fingers — pause',
   ],
@@ -166,6 +169,8 @@ export class Input {
     this.rollFlick = 0;
     this.vFlick = 0; // +1 flick up (loop), -1 flick down (tail slap)
     this.twoTap = false; // a quick two-finger tap (spout)
+    this.biteTap = false; // a single quick tap (bite), resolved once no second tap follows
+    this._tapT = -1;
     let twoT0 = -1, twoMoved = false;
     let lastEnd = 0;
     const setPointer = (t) => {
@@ -192,6 +197,7 @@ export class Input {
           menu: !this.lockWanted, gesture: this.touches.size > 0,
         });
         if (boom && this.lockWanted) press(2);
+        this._tapT = -1; // a second finger or a second tap: not a bite
         setPointer(t);
       }
       if (this.touches.size === 3 && this.lockWanted) this.touchPause = true;
@@ -243,7 +249,7 @@ export class Input {
           this.vFlick = -Math.sign(dy); // screen y grows downward: a flick up is +1
         }
         // only a tap arms the double-tap boom (not a roll flick, not a menu tap)
-        if (this.touches.size === 0 && quick && this.lockWanted && Math.hypot(dx, dy) < 24 && !tr.boom && !tr.gesture) lastEnd = now;
+        if (this.touches.size === 0 && quick && this.lockWanted && Math.hypot(dx, dy) < 24 && !tr.boom && !tr.gesture) { lastEnd = now; this._tapT = now; }
         if (this.touches.size === 0 && twoT0 >= 0) {
           if (now - twoT0 < 300 && !twoMoved && this.lockWanted) this.twoTap = true;
           twoT0 = -1;
@@ -315,6 +321,11 @@ export class Input {
       this.gpButtons.fill(0);
       this.gpAxes.fill(0);
     }
+    // a lone tap becomes a bite once the double-tap window has passed
+    if (this._tapT >= 0 && performance.now() - this._tapT > 290) {
+      this._tapT = -1;
+      if (this.lockWanted && this.touches.size === 0) this.biteTap = true;
+    }
   }
 
   endFrame() {
@@ -329,6 +340,7 @@ export class Input {
     this.rollFlick = 0;
     this.vFlick = 0;
     this.twoTap = false;
+    this.biteTap = false;
     this.dashTap = false;
     this.touchPause = false;
   }
@@ -363,7 +375,6 @@ export class Input {
     if (!this.enabled) return 0;
     let v = (this.key('up') ? 1 : 0) - (this.key('down') ? 1 : 0);
     v += this.gp(GP.A) ? 1 : 0;
-    v -= this.gp(GP.B) ? 1 : 0;
     v += -this.gpAxes[1] * (this.settings.invertY ? -1 : 1);
     return Math.max(-1, Math.min(1, v));
   }
@@ -392,6 +403,8 @@ export class Input {
   get spoutPressed() { return this.enabled && (this.keyPressed('spout') || this.gpPressed(GP.UP) || this.twoTap); }
   get loopPressed() { return this.enabled && (this.keyPressed('loop') || this.gpPressed(GP.LEFT) || this.gpPressed(GP.R3) || this.vFlick > 0); }
   get dashPressed() { return this.enabled && (this.keyPressed('dash') || this.gpPressed(GP.RIGHT) || this.dashTap); }
+  /** The hunt's bite: B, gamepad B, or a single tap. */
+  get bitePressed() { return this.enabled && (this.keyPressed('bite') || this.gpPressed(GP.B) || this.biteTap); }
   /** Rolls queued while a roll is spinning chain into a corkscrew (the press itself is enough). */
   get rollHeld() { return this.enabled && (this.key('rollLeft') || this.key('rollRight') || this.gp(GP.LB) || this.gp(GP.RB)); }
 

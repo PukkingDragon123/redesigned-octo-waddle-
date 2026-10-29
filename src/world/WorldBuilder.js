@@ -31,8 +31,9 @@ const SHAPES = { stack: stackShape, coil: coilShape, ammonite: ammoniteShape, pe
 // sea fans and puffballs, plus giant fiddleheads standing in for the old tree groves.
 const BIOME = { cradle: 'lagoon', valleys: 'reach', krill: 'shoals', forest: 'forest', song: 'golden', night: 'night', storm: 'storm', falcon: 'storm', wall: 'storm', oasis: 'oasis' };
 const TREES = {
-  cradle: { kind: 'coil', max: 1, per: 9000, spacing: 60 }, valleys: { kind: 'coil', max: 1, per: 9000, spacing: 60 }, krill: null,
-  forest: null, song: { kind: 'coil', max: 1, per: 12000, spacing: 60 }, night: null,
+  // no big trees: only small accents (pines on spires, palms on motus, Oasis blossoms) remain
+  cradle: null, valleys: null, krill: null,
+  forest: null, song: null, night: null,
   storm: null, falcon: null, wall: null, oasis: { kind: 'blossom', max: 2, per: 6000, spacing: 50 },
 };
 // AlienFlora per chapter: the biome of the island meadows, a density multiplier, and the giant
@@ -445,10 +446,9 @@ export class WorldBuilder {
       this.shelters.push([mt.x + 40, mt.z + 120, 560, 0.85]);
       const Hin = 44;
       this.island(id, 'coil', { a: 30, b: 0.19, turns: 1.6, kw: 0.24, Hin, fall: 1.7, seed: 1001, steps: 10, horn: { R: 40, H: Hin + 8, cap: 'dome', topFrac: 0.92, twist: 0.25, lobes: 2, lobeAmp: 0.08, taperPow: 2.2, capH: 4, notch: 0.12 } }, 11150, -40, { pos: mt, clear: false, avoid: false, falls: 4, central: true });
+      // the heart of the Oasis: the gathering and the final song circle this point on the central
+      // island (no giant tree stands here any more)
       this.motherTree = new Vector3(mt.x, Hin + 8 + 3, mt.z);
-      // trunk and crown (the crown spans ~100 m around the trunk, ~110-235 m up)
-      this.capsules.push({ a: this.motherTree.clone(), b: this.motherTree.clone().add(new Vector3(0, 110, 0)), r: 22, chapter: id });
-      this.sphereColliders.push({ p: this.motherTree.clone().add(new Vector3(0, 118, 0)), r: 78, chapter: id, soft: true });
       // lagoon stacks and islets
       for (let k = 0; k < 9; k++) {
         const a = (k / 9) * TAU + r() * 0.4;
@@ -465,7 +465,6 @@ export class WorldBuilder {
       for (let k = 0; k < 3; k++) this.fish(id, lerp(10300, 11800, r()), (r() - 0.5) * 500, lerp(5, 7.5, r()), 'lanternjack', 2);
       for (let k = 0; k < 5; k++) this.reptiles(id, mt.clone().add(new Vector3((r() - 0.5) * 600, lerp(50, 140, r()), (r() - 0.5) * 600)), 'coilwing', Math.round(lerp(80, 140, r())));
       for (let k = 0; k < 3; k++) this.reptiles(id, mt.clone().add(new Vector3((r() - 0.5) * 900, lerp(30, 60, r()), (r() - 0.5) * 900)), 'skimmer', 10);
-      this.extra(id, (w) => w._motherTree());
       this.extra(id, (w) => w._clouds(id, 14, { yMin: 380, yMax: 800, latMin: 600, latMax: 1800, s0: 9950, s1: 12400 }));
     }
   }
@@ -623,14 +622,15 @@ export class WorldBuilder {
     if (needsFlora && this.grass !== false) this._grassClumps(rec, S);
     // giant fiddleheads: tree-sized croziers that coil and uncoil, the alien stand-in for groves
     const AL = ALIEN[rec.chapter] || this.chapterOpts[rec.chapter]?.alien || ALIEN.valleys;
-    if (needsGiants && AL.giant) this._giants(rec, S, AL.giant);
-    let tc = rec.opts?.trees === false ? null : (rec.opts?.giant ? (rec.seed % 2 === 0 ? { kind: 'giantFern', max: 1, per: 4000, spacing: 45 } : null) : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null));
+    // (no giant trees: the tree-sized fiddleheads, giant ferns and coil trees are gone)
+    if (needsGiants && AL.giant && this.giantPlants === true) this._giants(rec, S, AL.giant);
+    let tc = rec.opts?.trees === false || rec.opts?.giant ? null : (TREES[rec.chapter] ?? this.chapterOpts[rec.chapter]?.trees ?? null);
     // a few spires wear wind-bent pines (one in three; storms leave a lone one on one in four)
     if (rec.kind === 'stack' && !rec.opts?.giant) {
       const harsh = rec.chapter === 'storm' || rec.chapter === 'falcon';
       tc = hash01(rec.seed * 1.37) < (harsh ? 0.25 : 0.34) ? { kind: 'pine', max: harsh ? 1 : 2, per: 900, spacing: 9 } : null;
     }
-    const giantCoil = rec.opts?.giant && rec.shape.horn && needsTrees;
+    const giantCoil = false;
     if ((tc || giantCoil) && !volcanic && needsTrees) {
       const ts = this._set(rec.chapter, 'trees');
       const before = new Map();

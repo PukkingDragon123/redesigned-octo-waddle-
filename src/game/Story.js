@@ -1558,6 +1558,9 @@ export class Story {
           if (g.time - (this.lastGulp || 0) > 0.35) {
             this.lastGulp = g.time;
             this.audio.sfx?.('gulp', { position: mouth, gain: 0.6 });
+            // the same bite as with bugs: the jaw snaps shut and a swallow runs down the throat
+            calf.anim.snap?.(0.7);
+            calf.anim.gulp?.(Math.min(1.2, 0.4 + eaten * 0.05));
           }
         }
       }

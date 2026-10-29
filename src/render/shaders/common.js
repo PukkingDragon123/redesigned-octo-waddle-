@@ -367,7 +367,11 @@ vec3 waterSubmerge(vec3 col, vec3 P) {
   float k = uWaterParams.x * sunUp * smoothstep(0.1, 1.4, dd) * exp(-dd * 0.05) * far;
   // focusing moves light around rather than adding it: dim between the filaments
   float cs = k > 0.002 ? (waterCaustics(P, dd) * 1.5 - 0.32) * k : 0.0;
-  vec3 lit = col * Td * (1.0 + cs);
+  // seen from within the water, the downwelling light on the floor is the diffuse, already scattered
+  // part: the shallow sand stays a lit, warm-tinted ground under the caustics, not the brightest
+  // thing in the frame (seen from the air the lagoon keeps its full turquoise glow)
+  float diffuse = mix(1.0, 0.52, uUnderwater * smoothstep(0.3, 2.0, dd));
+  vec3 lit = col * Td * (diffuse + cs);
   return mix(col, lit, w);
 }
 /** In-scattered light of the water column toward the viewer along rd, at a given depth. */
@@ -375,7 +379,7 @@ vec3 waterFogColor(vec3 rd, float depth) {
   float up = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
   // the water column reads in planes: a luminous green-cyan toward the surface, the level view
   // fading through clear blue, and below it a deep, darker, purer blue (never one flat teal)
-  vec3 c = uWaterTint * (0.14 + 1.5 * pow(up, 2.4));
+  vec3 c = uWaterTint * (0.14 + 1.3 * pow(up, 2.4));
   c *= mix(vec3(0.42, 0.68, 1.12), vec3(1.0), smoothstep(0.12, 0.62, up));
   c *= mix(vec3(1.0), vec3(1.05, 1.04, 0.94), smoothstep(0.55, 1.0, up));
   vec3 sr = waterSunRefract();
@@ -404,7 +408,8 @@ vec3 underwaterFog(vec3 col, vec3 P) {
   // above the surface: the air part of the path hazes first
   float air = max(dist - dw, 0.0);
   col = mix(col, uFogColor, 1.0 - exp(-air * uFogParams.x * 2.0));
-  vec3 T = exp(-uWaterAbsorb * dw);
+  // (clear tropical water: shapes stay readable well past the near field)
+  vec3 T = exp(-uWaterAbsorb * dw * 0.78);
   float midDepth = max(uSeaLevel - (uCamPos.y + rd.y * dw * 0.5), 0.0);
   return col * T + waterFogColor(rd, midDepth) * waterFarTint(dw) * (1.0 - T);
 }
@@ -453,7 +458,7 @@ float fogAmount(vec3 P) {
   float a = airFogAmount(P);
   if (uUnderwater <= 0.0) return a;
   float dist = length(P - uCamPos);
-  vec3 T = exp(-uWaterAbsorb * waterPathLength(P, dist));
+  vec3 T = exp(-uWaterAbsorb * waterPathLength(P, dist) * 0.78);
   float w = 1.0 - dot(T, vec3(0.2, 0.5, 0.3));
   return mix(a, w, uUnderwater);
 }

@@ -821,6 +821,18 @@ void main() {
       float mote = on * exp(-dot(dd, dd) * 900.0) * blink * (1.0 - smoothstep(30.0, 90.0, dist));
       col += vec3(0.15, 0.7, 1.0) * mote * uWaterParams.z * 0.9 * (1.0 - f);
     }
+    // the living sea at night: drifting blooms of plankton give the dark water a faint, patchy
+    // blue-green light out toward the horizon, grainy with single cells up close (a milky sea,
+    // not a neon plane: it lives in the troughs, under the reflection, and dies at dawn)
+    if (uWaterParams.z > 0.01) {
+      float bloomA = texture2D(uNoise, p / 520.0 + uWindDir * uTime * 0.0015).r;
+      float bloomB = texture2D(uNoise, p / 190.0 - uWindDir * uTime * 0.003 + 0.37).a;
+      float bloom = smoothstep(0.48, 0.78, bloomA * 0.65 + bloomB * 0.35);
+      float cells = texture2D(uNoise, p / 2.6 + vec2(uTime * 0.01, -uTime * 0.013)).b;
+      float grain = mix(1.0, 0.35 + 1.3 * smoothstep(0.45, 0.75, cells), 1.0 - smoothstep(25.0, 120.0, dist));
+      vec3 bc = mix(vec3(0.03, 0.42, 0.7), vec3(0.1, 0.6, 0.55), bloomB);
+      col += bc * bloom * grain * uWaterParams.z * uNight * 0.12 * (1.0 - F) * (1.0 - f);
+    }
 
     // far: blend to exactly what the sky dome draws beyond the mesh
     if (farK > 0.001) {

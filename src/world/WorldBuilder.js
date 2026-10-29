@@ -480,6 +480,17 @@ export class WorldBuilder {
       c.y = lerp(o.yMin ?? 320, o.yMax ?? 700, r());
       clouds.cumulus(c, lerp(220, 420, r()), lerp(120, 260, r()), { seed: 600 + ch.index * 50 + k });
     }
+    // thin high veils (altostratus / cirrostratus, streaked along the wind by the cloud shader), so
+    // the sky has layers above the cumulus instead of cumulus alone
+    if (!clouds.sheet) return;
+    const nV = Math.max(1, Math.round(n / 5));
+    for (let k = 0; k < nV; k++) {
+      const s = lerp(o.s0 ?? ch.start - 200, o.s1 ?? ch.end + 200, r());
+      const c = this.at(s, (r() * 2 - 1) * lerp(600, 2200, r()));
+      c.y = lerp(1300, 1900, r());
+      clouds.sheet(c, lerp(1800, 3000, r()), lerp(900, 1500, r()), 70,
+        { seed: 900 + ch.index * 50 + k, minR: 120, maxR: 240, opacity: 0.2, flat: 0.88, spacing: 70000, maxPuffs: 36 });
+    }
   }
 
   _arch(id, sArch, at = null) {

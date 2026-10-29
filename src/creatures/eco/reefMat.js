@@ -93,6 +93,9 @@ void main() {
   vec3 local = pos * iB.x;
   if (part > 0.5 && part < 1.5) {
     float u = aP.z;
+    // a blade right at the lens folds away to a sliver (it never fills the frame as a flat sheet)
+    float camD = length(spine - uCamPos);
+    local *= mix(0.12, 1.0, smoothstep(1.2, 4.5, camD));
     // blades stream with the surge and flutter along their length
     local.y += sin(uTime * 2.1 + u * 6.0 + seed * 9.0 + t * 5.0) * 0.12 * u;
     vec3 sw = vec3(cur.x, 0.0, cur.y) * u * u * 0.9;
@@ -377,6 +380,7 @@ void main() {
   float trans = 0.2, spec = 0.15, gloss = 0.5, rim = 0.5, wrap = 0.22, ao = 1.0, alpha = 1.0;
   float glowK = 0.5 + 1.4 * uNight;
   float hs = fract(seed * 7.13);
+  vec3 kelpBack = vec3(0.0);
 
 #if KIND == 0
   float t = vI.w;
@@ -384,16 +388,39 @@ void main() {
     albedo = mix(vec3(0.16, 0.13, 0.05), vec3(0.42, 0.33, 0.1), t);
     ao = mix(0.55, 1.0, t);
   } else if (part < 1.5) {
-    float u = vP.z, w = abs(vP.w);
-    // blades: olive-gold near the stalk to amber and teal, a dark midrib, glowing edges
-    vec3 a = mix(vec3(0.32, 0.2, 0.03), vec3(0.1, 0.22, 0.08), hs);
-    vec3 b = mix(vec3(0.75, 0.42, 0.06), vec3(0.42, 0.55, 0.12), hs);
-    albedo = mix(a, b, u) * (0.85 + 0.15 * sin(u * 40.0 + vLoc.y * 9.0 + vnoise(vec2(u * 12.0, vP.w * 3.0 + seed * 7.0)) * 2.4));
-    albedo *= mix(0.7, 1.0, smoothstep(0.05, 0.3, w));
-    trans = 0.75;
-    rim = 0.55;
-    ao = mix(0.6, 1.0, u);
-    emis = mix(vec3(0.1, 0.8, 0.9), vec3(0.6, 0.3, 1.0), hs) * smoothstep(0.75, 1.0, w) * 0.25 * u;
+    float u = vP.z, sw = vP.w, w = abs(sw);
+    // ruffled, rippled margins: the edge wanders in and out along the blade (never a straight cut)
+    float ruff = 0.8 + 0.1 * sin(u * 47.0 + seed * 9.0 + sign(sw) * 1.7) + 0.06 * sin(u * 113.0 + seed * 4.0)
+               + 0.04 * vnoise(vec2(u * 60.0, sign(sw) * 5.0 + seed * 11.0));
+    ruff *= smoothstep(1.02, 0.9, u) * 0.35 + 0.65;
+    if (w > ruff) discard;
+    float edgeK = smoothstep(ruff - 0.16, ruff, w);
+    // corrugated blade: bullate blisters running across it catch and lose the light
+    float corr = sin(u * 70.0 + w * 6.0 + vnoise(vec2(u * 18.0, sw * 2.0 + seed)) * 3.0);
+    N = normalize(N + (vec3(0.0, 1.0, 0.0) - N * N.y) * corr * 0.18);
+    // colour: dark olive-brown at the base, golden amber in the body, paler worn tips; each plant its
+    // own shade, mottled along every blade
+    vec3 baseC = mix(vec3(0.14, 0.09, 0.03), vec3(0.08, 0.1, 0.04), hs);
+    vec3 bodyC = mix(vec3(0.52, 0.32, 0.07), vec3(0.4, 0.38, 0.1), hs);
+    vec3 tipC = mix(vec3(0.62, 0.5, 0.2), vec3(0.5, 0.52, 0.24), hs);
+    albedo = mix(baseC, bodyC, smoothstep(0.0, 0.35, u));
+    albedo = mix(albedo, tipC, smoothstep(0.7, 1.0, u));
+    albedo *= 0.85 + 0.3 * vnoise(vec2(u * 9.0 + seed * 13.0, sw * 1.5));
+    albedo *= 0.88 + 0.12 * corr;
+    // the midrib: a darker, slightly wandering vein that fades out toward the tip
+    float rib = smoothstep(0.09, 0.0, abs(sw - 0.05 * sin(u * 9.0 + seed * 5.0))) * smoothstep(0.95, 0.4, u);
+    albedo = mix(albedo, albedo * vec3(0.55, 0.5, 0.42), rib * 0.8);
+    // thin, light-catching margins
+    albedo = mix(albedo, tipC * 1.15, edgeK * 0.35);
+    trans = 0.0;
+    rim = 0.4;
+    ao = mix(0.45, 1.0, smoothstep(0.0, 0.45, u)) * mix(0.75, 1.0, t);
+    // backlight: sunlight through the blade glows warm amber, strongest at the thin margins and
+    // weakest along the thick midrib
+    float thinT = mix(1.0, 0.35, rib) * (0.75 + 0.5 * edgeK);
+    float through = max(-dot(N, uSunDir), 0.0) * (0.35 + 0.9 * pow(max(dot(-V, uSunDir), 0.0), 3.0));
+    kelpBack = albedo * vec3(1.25, 0.95, 0.45) * uSunColor * through * thinT * 0.55;
+    emis = mix(vec3(0.1, 0.8, 0.9), vec3(0.6, 0.3, 1.0), hs) * edgeK * 0.12 * u;
   } else {
     // gas bladders: pearly, glowing from within
     albedo = vec3(0.5, 0.36, 0.08);
@@ -747,6 +774,7 @@ void main() {
   }
 #endif
 #endif
+  col += kelpBack;
   vec3 lit = col;
   col = applyFog(col, vWorldPos);
   // bioluminescence carries through the dark water further than reflected light

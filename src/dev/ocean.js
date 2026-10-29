@@ -133,6 +133,10 @@ export default async function (game) {
       const c = new Vector3((r() - 0.5) * 5000, 380 + r() * 420, -r() * 5000 + 600);
       game.clouds.cumulus(c, 260 + r() * 380, 140 + r() * 260, { seed: 40 + i, sparse: true });
     }
+    for (let i = 0; i < 4; i++) {
+      game.clouds.sheet(new Vector3((r() - 0.5) * 4000, 1300 + r() * 600, -800 - r() * 3500), 2400, 1200, 70,
+        { seed: 70 + i, minR: 120, maxR: 240, opacity: 0.2, flat: 0.88, spacing: 70000, maxPuffs: 36 });
+    }
   }
   if (p.has('fog')) {
     game.clouds.sheet(new Vector3(-200, 18, -500), 900, 500, 30, { seed: 5, minR: 26, maxR: 60, opacity: 0.55 });

@@ -110,9 +110,24 @@ void main() {
   // flat puffs are lenses: squashed when seen from the side, still round from above
   float flatK = aExtra.w;
   vFlat = flatK;
-  vec3 rightF = right - vec3(0.0, right.y * flatK, 0.0);
-  vec3 upF = up - vec3(0.0, up.y * flatK, 0.0);
-  vec3 off = (rightF * position.x + upF * position.y) * sz;
+  // high veils (flat > 0.75) are squashed less: seen from far below they must stay a soft sheet,
+  // not collapse into ruled lines
+  float sq = flatK > 0.75 ? 0.5 : flatK;
+  vec3 rightF = right - vec3(0.0, right.y * sq, 0.0);
+  vec3 upF = up - vec3(0.0, up.y * sq, 0.0);
+  vec2 q = position.xy;
+  float streak = smoothstep(0.7, 0.9, flatK);
+  if (streak > 0.0) {
+    vec3 wdir = length(uWind) > 1e-3 ? normalize(uWind) : vec3(1.0, 0.0, 0.0);
+    // each streak wanders off the wind a little (never a set of parallel ruled stripes)
+    float wa = (fract(aLocal.w * 7.31) - 0.5) * 0.9;
+    wdir = vec3(wdir.x * cos(wa) - wdir.z * sin(wa), wdir.y, wdir.x * sin(wa) + wdir.z * cos(wa));
+    vec2 ws = vec2(dot(wdir, rightF), dot(wdir, upF));
+    ws = length(ws) > 1e-3 ? normalize(ws) : vec2(1.0, 0.0);
+    vec2 wn = vec2(-ws.y, ws.x);
+    q = ws * dot(q, ws) * (1.0 + 1.5 * streak) + wn * dot(q, wn);
+  }
+  vec3 off = (rightF * q.x + upF * q.y) * sz;
   vec3 wp = c + off;
   vUv = position.xy * 1.18;
   vK = aExtra.y;
@@ -230,10 +245,15 @@ void main() {
   vec3 p = S * 0.9;
   float b = dot(p, L);
   float tEx = max(-b + sqrt(max(b * b - dot(p, p) + 1.0, 0.0)), 0.0);
-  float tau = tEx * 2.6 * (1.0 + vDark);
-  float sunT = exp(-tau) + 0.32 * exp(-tau * 0.22);
+  float tau = tEx * 2.1 * (1.0 + vDark);
+  float sunT = exp(-tau) + 0.4 * exp(-tau * 0.22);
   sunT *= smoothstep(-0.75, 0.45, ndl) * 0.7 + 0.3;
   sunT *= clamp(0.78 + 0.5 * relief + 0.25 * (bl - 0.5), 0.35, 1.25);
+  // form even when lit from behind the viewer: the folds between the domes and the lower body
+  // hold less light than the sunlit crowns (a front-lit cumulus is not a flat cut-out)
+  float fold = smoothstep(0.15, 0.7, lump * 0.45 + bl * 0.55);
+  float hgt = smoothstep(baseY, baseY + 0.9, cl.y);
+  sunT *= mix(0.68, 1.0, fold) * mix(0.72, 1.04, hgt);
   // fog banks and stratus lenses: lit evenly, a little brighter on top
   sunT = mix(sunT, 0.78 + 0.22 * clamp(cl.y * 2.0, -1.0, 1.0), clamp(vFlat * 1.8, 0.0, 1.0));
   // phase: forward scattering when looking toward the sun (thin parts glow, thick cores do not)
@@ -349,9 +369,14 @@ export class Clouds {
   }
 
   /**
-   * A cumulus: a flat base at the condensation level, a few rounded towers rising from it with
-   * cauliflower billows over their sunlit tops. w = width, h = height (m); center.y is the base.
-   * opts: { seed, opacity, moisture, dark, density, towers, maxPuffs, depth, sparse, minR }
+   * A cumulus built like the real thing, from FEW, LARGE puffs (the shader lights them as one mass and
+   * carves the outline, so big puffs give a cloud-sized silhouette instead of a chain of small balls):
+   *   1. a broad, flat base layer of wide lenses at the condensation level (the shaded flat base);
+   *   2. one to four towers growing out of that layer: a column of big domes that narrow upward and
+   *      lean downwind, a few broad shoulders, and a small cauliflower crown;
+   *   3. thin, low-opacity streamers sheared off the tops downwind and ragged fractus along the base.
+   * w = width, h = height (m); center.y is the base.
+   * opts: { seed, opacity, moisture, dark, density, towers, depth, minR, windDir, shear }
    */
   cumulus(center, w, h, opts = {}) {
     const r = rng(opts.seed ?? 1);
@@ -362,68 +387,76 @@ export class Clouds {
     const rad = Math.max(ax, az, h * 0.6);
     // the tops lean downwind (wind shear over the trade-wind layer)
     const wd = opts.windDir ?? 0.6;
-    const shear = opts.shear ?? lerp(0.12, 0.32, r());
-    const sx = Math.sin(wd) * shear, sz = Math.cos(wd) * shear;
+    const shear = opts.shear ?? lerp(0.14, 0.34, r());
+    const ux = Math.sin(wd), uz = Math.cos(wd);
     const baseL = opts.noBase ? -2 : (base - cc.y) / rad;
-    // towers: one main dome and a few shoulders, tallest near the middle
-    const nT = opts.towers ?? Math.max(1, Math.min(6, Math.round(1 + w / 140 + r() * 1.5)));
-    const towers = [];
-    let wsum = 0;
-    for (let i = 0; i < nT; i++) {
-      const main = i === 0;
-      const a = r() * Math.PI * 2, d = main ? r() * 0.15 : lerp(0.3, 0.75, Math.sqrt(r()));
-      const tx = center.x + Math.cos(a) * ax * d, tz = center.z + Math.sin(a) * az * d;
-      const tr = (main ? lerp(0.45, 0.58, r()) : lerp(0.28, 0.42, r())) * Math.min(ax, az) * 1.25;
-      // domes about as tall as they are wide: tall thin stacks read as columns of balls
-      const th = Math.min(h * (main ? 1 : lerp(0.45, 0.8, r()) * (1 - d * 0.35)), tr * (main ? 2.0 : 1.6));
-      const t = { x: tx, z: tz, rx: tr, ry: th * 0.6, rz: tr * lerp(0.85, 1.1, r()), cy: base + th * 0.42 };
-      t.wgt = t.rx * (t.ry + t.rx);
-      wsum += t.wgt;
-      towers.push(t);
-    }
-    // fewer, bigger, overlapping puffs: the mass is lit as one, the edges carry the detail
-    const n = Math.round(clamp((w * h) / (opts.sparse ? 900 : 560), 10, opts.maxPuffs ?? 170) * (opts.density ?? 1));
-    const v = new Vector3();
+    const op0 = opts.opacity ?? 1;
+    const dens = opts.density ?? 1;
     const minR = opts.minR ?? 6;
+    const v = new Vector3();
     const add = (px, py, pz, pr, op, flat = 0) => {
       // shear: the higher, the further downwind
       const up = Math.max(0, py - base);
-      px += sx * up; pz += sz * up;
-      v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
-      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, (opts.opacity ?? 1) * op, pr / rad, opts.dark ?? 0, flat, baseL);
-    };
-    // a few big core puffs keep the body solid from any angle
-    for (const t of towers) add(t.x, Math.max(t.cy, base + t.rx * 0.5), t.z, Math.max(minR, Math.min(t.rx, t.ry) * 0.85), 0.92);
-    for (let i = 0; i < n; i++) {
-      // pick a tower by size, then a point on its upper shell
-      let k = r() * wsum, t = towers[0];
-      for (const tt of towers) { k -= tt.wgt; if (k <= 0) { t = tt; break; } }
-      const u = r() * 2 - 1, phi = r() * Math.PI * 2;
-      const dy = lerp(-0.35, 1, Math.sqrt((u + 1) * 0.5));
-      const ring = Math.sqrt(Math.max(0, 1 - dy * dy));
-      const shell = lerp(0.72, 0.98, r());
-      const px = t.x + Math.cos(phi) * ring * t.rx * shell;
-      const pz = t.z + Math.sin(phi) * ring * t.rz * shell;
-      let py = t.cy + dy * t.ry * shell;
-      // billows shrink toward the cauliflower tops and widen at the flat base
-      const top = smoothstep(0.1, 0.9, dy);
-      let pr = Math.min(t.rx, t.ry) * lerp(0.5, 0.3, top) * lerp(0.8, 1.15, r());
+      px += ux * shear * up; pz += uz * shear * up;
       pr = Math.max(pr, minR);
-      // the base is flat: nothing hangs below the condensation level
-      if (py - pr * 0.45 < base) py = base + pr * 0.45;
-      add(px, py, pz, pr, lerp(0.85, 1, r()));
+      v.set(px - cc.x, py - cc.y, pz - cc.z).divideScalar(rad);
+      this.addPuff(px, py, pz, pr, v.x, v.y, v.z, r() * 10, op0 * op, pr / rad, opts.dark ?? 0, flat, baseL);
+    };
+    // 1. the base layer
+    const slabR = Math.min(ax, az) * 0.46;
+    const nSlab = Math.round(clamp(((ax * az) / (slabR * slabR)) * 0.7, 3, 12) * dens);
+    for (let i = 0; i < nSlab; i++) {
+      const a = r() * TAU, d = Math.sqrt(r()) * 0.72;
+      const pr = slabR * lerp(0.85, 1.15, r());
+      add(center.x + Math.cos(a) * ax * d, base + pr * 0.34, center.z + Math.sin(a) * az * d, pr, lerp(0.85, 0.95, r()), 0.5);
     }
-    // a skirt of flattened puffs along the base hides the spheres' lower curves
-    const nb = Math.round(n * 0.15);
-    for (let i = 0; i < nb; i++) {
+    // 2. towers growing out of it
+    const nT = opts.towers ?? Math.max(1, Math.min(4, Math.round(1 + w / 210 + r() * 1.2)));
+    const towers = [];
+    for (let i = 0; i < nT; i++) {
+      const main = i === 0;
+      const a = r() * TAU, d = main ? r() * 0.18 : lerp(0.3, 0.62, r());
+      const tx = center.x + Math.cos(a) * ax * d, tz = center.z + Math.sin(a) * az * d;
+      const tr = Math.min(ax, az) * (main ? lerp(0.5, 0.62, r()) : lerp(0.32, 0.46, r()));
+      // domes about as tall as they are wide: tall thin stacks read as columns of balls
+      const th = Math.min(h * (main ? 1 : lerp(0.45, 0.75, r())), tr * (main ? 2.1 : 1.6));
+      towers.push({ x: tx, z: tz, r: tr, h: th });
+      // the column: big domes that narrow upward
+      const nC = Math.max(2, Math.round(th / (tr * 0.8)));
+      for (let k = 0; k < nC; k++) {
+        const f = (k + 0.5) / nC;
+        const pr = tr * lerp(0.95, 0.62, f);
+        add(tx + (r() - 0.5) * tr * 0.3, base + tr * 0.4 + f * Math.max(th - tr * 0.75, 0), tz + (r() - 0.5) * tr * 0.3, pr, 0.95);
+      }
+      // a few broad shoulders (not a shell of small balls)
+      const nS = Math.round(lerp(2, 4.5, r()) * dens);
+      for (let k = 0; k < nS; k++) {
+        const b = r() * TAU, f = lerp(0.1, 0.7, r());
+        add(tx + Math.cos(b) * tr * 0.62, base + tr * 0.35 + f * Math.max(th - tr * 0.8, 0), tz + Math.sin(b) * tr * 0.62, tr * lerp(0.55, 0.75, r()), 0.92);
+      }
+      // the cauliflower crown
+      const nCr = Math.round(lerp(2, 4, r()));
+      for (let k = 0; k < nCr; k++) {
+        const b = r() * TAU;
+        const pr = tr * lerp(0.36, 0.5, r());
+        add(tx + Math.cos(b) * tr * 0.38, base + Math.max(th - pr * 0.55, pr), tz + Math.sin(b) * tr * 0.38, pr, 0.9);
+      }
+    }
+    // 3. streamers combed off the tops, ragged fractus along the base
+    const nW = Math.round(lerp(1, 4, r()) * dens);
+    for (let i = 0; i < nW; i++) {
       const t = towers[Math.floor(r() * towers.length)];
-      const phi = r() * Math.PI * 2, d = Math.sqrt(r()) * 0.9;
-      const pr = Math.max(minR, t.rx * lerp(0.35, 0.5, r()));
-      add(t.x + Math.cos(phi) * t.rx * d, base + pr * 0.3, t.z + Math.sin(phi) * t.rz * d, pr, 0.75, 0.45);
+      const dn = lerp(0.5, 1.2, r()) * t.r;
+      add(t.x + ux * dn, base + t.h * lerp(0.7, 0.95, r()), t.z + uz * dn, t.r * lerp(0.45, 0.65, r()), lerp(0.28, 0.42, r()), 0.65);
+    }
+    const nF = Math.round(lerp(2, 5, r()) * dens);
+    for (let i = 0; i < nF; i++) {
+      const a = r() * TAU;
+      add(center.x + Math.cos(a) * ax * 0.95, base + slabR * 0.15, center.z + Math.sin(a) * az * 0.95, slabR * lerp(0.4, 0.6, r()), lerp(0.3, 0.5, r()), 0.6);
     }
     const cl = { center: cc.clone(), radius: rad * 1.3, start, count: this.count - start, moisture: opts.moisture ?? 0, kind: 'cumulus',
       // footprints for cast shadows: the towers (xz, radius) on the cloud base
-      towers: towers.map((t) => ({ x: t.x, z: t.z, r: Math.max(t.rx, t.rz) * 0.95, y: base })), opacity: opts.opacity ?? 1 };
+      towers: towers.map((t) => ({ x: t.x, z: t.z, r: t.r * 0.95, y: base })), opacity: op0 };
     this.clusters.push(cl);
     return cl;
   }

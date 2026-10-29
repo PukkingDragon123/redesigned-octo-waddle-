@@ -221,6 +221,22 @@ Builders:
 | film (grade, light, sky, clouds) | src/render/ (PostFX, painterly/, shaders/common.js, Globals, Engine look settings), src/world/Atmosphere.js, Sky.js, Clouds.js, Ocean.js shading |
 | whale look | src/creatures/whale/, Whale.js, WhaleAnimator.js, src/creatures/WhaleTypes.js, src/dev/whale.js, src/dev/fly.js |
 
+### 0.9 Ultra-realistic particles (newest; overrides the 2D particle style)
+User: *"I hate the new particles. All particles: I want realistic, ultra-realistic particles."*
+- **No 2D or hand-drawn look for particles:** no outlines, no scalloped cartoon puffs, no drawn wind strokes or
+  arcs, no stars. (Section 0.6's hand-drawn rule still applies to lines in textures, not to particles.)
+- **Physically based look,** like a high-end nature film or a modern AAA game:
+  - Spray and splashes: whitewater sheets breaking into thousands of fine droplets and mist.
+  - Droplets: refractive, catching the sun.
+  - Mist and breath: soft volumetric vapour lit with forward scattering and silver linings, dissipating
+    naturally.
+  - Bubbles: transparent with fresnel rims, internal reflection and a specular highlight; they wobble, rise
+    and pop at the surface.
+  - Rain: thin streaks with splash rings.
+  - Glows: soft bokeh-like bioluminescence.
+  - Sonic boom: a realistic condensation flash or vapour cone that dissipates in a moment.
+- Keep them grounded in the natural film grade, and never veil the camera.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

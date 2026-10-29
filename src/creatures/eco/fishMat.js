@@ -358,7 +358,7 @@ void main() {
     float irisK;
     vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, vec3(0.75, 0.6, 0.28), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.3 * irisK, eye.a);
+    mirror = mix(mirror, 0.1 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(1.1, 0.95, 0.7), eye.a);
 #elif SPECIES == 1
     // ---- spiralback: teal back with dark helical bands, silver-bronze flanks, white belly
@@ -385,7 +385,7 @@ void main() {
     float irisK;
     vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 1.0, vec3(0.8, 0.55, 0.2), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.3 * irisK, eye.a);
+    mirror = mix(mirror, 0.1 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(0.95, 0.78, 0.45), eye.a);
 #else
     // ---- lanternjack: slate-bronze mottled back, big bronze scales with dark rims, scutes,
@@ -434,7 +434,7 @@ void main() {
     float irisK;
     vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, vec3(0.85, 0.62, 0.22), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.35 * irisK, eye.a);
+    mirror = mix(mirror, 0.12 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(1.2, 0.95, 0.55), eye.a);
     // eyeshine: a tapetum returns light toward its source (lures, moon, the viewer's side)
     vec2 qe = vec2(L.z - EYE_Z, L.y - EYE_Y) / EYE_R;

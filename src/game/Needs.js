@@ -23,7 +23,7 @@ import { seaHeight } from './Swim.js';
 import { G } from '../render/Globals.js';
 
 /** Full to starving in a little over three minutes of play (slower at rest and by mother). */
-const HUNGER_RATE = 1 / 185;
+const HUNGER_RATE = 1 / 170;
 const START_HUNGER = 0.22;
 const LEAD_AT = 0.45; // the mother leads the calf to food from here
 const NURSE_AT = 0.86; // and feeds it herself from here
@@ -127,8 +127,8 @@ export class Needs {
     if (active) {
       let rate = HUNGER_RATE;
       if (calf.ctl.surge) rate *= 1.7;
-      else if (calf.ctl.thrust < 0.1) rate *= 0.75;
-      rate *= 1 - 0.3 * this.near; // her warmth
+      else if (calf.ctl.thrust < 0.1) rate *= 0.8;
+      rate *= 1 - 0.25 * this.near; // her warmth
       if (herd.mode === 'rest' || herd.mode === 'sleep') rate *= 0.5;
       else if (herd.mode !== 'travel' && herd.mode !== 'feed') rate *= 0.35; // the story's big moments
       if (this.nurse && this.nurse.phase === 'feed') rate = 0;
@@ -149,6 +149,8 @@ export class Needs {
     const slipT = smoothstep(-0.45, -0.05, a) * (1 - smoothstep(1.5, 2.6, a)) * (1 - smoothstep(0.55, 1.5, lat / L)) * smoothstep(2.5, 6, ms);
     this.slip = damp(this.slip, slipT * k, 2, dt);
     if (this.slip > 0.01) calf.wind.addScaledVector(mom.vel, 0.4 * this.slip);
+    // being fed at her cheek, a calf not steering anywhere turns with her (set by _nurse last frame)
+    if (this._yawHold != null) { calf.ctl.targetYaw = this._yawHold; this._yawHold = null; }
     // ---- the body: thrust, drag, stamina, droop ----
     const B = this._base;
     calf.phys.thrust = B.thrust * (1 + 0.07 * full - 0.3 * weak);
@@ -205,7 +207,7 @@ export class Needs {
     const k = this.k;
     const h = this.weak * k, lo = this.lonely * k;
     const warm = clamp(Math.max(this.near * 0.55, this.fullK * 0.6, this.relief * 0.8), 0, 1) * k * (1 - 0.6 * this.weak);
-    gr.uSaturation.value *= clamp(1 - 0.3 * h - 0.17 * lo + 0.05 * warm, 0.4, 1.1);
+    gr.uSaturation.value *= clamp(1 - 0.3 * h - 0.2 * lo + 0.05 * warm, 0.4, 1.1);
     gr.uContrast.value *= 1 - 0.05 * h;
     gr.uVignette.value += 0.3 * h + 0.18 * lo;
     const vc = gr.uVignetteColor.value;
@@ -214,9 +216,9 @@ export class Needs {
     vc.b *= (1 - 0.18 * h) * (1 + 0.04 * lo);
     // white balance: warm by her, cool alone (normalised, so it never changes the brightness)
     const wb = gr.uWB.value;
-    wb.x *= 1 + 0.035 * warm - 0.06 * lo;
+    wb.x *= 1 + 0.035 * warm - 0.08 * lo;
     wb.y *= 1 + 0.008 * warm - 0.012 * lo;
-    wb.z *= 1 - 0.04 * warm + 0.075 * lo;
+    wb.z *= 1 - 0.04 * warm + 0.1 * lo;
     const wl = wb.x * 0.2126 + wb.y * 0.7152 + wb.z * 0.0722;
     wb.multiplyScalar(1 / Math.max(wl, 1e-3));
     G.uExposure.value *= 1 - 0.06 * h - 0.03 * lo + 0.02 * warm;
@@ -276,6 +278,14 @@ export class Needs {
       }
     }
     if (this.lonely > 0.05) opts.extraDist = (opts.extraDist || 0) + 4 * this.lonely * this.k;
+  }
+
+  /** The headless autopilot (?auto) follows these: into her food, or to her cheek to be fed. */
+  autoGoal() {
+    if (this.k < 0.5) return null;
+    if (this.nurse && this._spot) return this._spot;
+    if (this.lead && this.lead.phase === 'circle' && this.hunger > 0.15) return this.lead.pos;
+    return null;
   }
 
   // ---- the mother (Herd.updateMother asks, below the story's own direction) ----------------------
@@ -399,17 +409,21 @@ export class Needs {
       out.lookAt = Math.sin(now * 0.7) > 0 || lag > 0.3 ? calf.pos : F.pos;
       if (toFood < R + 12) { F.phase = 'circle'; F.snapT = now + 1; }
     } else {
-      // round and round it, low, snapping at it: here
-      const w = clamp(7 / R, 0.08, 0.5) * F.dir;
-      F.ang += w * dt;
-      T.set(F.pos.x + Math.cos(F.ang) * R, F.pos.y + 2 + Math.sin(F.ang * 2) * 1.5, F.pos.z + Math.sin(F.ang) * R);
+      // to and fro along an arc on the calf's side of it (the open side: moths hang by the rocks),
+      // low, snapping at it: here
+      const toCalf = Math.atan2(calf.pos.z - F.pos.z, calf.pos.x - F.pos.x);
+      F.base = F.base === undefined ? toCalf : F.base + Math.atan2(Math.sin(toCalf - F.base), Math.cos(toCalf - F.base)) * Math.min(1, dt * 0.15);
+      F.sw = (F.sw || 0) + dt * F.dir * clamp(5 / R, 0.12, 0.4);
+      F.ang = F.base + Math.sin(F.sw) * 1.1;
+      T.set(F.pos.x + Math.cos(F.ang) * R, F.pos.y + 2 + Math.sin(F.sw * 2) * 1.5, F.pos.z + Math.sin(F.ang) * R);
       if (F.fish) T.y = sea + m.radius * 0.7 + 1;
-      // lead the orbit a little ahead so she flows round instead of chasing a point
-      _v.set(-Math.sin(F.ang) * F.dir, 0, Math.cos(F.ang) * F.dir);
-      T.addScaledVector(_v, 6);
-      out.speed = 6.5;
-      out.arrive = 4;
-      out.minSpeed = 4;
+      // lead the arc a little ahead so she flows along it instead of chasing a point
+      const sd = Math.cos(F.sw) * F.dir;
+      _v.set(-Math.sin(F.ang) * sd, 0, Math.cos(F.ang) * sd);
+      T.addScaledVector(_v, 5);
+      out.speed = 5;
+      out.arrive = 5;
+      out.minSpeed = 2.5;
       out.lookAt = calfFood > R + 25 && Math.sin(now * 0.6) > 0.2 ? calf.pos : F.pos;
       if (now > F.snapT) {
         F.snapT = now + lerp(2.2, 4, Math.random());
@@ -443,6 +457,7 @@ export class Needs {
     const out = this._ret;
     // the calf's spot: under her eye, by the corner of her mouth (like the title's nestle)
     const spot = _v2.copy(m.pos).addScaledVector(m.right, N.side * (0.17 * m.L + calf.radius)).addScaledVector(m.fwd, 0.36 * m.L).addScaledVector(m.up, -0.04 * m.L);
+    (this._spot || (this._spot = new Vector3())).copy(spot);
     const mouthM = _v3.copy(m.pos).addScaledVector(m.fwd, 0.46 * m.L).addScaledVector(m.up, -0.03 * m.L).addScaledVector(m.right, N.side * 0.06 * m.L);
     const cs = calf.vel.length();
     // she brings her head to the calf: her body aims so the spot lands on it
@@ -467,12 +482,14 @@ export class Needs {
     N.ft += dt;
     out.speed = Math.max(2.5, Math.min(cs, 9) + 0.5);
     out.arrive = 3;
-    m.drive.mouth = damp(m.drive.mouth, 0.45 + 0.15 * Math.sin(now * 3), 4, dt);
+    m.drive.mouth = damp(m.drive.mouth, 0.28 + 0.1 * Math.sin(now * 3), 4, dt);
     m.drive.feed = 0.4;
-    const pull = 1 - smoothstep(10, 22, gap);
+    const pull = 1 - smoothstep(12, 26, gap);
     if (pull > 0) {
       _v.copy(spot).sub(calf.pos).multiplyScalar(0.9).add(m.vel);
-      calf.vel.lerp(_v, 1 - Math.exp(-dt * 1.6 * pull));
+      calf.vel.lerp(_v, 1 - Math.exp(-dt * 2.4 * pull));
+      // a calf not steering anywhere turns with her
+      if ((this.game.input?.swim ?? 0) < 0.1) this._yawHold = m.yaw;
     }
     calf.drive.lookAt = mouthM;
     const calfMouth = _v.copy(calf.pos).addScaledVector(calf.fwd, calf.L * 0.48);
@@ -483,12 +500,12 @@ export class Needs {
       // the krill: little pink morsels tumbling from her lips to the calf's (no glow)
       N.emitT -= dt;
       if (N.emitT <= 0) {
-        N.emitT = 0.07;
+        N.emitT = 0.045;
         const E = this._em;
         E.pos.copy(mouthM).addScaledVector(m.right, N.side * 0.4);
         E.vel.copy(calfMouth).sub(E.pos).multiplyScalar(1.6).add(m.vel);
         E.vel.x += (Math.random() - 0.5) * 0.8; E.vel.y += (Math.random() - 0.5) * 0.6; E.vel.z += (Math.random() - 0.5) * 0.8;
-        E.life = 0.6 + Math.random() * 0.3; E.size = 0.03 + Math.random() * 0.02; E.sizeEnd = E.size * 0.6;
+        E.life = 0.6 + Math.random() * 0.3; E.size = 0.05 + Math.random() * 0.03; E.sizeEnd = E.size * 0.6;
         E.alpha = 0.95; E.drag = 1.2; E.gravity = 0.4; E.kind = 10; E.fadeIn = 0.04;
         const p = Math.random();
         E.color[0] = 0.95; E.color[1] = lerp(0.45, 0.62, p); E.color[2] = lerp(0.4, 0.5, p);
@@ -505,11 +522,11 @@ export class Needs {
         calf.drive.happy = 1;
       }
     }
-    if (this.hunger < 0.32 || N.ft > 12 || N.gulps >= 9) {
+    if (this.hunger < 0.4 || N.ft > 12 || N.gulps >= 9) {
       st.voiceCall?.(m, 'coo');
       if (this.story.activities) this.story.activities.schedule(calf, 0.6, 'wiggle');
       else calf.anim.gesture?.('happyWiggle');
-      this._endNurse(70);
+      this._endNurse(120);
       return null;
     }
     if (gap > 40 && N.ft > 3) { this._endNurse(25); return null; }

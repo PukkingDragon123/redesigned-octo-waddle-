@@ -339,11 +339,13 @@ void main() {
   } else if (part < 1.5 || part > 7.5) {
     // mouth: palate ridges and the tongue
     float k = vP.y;
-    albedo = uMouthColor * (part > 7.5 ? 1.1 : 0.8);
+    albedo = uMouthColor * (part > 7.5 ? 1.05 : 0.8);
+    // a dusky, muted mauve deep in shadow, never a bright pink that reads as a red spot
+    albedo = mix(vec3(dot(albedo, vec3(0.3, 0.59, 0.11))), albedo, 0.5) * 0.55;
     albedo *= 0.85 + 0.15 * sin(vLoft.x * 900.0);
-    // the lips' inner margin is dark; the pink only shows deeper in an open mouth
-    albedo = mix(vec3(0.05, 0.03, 0.035), albedo, smoothstep(0.0, 0.35, vP.z));
-    ao = mix(0.3, 0.8, vP.z);
+    // the lips' inner margin is dark; the colour only shows deeper in a wide-open mouth
+    albedo = mix(vec3(0.04, 0.028, 0.03), albedo, smoothstep(0.05, 0.5, vP.z));
+    ao = mix(0.22, 0.65, vP.z);
     rough = 0.25;
     trans = 0.0;
     rim = 0.1;

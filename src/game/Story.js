@@ -160,7 +160,7 @@ export class Story {
       this.autoplay = true;
       this.player.autopilot = () => {
         const calf = this.herd.calf;
-        const lg = this.life?.autoGoal?.();
+        const lg = this.life?.autoGoal?.() || this.needs?.autoGoal?.();
         if (lg) {
           const to = this._v2.copy(lg).sub(calf.pos);
           const d = to.length();

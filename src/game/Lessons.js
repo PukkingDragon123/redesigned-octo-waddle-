@@ -885,7 +885,7 @@ export class Lessons {
       // headless testing: the autopilot lunges when it is in the ball
       if (S.autoplay && calf.pos.distanceTo(ball) < 9) { autoT -= dt; if (autoT <= 0) { A?.hunt?.bite?.(); autoT = 1; } }
       const bit = (A?.hunt?.caught?.fish ?? 0) > fish0;
-      if (bit || (S.eaten || 0) - eaten0 > 12) { fed = true; break; }
+      if (bit || (S.eaten || 0) - eaten0 > 2.5) { fed = true; break; }
       if (calf.water && calf.water.depth > 0.5 && calf.water.air < 0.3) break; // up for air first
     }
     if (L.auto) { P.autopilot = L.auto; L.auto = null; }

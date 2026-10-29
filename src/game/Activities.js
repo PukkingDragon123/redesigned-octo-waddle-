@@ -4,7 +4,7 @@
 //    and head lock on the swarm and its mouth opens wider as bugs come within reach; bugs in reach
 //    are drawn in along a curving, spinning path, shrinking, their glow streaking; the jaw snaps
 //    shut as each arrives (merged when they come fast); a gulp travels down the throat, a little
-//    chew; then a contented shimmy, smiling eyes, a soft coo and glow motes from the mouth corners.
+//    chew; then a contented shimmy, smiling eyes and a soft coo (nothing glows at the mouth).
 //    Each catch chimes up the chord with the combo and gives energy;
 //  - reactions to the calf's moves (src/game/Moves.js): playmates copy slaps, rolls and breaches,
 //    the mother answers spouts and calls out when the calf is having fun;
@@ -34,7 +34,6 @@ const _v2 = new Vector3();
 const _v3 = new Vector3();
 const _mouth = new Vector3();
 const _tan = new Vector3();
-const _corner = new Vector3();
 
 export class Activities {
   constructor(game, story) {
@@ -43,11 +42,9 @@ export class Activities {
     this.bugs = new SkyBugs(game);
     this.bugs.onCatch = (kind, x, y, z, S) => this.onCatch(kind, x, y, z, S);
     this.bugs.onSuck = (kind, x, y, z) => this.onSuck(kind, x, y, z);
-    // eating: the morsels in the mouth waiting to be swallowed, the motes to puff out, the coo
+    // eating: the morsels in the mouth waiting to be swallowed, the coo
     this.morsel = 0;
     this.biteT = -9;
-    this.motes = 0;
-    this.moteT = 0;
     this.cooT = -99;
     this.joy = 0;
     this.intensity = 0; // 0..1 how lively the music could be (Story may blend it in)
@@ -81,7 +78,6 @@ export class Activities {
     this.joy = 0;
     this.combo = 0;
     this.morsel = 0;
-    this.motes = 0;
     this.reactions.length = 0;
     this.endRace(false);
     this.raceCd = 45;
@@ -146,30 +142,11 @@ export class Activities {
     // swallow a beat after the jaw shuts on the last morsel
     if (this.morsel > 0 && now - this.biteT > 0.16) {
       calf.anim.gulp?.(Math.min(1.3, 0.45 + this.morsel));
-      this.motes += this.morsel > 0.5 ? 3 : 2;
-      this.moteT = 0.25;
       this.morsel = 0;
       // a soft contented coo now and then (not on every gnat)
       if (now - this.cooT > 5 && this.story.state === 'play') {
         this.cooT = now;
         this.schedule(calf, 0.45, 'coo');
-      }
-    }
-    // a few glow motes escape from the corners of the mouth after the swallow
-    if (this.motes > 0) {
-      this.moteT -= dt;
-      if (this.moteT <= 0) {
-        this.moteT = 0.11;
-        this.motes--;
-        const side = this.motes % 2 ? 1 : -1;
-        _corner.copy(calf.pos).addScaledVector(calf.fwd, calf.L * 0.44).addScaledVector(calf.right, side * calf.L * 0.07).addScaledVector(calf.up, -calf.L * 0.025);
-        const E = this._em, col = this._col.moth;
-        E.pos.copy(_corner);
-        E.vel.copy(calf.vel).multiplyScalar(0.85).addScaledVector(calf.right, side * (0.6 + Math.random() * 0.6)).addScaledVector(calf.up, 0.3 + Math.random() * 0.5);
-        E.life = 0.9 + Math.random() * 0.5; E.size = 0.13; E.sizeEnd = 0.03; E.alpha = 0.9;
-        E.drag = 1.8; E.gravity = -0.25; E.kind = 1; E.fadeIn = 0.05;
-        E.color[0] = col[0] * 1.4; E.color[1] = col[1] * 1.4; E.color[2] = col[2] * 1.4;
-        g.glow?.emit(E);
       }
     }
   }

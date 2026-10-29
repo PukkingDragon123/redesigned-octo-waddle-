@@ -796,10 +796,14 @@ export class ReefLife {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * TAU;
       if (kind === 'sand') {
-        mist.emit({
-          pos: _v.set(x + Math.cos(a) * 0.3 * s, y, z + Math.sin(a) * 0.3 * s), vel: _v2.set(Math.cos(a) * 0.6, 0.4 + Math.random() * 0.5, Math.sin(a) * 0.6),
-          life: 1.6 + Math.random(), size: 0.25 * s, sizeEnd: 0.9 * s, color: [0.75, 0.68, 0.52], alpha: 0.35, drag: 1.6, gravity: 0.15, kind: 0, fadeIn: 0.05,
-        });
+        // kicked-up silt: fine grains that lift, hang and settle (no soft puff)
+        for (let j = 0; j < 3; j++) {
+          mist.emit({
+            pos: _v.set(x + Math.cos(a) * 0.3 * s, y + Math.random() * 0.1, z + Math.sin(a) * 0.3 * s),
+            vel: _v2.set(Math.cos(a) * (0.3 + Math.random() * 0.5), 0.3 + Math.random() * 0.6, Math.sin(a) * (0.3 + Math.random() * 0.5)),
+            life: 1.8 + Math.random() * 1.4, size: 0.02 + Math.random() * 0.03, sizeEnd: 0.015, color: [0.78, 0.7, 0.54], alpha: 0.7, drag: 2.2, gravity: 0.35, kind: 5, fadeIn: 0.05,
+          });
+        }
       } else {
         mist.emit({
           pos: _v.set(x + Math.cos(a) * 0.2 * s, y + Math.random() * 0.2, z + Math.sin(a) * 0.2 * s), vel: _v2.set(Math.cos(a) * 0.3, 0.6 + Math.random() * 0.8, Math.sin(a) * 0.3),

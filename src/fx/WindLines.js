@@ -97,7 +97,8 @@ void main() {
     float len = clamp(sp * 0.3, 3.0, 17.0) * iM.y * uAmb.y;
     vec3 e1 = normalize(cross(dir, abs(dir.y) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
     vec3 e2 = cross(e1, dir);
-    float straight = 1.0 / (1.0 + sp * 0.04);
+    // never ruler-straight: even at speed every line keeps a hand-drawn waver
+    float straight = 0.5 + 0.5 / (1.0 + sp * 0.04);
     float A1 = (0.35 + 1.2 * hs(sd2 + 1.3)) * straight * (0.7 + uGust) * len / 12.0, A2 = A1 * 0.7;
     float ph = sd2 * 20.0 + uTime * (0.5 + 0.6 * hs(sd2));
     for (int q = 0; q < 2; q++) {

@@ -131,8 +131,8 @@ void main() {
     }
     float dist = length(an.xz - uFocus.xz);
     float life = sin(3.14159 * fract(uTime / (4.0 + 4.0 * hs(sd2 + 2.0)) + iL.w));
-    alpha = uSpin.y * smoothstep(0.08, 0.6, gst + 0.1 * smoothstep(4.0, 12.0, wsp)) * (1.0 - smoothstep(70.0, 118.0, dist)) * life * 0.7;
-    width *= 2.2;
+    alpha = uSpin.y * smoothstep(0.05, 0.55, gst + 0.5 * smoothstep(3.0, 10.0, wsp)) * (1.0 - smoothstep(70.0, 118.0, dist)) * life * 0.85;
+    width *= 2.6;
   } else if (type < 2.5) {
     // ---- a wingtip vortex trail from the recorded path
     int base = seed.x < 0.5 ? 0 : ${NT};

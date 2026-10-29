@@ -12,7 +12,7 @@ import { G } from '../../render/Globals.js';
 import { UNIFORMS, NOISE, LIGHTING } from '../../render/shaders/common.js';
 import { ECO_GLSL } from './glsl.js';
 
-export const KIND = { kelp: 0, tubes: 1, anemone: 2, shell: 3, fan: 4, crab: 5, jelly: 6, ray: 7, puffer: 8, eel: 9 };
+export const KIND = { kelp: 0, tubes: 1, anemone: 2, shell: 3, fan: 4, crab: 5, jelly: 6, ray: 7, rayFar: 7, puffer: 8, eel: 9 };
 
 const VERT = /* glsl */ `
 ${UNIFORMS}
@@ -227,28 +227,71 @@ void main() {
   info.z = iB.w;
   info.w = c;
 #elif KIND == 7
-  // ---- rays: slow wing beats travelling out along the wings, a whip tail -----------------------
+  // ---- mantas: slow wing beats as a wave running from the leading edge out to the tips (the tips
+  // lag and curl), the inner wing beating less in a turn; cephalic lobes rolled into horns while
+  // cruising, unfurled into a funnel (and the mouth agape) when feeding; the whip tail trails.
   float flap = iB.z;
+  float fg = iB.w;
+  float giant = step(1.5, fg);
+  float feed = clamp(fg - giant * 2.0, 0.0, 1.0);
   float amp = iC.z;
+  float turn = clamp(iC.w, -1.0, 1.0);
   vec3 p = pos;
+  float heave = sin(flap + 0.5) * 0.02 * amp;
+  float thin = 0.0;
   if (part < 30.5) {
-    float u = abs(aP.z), v = aP.y;
-    p.y += sin(flap - u * 1.9) * pow(u, 1.5) * 0.55 * amp;
-    p.y += sin(flap * 0.5 - v * 3.0) * 0.04 * amp;
-    // the wing margin ripples: a wave running nose to tail along the edge (rajiform undulation)
-    p.y += sin(uTime * 2.6 + seed * 9.0 - v * 7.5) * smoothstep(0.55, 1.0, u) * 0.05 * (0.5 + amp);
-    // wing tips curl a little on the downstroke
-    p.x *= 1.0 - 0.06 * u * max(-sin(flap - u * 1.9), 0.0) * amp;
+    float u = aP.z, au = abs(u), v = aP.y, side = u < 0.0 ? -1.0 : 1.0;
+    // the terminal mouth: the lower jaw drops when feeding
+    float mz = (1.0 - smoothstep(0.085, 0.125, au)) * (1.0 - smoothstep(0.0, 0.05, v));
+    p.y -= mz * feed * 0.05 * smoothstep(0.0, -0.2, aP.w);
+    p.y += mz * feed * 0.008 * smoothstep(0.0, 0.2, aP.w);
+    // wings: bend about a hinge beside the body; the bend grows outward (the outer wing curves)
+    float r = max(au - 0.17, 0.0);
+    float a = amp * (1.0 - 0.4 * turn * side);
+    float wph = flap - r * 1.7 - v * 0.95;
+    float th = (sin(wph) * 0.5 + 0.08) * a * smoothstep(0.0, 0.3, r);
+    th += sin(wph - 1.0) * 0.42 * a * smoothstep(0.4, 0.83, r);
+    // the trailing edge flutters a little in the wake
+    th += sin(uTime * 3.1 + seed * 7.0 - au * 6.0) * 0.03 * smoothstep(0.7, 1.0, v) * smoothstep(0.2, 0.6, r);
+    vec3 hinge = vec3(side * 0.17, 0.0, p.z);
+    mat3 Rz = rotZ(side * th);
+    p = hinge + Rz * (p - hinge);
+    nrm = Rz * nrm;
+    thin = 1.0 - smoothstep(0.004, 0.035, aQ.x);
   } else if (part < 31.5) {
-    p.x += aP.z * sin(uTime * 1.3 + seed * 4.0) * 0.03 * aP.y;
-  } else {
-    p.x += sin(uTime * 2.0 + aP.y * 4.0 + seed * 3.0) * 0.18 * aP.y;
-    p.y += sin(flap - 1.5 - aP.y * 2.0) * 0.12 * aP.y;
+    // cephalic lobes: a sheet attached along its top edge, rolled up like a horn or unfurled
+    float t = aP.y, c = aP.z, side = aP.w;
+    float curl = (1.0 - feed * 0.92) * (0.93 + 0.07 * sin(uTime * 0.8 + seed * 9.0 + side * 1.7));
+    vec3 root = vec3(side * 0.125, -0.006, 0.452);
+    vec3 f = normalize(vec3(-side * mix(0.04, 0.2, feed), mix(-0.1, -0.5, feed), 1.0));
+    vec3 d = vec3(side * mix(0.35, 0.15, feed), -1.0, 0.0);
+    d = normalize(d - f * dot(d, f));
+    vec3 nn = normalize(cross(f, d)) * side;
+    float L = mix(0.16, 0.2, feed);
+    float wdt = 0.07 * (0.9 - 0.4 * t * t) + 0.012;
+    float s = c * wdt;
+    float ang = curl * c * (4.0 + 2.2 * c) * (1.0 - 0.2 * t);
+    float sc = ang > 1e-3 ? sin(ang) / ang : 1.0;
+    float cc = ang > 1e-3 ? (1.0 - cos(ang)) / ang : 0.0;
+    p = root + f * (t * L) + (d * sc + nn * cc) * s;
+    p.y += sin(uTime * 1.9 + t * 3.0 + seed * 5.0) * 0.008 * t * (0.3 + feed);
+    vec3 tg = d * cos(ang) + nn * sin(ang);
+    nrm = normalize(cross(f, tg)) * side;
+    thin = 0.8;
+  } else if (part < 32.5) {
+    // the tail trails: a lazy sway, bent out of the turn, the beat arriving late
+    float t = aP.y;
+    p.x += sin(uTime * 1.4 + t * 4.0 + seed * 3.0) * 0.06 * t * t - turn * 0.22 * t * t;
+    p.y += sin(flap - 1.8 - t * 2.6) * 0.07 * t * amp;
+  } else if (part > 34.5) {
+    p.y += sin(flap - 1.2) * 0.012 * aP.y * amp;
   }
+  p.y += heave;
   mat3 O = R * rotX(-iC.x) * rotZ(iC.y);
   W = base + O * (p * iB.x);
   nrm = O * nrm;
-  info.z = iC.w;
+  info.y = feed + giant * 2.0;
+  info.z = thin;
   info.w = aP.z;
 #elif KIND == 8
   // ---- lantern puffers: inflate into a spiky ball when startled ---------------------------------
@@ -316,6 +359,9 @@ varying vec4 vI;
 varying vec3 vLoc;
 
 vec3 hue(float h) { return 0.5 + 0.5 * cos(6.2831 * (h + vec3(0.0, 0.33, 0.67))); }
+// manta planform (reefGeo.js mantaLE / mantaTE): leading and trailing edge z at |x| = u
+float mantaLE(float u) { return u < 0.2 ? 0.47 - 0.09 * smoothstep(0.08, 0.2, u) : 0.38 - 0.6 * pow(max((u - 0.2) / 0.8, 0.0), 1.45); }
+float mantaTE(float u) { return -0.45 + 0.23 * u + 0.17 * sin(3.14159265 * pow(max(u, 0.0), 0.8)) * smoothstep(0.0, 0.35, u); }
 
 void main() {
   vec3 N = normalize(vN);
@@ -433,24 +479,94 @@ void main() {
   }
   emis *= 1.0 + vI.w * 2.0;
 #elif KIND == 7
-  // ray: dark ink-blue back with rows of glowing spots, a pale belly
-  float top = step(0.0, vP.w);
-  float u = vI.w;
-  float spots = 0.0;
-  if (part < 30.5) {
-    vec2 q = vec2(abs(vLoc.x) * 7.0, vLoc.z * 7.0);
-    vec2 cell = fract(q) - 0.5;
-    float onRow = step(0.45, hash12(floor(q) + seed));
-    spots = onRow * smoothstep(0.24, 0.12, length(cell)) * smoothstep(0.98, 0.5, abs(u));
+  // manta: countershaded (a deep slate-indigo back with pale shoulder patches drawn by hand, a
+  // white belly with this one's own dark spots and five pairs of gill slits), a soft sheen,
+  // light through the thin wing margins, and bioluminescent beads along the wing edges at night
+  float fg = vI.y;
+  float giant = step(1.5, fg);
+  float feed = clamp(fg - giant * 2.0, 0.0, 1.0);
+  float thin = vI.z;
+  float topK = vP.w;
+  vec2 L2 = vLoc.xz;
+  float ax = abs(L2.x);
+  // hand-drawn wobble shared by every line on the body
+  vec2 wob = vec2(vnoise(L2 * 23.0 + seed * 17.0), vnoise(L2.yx * 19.0 + 5.3 + seed * 11.0)) - 0.5;
+  float zl = mantaLE(min(ax, 1.0)), zt = mantaTE(min(ax, 1.0));
+  vec3 back = mix(vec3(0.03, 0.038, 0.07), vec3(0.045, 0.04, 0.085), hs);
+  back = mix(back, vec3(0.018, 0.02, 0.03), giant * 0.7);
+  back *= 0.85 + 0.3 * vnoise(L2 * 7.0 + seed * 3.0);
+  // shoulder patches: a crescent set in from the leading edge, wide at the head, tapering out
+  float dz = zl - L2.y + wob.x * 0.03;
+  float pw = mix(0.1, 0.16, giant) * (1.0 - smoothstep(0.14, mix(0.5, 0.62, giant), ax + wob.y * 0.05));
+  float pin = mix(0.06, 0.09, giant) + 0.012 * sin(ax * 13.0 + seed * 5.0);
+  float pd = max(pin - dz, dz - pin - pw);
+  float patchK = (1.0 - smoothstep(-0.006, 0.008, pd)) * smoothstep(0.08, 0.13, ax + wob.x * 0.02);
+  vec3 pale = mix(vec3(0.42, 0.45, 0.5), vec3(0.78, 0.8, 0.82), giant);
+  vec3 dorsal = mix(back, pale * (0.85 + 0.15 * vnoise(L2 * 30.0)), patchK * mix(0.75, 0.95, giant));
+  // a soft ink line along the patch edge, swelling and thinning
+  float inkW = 0.004 + 0.004 * vnoise(L2 * 17.0 + 2.0);
+  dorsal *= 1.0 - 0.45 * (1.0 - smoothstep(0.0, inkW, abs(pd))) * step(0.11, ax);
+  // belly: white, the margins dusky with a ragged edge
+  vec3 belly = vec3(0.8, 0.82, 0.84);
+  float vv = clamp((zl - L2.y) / max(zl - zt, 0.01), 0.0, 1.0);
+  float marg = max(smoothstep(0.72, 0.95, ax + wob.x * 0.08), smoothstep(0.8, 0.97, vv + wob.y * 0.1) * smoothstep(0.2, 0.4, ax));
+  belly = mix(belly, back * 2.2 + 0.04, marg * 0.85);
+#ifndef RAY_FAR
+  // this individual's belly spots (blotchy, scattered between the gills and the vent)
+  vec2 sq = L2 * 9.0 + wob * 0.45 + seed * 37.0;
+  vec2 sc = floor(sq);
+  float spot = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 cc = sc + vec2(float(i), float(j));
+    vec2 h = vec2(hash12(cc), hash12(cc + 7.7));
+    float has = step(0.7, hash12(cc + 3.1));
+    float rr = 0.14 + 0.22 * h.y;
+    spot = max(spot, has * (1.0 - smoothstep(rr * 0.75, rr, length(sq - cc - h))));
   }
-  vec3 back = mix(vec3(0.03, 0.06, 0.12), vec3(0.1, 0.05, 0.14), hs);
-  vec3 belly = vec3(0.7, 0.72, 0.75);
-  albedo = mix(belly, back, top);
-  albedo += vec3(0.2, 0.3, 0.4) * (1.0 - abs(u)) * 0.12 * top;
-  spec = 0.4; gloss = 0.7; rim = 0.9; trans = 0.3;
-  vec3 sc = mix(vec3(0.2, 0.9, 1.0), vec3(0.6, 0.4, 1.0), hs);
-  emis = sc * spots * top * (0.8 + 0.4 * sin(uTime * 1.5 + vLoc.z * 6.0)) * (1.0 + vI.z * 2.0);
-  emis += sc * smoothstep(0.85, 1.0, abs(u)) * 0.25 * top;
+  spot *= (1.0 - smoothstep(0.32, 0.45, ax)) * smoothstep(-0.42, -0.25, L2.y) * (1.0 - smoothstep(0.2, 0.32, L2.y));
+  belly = mix(belly, vec3(0.08, 0.08, 0.1), spot * 0.85);
+  // five pairs of gill slits: short curved strokes, tapered at both ends
+  float gk = clamp(floor((0.29 - L2.y) / 0.034 + 0.5), 0.0, 4.0);
+  float gx = clamp((ax - 0.075) / 0.085, 0.0, 1.0);
+  float gz = 0.29 - gk * 0.034 - 0.02 * gx + 0.018 * (gx - 0.5) * (gx - 0.5) + wob.x * 0.006;
+  float gw = 0.0045 * pow(sin(3.14159 * gx), 0.7) * (1.0 - 0.15 * gk) * (0.7 + 0.6 * vnoise(vec2(ax * 40.0, gk)));
+  float gill = (1.0 - smoothstep(gw * 0.5, gw, abs(L2.y - gz))) * step(0.075, ax) * step(ax, 0.16);
+  belly = mix(belly, vec3(0.12, 0.1, 0.12), gill);
+#endif
+  // the dark back wraps over the rims (leading edge, tips and the tail root) onto the belly a little
+  float topW = smoothstep(-0.6, -0.15, topK + wob.y * 0.3);
+  albedo = mix(belly, dorsal, topW);
+  // the mouth: a dark slot across the front of the head, a gaping funnel when feeding
+  if (part < 30.5) {
+    float mouth = (1.0 - smoothstep(0.095, 0.12, ax + wob.x * 0.01)) * (1.0 - smoothstep(0.1 + feed * 0.55, 0.16 + feed * 0.6, abs(topK + 0.08)));
+    mouth *= 1.0 - smoothstep(0.0, 0.035 + feed * 0.04, vP.y);
+    albedo = mix(albedo, vec3(0.025, 0.02, 0.03), mouth);
+  }
+  if (part > 30.5 && part < 31.5) albedo = mix(dorsal, belly * 0.7, 0.35);
+  if (part > 31.5 && part < 32.5) albedo = back * 1.1;
+  if (part > 32.5 && part < 33.5) {
+    // eyes: dark and glossy, a faint golden ring
+    vec3 en = normalize(vLoc - vec3(sign(vLoc.x) * 0.19, 0.012, 0.36));
+    float side = abs(en.x);
+    albedo = mix(vec3(0.05, 0.04, 0.035), vec3(0.01), smoothstep(0.6, 0.8, side));
+    albedo += vec3(0.25, 0.18, 0.06) * smoothstep(0.45, 0.55, side) * (1.0 - smoothstep(0.6, 0.7, side));
+    spec = 1.0; gloss = 0.95;
+  } else { spec = 0.32; gloss = 0.62; }
+  if (part > 33.5) albedo = back;
+  rim = 0.55; wrap = 0.24;
+  trans = 0.15 + 1.1 * thin;
+  // bioluminescent beads in rows along the leading and trailing edges of the outer wings
+  float rowL = abs(dz - 0.028 - wob.y * 0.004);
+  float cL = (fract(ax / 0.042 + wob.x * 0.2) - 0.5) * 0.042;
+  float beadL = (1.0 - smoothstep(0.004, 0.009, length(vec2(cL, rowL)))) * smoothstep(0.28, 0.4, ax) * (1.0 - smoothstep(0.92, 0.98, ax));
+  float dzt = L2.y - zt;
+  float cT = (fract(ax / 0.05 + 0.5 + wob.y * 0.2) - 0.5) * 0.05;
+  float beadT = (1.0 - smoothstep(0.003, 0.008, length(vec2(cT, abs(dzt - 0.022))))) * smoothstep(0.35, 0.5, ax) * (1.0 - smoothstep(0.9, 0.97, ax));
+  float bead = max(beadL, beadT) * smoothstep(-0.2, 0.3, topK);
+  float nightK = smoothstep(0.3, 0.8, uNight);
+  vec3 bc = mix(vec3(0.25, 0.85, 1.0), vec3(0.55, 0.45, 1.0), hs);
+  emis = bc * bead * nightK * (0.55 + 0.45 * sin(uTime * 1.1 - ax * 9.0 + seed * 20.0)) * 1.4;
+  emis += bc * 0.05 * nightK * smoothstep(0.85, 1.0, ax) * topW;
 #elif KIND == 8
   float inf = vI.z;
   if (part < 40.5) {
@@ -520,6 +636,20 @@ void main() {
   sf.ao = ao; sf.rim = rim; sf.trans = trans; sf.spec = spec; sf.gloss = gloss; sf.wrap = wrap;
   sf.emissive = emis * glowK;
   vec3 col = stylizedLight(sf);
+#if KIND == 7
+  // light through the thin wing margins and lobes (backlit or lit from the far side), and the
+  // surface caustics dancing over the dark back in shallow water
+  float tb7 = pow(max(dot(-V, uSunDir), 0.0), 2.0) + 0.4 * max(-dot(N, uSunDir), 0.0);
+  col += vec3(0.16, 0.3, 0.38) * uSunColor * thin * tb7 * 0.45;
+  float dep7 = uSeaLevel - vWorldPos.y;
+#ifndef RAY_FAR
+  if (dep7 > 0.15 && N.y > 0.05 && uWaterParams.x > 0.0) {
+    float sunUp7 = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
+    float cs7 = waterCaustics(vWorldPos, dep7);
+    col += vec3(0.45, 0.65, 0.62) * uSunColor * cs7 * 0.11 * topW * N.y * sunUp7 * exp(-dep7 * 0.12) * smoothstep(0.15, 1.0, dep7);
+  }
+#endif
+#endif
   vec3 lit = col;
   col = applyFog(col, vWorldPos);
   // bioluminescence carries through the dark water further than reflected light
@@ -540,14 +670,14 @@ export function reefMaterial(kind, actors, fade = null) {
   const params = {
     vertexShader: VERT,
     fragmentShader: FRAG,
-    defines: { KIND: k },
+    defines: kind === 'rayFar' ? { KIND: k, RAY_FAR: 1 } : { KIND: k },
     uniforms: Object.assign({}, G, {
       uActors: { value: actors },
       uFade: { value: fade || new Vector4(0, 0, 1e6, 2e6) },
       uTintA: { value: new Color(0.5, 0.5, 0.5) },
       uGlow: { value: new Color(0.3, 0.8, 1.0) },
     }),
-    side: kind === 'kelp' || kind === 'fan' || kind === 'eel' || jelly ? DoubleSide : FrontSide,
+    side: kind === 'kelp' || kind === 'fan' || kind === 'eel' || kind === 'ray' || kind === 'rayFar' || jelly ? DoubleSide : FrontSide,
   };
   if (jelly) Object.assign(params, { transparent: true, depthWrite: false, blending: AdditiveBlending });
   return new ShaderMaterial(params);

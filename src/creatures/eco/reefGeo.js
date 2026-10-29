@@ -331,41 +331,113 @@ export function buildJelly() {
 }
 
 /**
- * Ray: a flat diamond body with thick centre (part 30: aP.z = x / halfspan signed, aP.y = along
- * nose 0 .. tail 1, aP.w top 1 / bottom -1), cephalic horns (31) and a whip tail (32). Span 2 m
- * (x -1..1), facing +z.
+ * Manta (KIND 7). Span 2 (x -1..1, halfspan 1), facing +z, the terminal mouth at z ~ +0.47.
+ * One lofted body that blends into the pectoral wings (part 30): every spanwise station is a closed
+ * airfoil loop (thick rounded leading edge thinning to a fine trailing edge; the body a thick
+ * central disc). aP.y = chord v (0 leading edge .. 1 trailing edge), aP.z = span u (signed),
+ * aP.w = topness (sin of the loop angle: -1 belly .. +1 back); aQ.x = half thickness there.
+ * Cephalic lobes (31: aP.y along, aP.z across 0..1, aP.w side; posed and curled in the shader),
+ * whip tail (32, aP.y along), eyes (33, aP.w side, aQ centre), dorsal fin (34), pelvic fins (35).
+ * lod 1 is the far mesh (coarse loft, no eyes or fins).
  */
-export function buildRay() {
+const mSmooth = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+/** Planform: leading and trailing edge z at |x| = u (mirrored in reefMat.js). */
+export function mantaLE(u) { return u < 0.2 ? 0.47 - 0.09 * mSmooth((u - 0.08) / 0.12) : 0.38 - 0.6 * Math.pow((u - 0.2) / 0.8, 1.45); }
+export function mantaTE(u) { return -0.45 + 0.23 * u + 0.17 * Math.sin(Math.PI * Math.pow(u, 0.8)) * mSmooth(u / 0.35); }
+function mantaHalf(u, v) {
+  // body: a thick central disc, blunt at the head and the tail root
+  const tb = 0.085 * Math.exp(-((u / 0.19) ** 2));
+  const vb = Math.pow(Math.max(v, 0), 0.85);
+  const pb = Math.pow(Math.max(4 * vb * (1 - vb), 0), 0.42);
+  // wings: an airfoil (thick muscular leading edge, fine trailing edge), thinning to the tips
+  const tw = 0.042 * Math.pow(Math.max(1 - u, 0), 1.15) + 0.0025;
+  const vv = Math.max(v, 0);
+  const pw = Math.max(0, 10 * (0.2969 * Math.sqrt(vv) - 0.126 * vv - 0.3516 * vv * vv + 0.2843 * vv ** 3 - 0.1015 * vv ** 4));
+  return [tb * pb + tw * pw, 0.55 * tb * pb + 0.8 * tw * pw];
+}
+function mantaPoint(x, th) {
+  const u = Math.min(Math.abs(x), 1);
+  const zl = mantaLE(u), zt = mantaTE(u);
+  const v = (1 - Math.cos(th)) * 0.5;
+  const s = Math.sin(th);
+  const [top, bot] = mantaHalf(u, v);
+  // a slight droop toward the tips; the belly flatter than the back
+  const yc = -0.035 * u * u;
+  const y = yc + (s >= 0 ? top : -bot) * Math.pow(Math.abs(s), 0.15);
+  return [x, y, zl + (zt - zl) * v];
+}
+export function buildRay(lod = 0) {
   const m = new Mk();
-  // a fine grid so the wing margins can ripple
-  const NU = 26, NV = 16;
-  for (let face = 1; face >= -1; face -= 2) {
-    const base = m.count;
-    for (let j = 0; j <= NV; j++) {
-      const v = j / NV; // nose (0) to tail root (1)
-      const z = 0.55 - v * 1.1;
-      // half span at this z: widest a little behind the head, swept wings
-      const half = Math.sin(Math.min(1, v * 1.35) * Math.PI) * 1.0 * (1 - 0.15 * v) + 0.12 * (1 - v);
-      for (let i = 0; i <= NU; i++) {
-        const u = (i / NU) * 2 - 1;
-        // wing tips sweep back
-        const x = u * half;
-        const zz = z - Math.pow(Math.abs(u), 2) * 0.35 * Math.sin(v * Math.PI);
-        const thick = 0.11 * (1 - u * u) * Math.sin(Math.min(1, v * 1.3 + 0.1) * Math.PI) + 0.008;
-        m.v([x, face * thick, zz], [0, face, 0], [30, v, u, face], [0, 0, 0, 0]);
-      }
-    }
-    for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
-      const a = base + j * (NU + 1) + i, b = a + NU + 1;
-      if (face > 0) m.quad(a, b, b + 1, a + 1); else m.quad(a, a + 1, b + 1, b);
+  const far = lod > 0;
+  const NU = far ? 22 : 46, M = far ? 12 : 26;
+  const base = m.count;
+  for (let i = 0; i <= NU; i++) {
+    const w = (i / NU) * 2 - 1;
+    const x = Math.sign(w) * Math.pow(Math.abs(w), 1.1);
+    const u = Math.abs(x);
+    const xn = Math.sign(x || 1) * Math.min(u, 0.985); // normals: avoid the zero-chord tip
+    for (let k = 0; k < M; k++) {
+      const th = (k / M) * TAU;
+      const P = mantaPoint(x, th);
+      const e = 1e-3;
+      const a0 = mantaPoint(xn, th - e), a1 = mantaPoint(xn, th + e);
+      const b0 = mantaPoint(xn - e, th), b1 = mantaPoint(xn + e, th);
+      let n = norm(cross(sub(a1, a0), sub(b1, b0)));
+      // outward: away from the chord line
+      const Pn = mantaPoint(xn, th);
+      const zm = (mantaLE(Math.abs(xn)) + mantaTE(Math.abs(xn))) * 0.5;
+      const out = [0, Pn[1] + 0.035 * xn * xn, Pn[2] - zm];
+      if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0) n = [-n[0], -n[1], -n[2]];
+      const v = (1 - Math.cos(th)) * 0.5;
+      const [top, bot] = mantaHalf(u, v);
+      m.v(P, n, [30, v, x, Math.sin(th)], [Math.sin(th) >= 0 ? top : bot, k / M, 0, 0]);
     }
   }
+  for (let i = 0; i < NU; i++) for (let k = 0; k < M; k++) {
+    const k1 = (k + 1) % M;
+    const a = base + i * M + k, b = base + i * M + k1, c = base + (i + 1) * M + k1, d = base + (i + 1) * M + k;
+    m.quad(a, d, c, b);
+  }
+  // cephalic lobes: flat sheets the shader rolls into horns (cruising) or unfurls (feeding)
   for (let side = -1; side <= 1; side += 2) {
-    tube(m, [[side * 0.14, 0, 0.5], [side * 0.17, -0.02, 0.68], [side * 0.12, -0.06, 0.8]], [0.05, 0.04, 0.012], 4, (i, t) => [[31, t, side, 0], [0, 0, 0, 0]], true, 0.5);
+    const NA = far ? 3 : 7, NC = far ? 2 : 6;
+    const lb = m.count;
+    for (let i = 0; i <= NA; i++) for (let j = 0; j <= NC; j++) {
+      const t = i / NA, c = j / NC;
+      m.v([side * 0.125, -0.01 - c * 0.06, 0.455 + t * 0.19], [side, 0, 0], [31, t, c, side], [side * 0.125, -0.005, 0.455, 0]);
+    }
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NC; j++) {
+      const a = lb + i * (NC + 1) + j, b = a + NC + 1;
+      if (side > 0) m.quad(a, b, b + 1, a + 1); else m.quad(a, a + 1, b + 1, b);
+    }
   }
-  const pts = [], rad = [];
-  for (let i = 0; i < 16; i++) { const t = i / 15; pts.push([0, 0, -0.5 - t * 1.6]); rad.push(0.04 * (1 - t * 0.85)); }
-  tube(m, pts, rad, 5, (i, t) => [[32, t, 0, 0], [0, 0, 0, 0]], true);
+  // the whip tail
+  {
+    const pts = [], rad = [];
+    const N = far ? 6 : 14;
+    for (let i = 0; i < N; i++) { const t = i / (N - 1); pts.push([0, 0.004 + 0.01 * t, -0.42 - t * 0.95]); rad.push(0.03 * Math.pow(1 - t, 1.4) + 0.0025); }
+    tube(m, pts, rad, far ? 3 : 6, (i, t) => [[32, t, 0, 0], [0, 0, 0, 0]], true);
+  }
+  if (far) return m.build();
+  // eyes on the sides of the head, just above where the pectoral leading edge begins
+  for (let side = -1; side <= 1; side += 2) {
+    const c = [side * 0.19, 0.012, 0.36];
+    ellipsoid(m, c, [0.024, 0.02, 0.026], 10, 6, (p, n) => [[33, 0, 0, side], [c[0], c[1], c[2], 0]]);
+  }
+  // a small swept dorsal fin at the tail root, and the pelvic fins either side of it
+  {
+    const th = 0.007;
+    const outline = [[0, -0.33], [0.012, -0.36], [0.05, -0.43], [0.06, -0.47], [0.02, -0.45], [0, -0.44]];
+    const yb = 0.035;
+    for (let s = -1; s <= 1; s += 2) {
+      const fb = m.count;
+      for (const [h, z] of outline) m.v([s * th * (1 - h / 0.07), yb + h, z], [s, 0.25, 0], [34, h / 0.06, 0, s], [0, 0, 0, 0]);
+      for (let i = 1; i < outline.length - 1; i++) if (s > 0) m.tri(fb, fb + i, fb + i + 1); else m.tri(fb, fb + i + 1, fb + i);
+    }
+    for (let side = -1; side <= 1; side += 2) {
+      tube(m, [[side * 0.045, -0.012, -0.36], [side * 0.075, -0.016, -0.42], [side * 0.07, -0.016, -0.47]], [0.02, 0.016, 0.003], 5, (i, t) => [[35, t, 0, side], [0, 0, 0, 0]], true, 0.35);
+    }
+  }
   return m.build();
 }
 

@@ -1,5 +1,8 @@
 // Dev scene: under the sea of Vur Sok, from the calf's point of view.
-// ?debug&test=underwater&shot=kelp|crabs|jellies|rays|reef|night|surface
+// ?debug&test=underwater&shot=kelp|crabs|jellies|rays|reef|night|surface|manta|mantaair
+//   manta: a close-up of a manta swimming alongside the calf (&view=side|below|front|top,
+//   &loop: a free manta doing feeding loops instead); mantaair: the great manta of the shallows
+//   seen from the air through the water.
 //   &time=<preset>  &state=<sea 0..1>  &nocalf (no whale)  &free (the camera holds still)
 //   &dens=k  reef density multiplier
 // window.__uw() prints the reef stats (counts, draws, triangles, eaten).
@@ -67,7 +70,7 @@ function rock() {
 
 /** The best spot for f (max of f over shallow water near the rock). */
 function bestSpot(f, minDepth, maxDepth, r0 = 40, r1 = 120) {
-  let best = -1, bx = 0, bz = 0;
+  let best = -Infinity, bx = 0, bz = 0;
   for (let i = -24; i <= 24; i++) for (let j = -24; j <= 24; j++) {
     const x = i * 5, z = j * 5;
     const r = Math.hypot(x, z);
@@ -85,6 +88,7 @@ export default async function (game) {
   const shot = p.get('shot') || 'kelp';
   const s = game.engine.scene;
   if (!p.get('time')) game.atmosphere.set(shot === 'night' ? 'night' : 'morning');
+  const view = p.get('view') || 'side';
   if (game.cloudSea && game.cloudSea !== game.ocean) game.cloudSea.enabled = false;
   if (!game.ocean) {
     try {
@@ -131,6 +135,7 @@ export default async function (game) {
   else if (shot === 'rays') { center = bestSpot((x, z) => -Math.hypot(x + 80, z - 30), 10, 24); depth = -7; radius = 26; speed = 3.2; camBack = 14; camUp = 4; }
   else if (shot === 'night') { center = kelpAt; depth = Math.max(kelpAt.y + 4, -7); radius = 14; }
   else if (shot === 'surface') { center = reefAt; depth = -3; radius = 18; camUp = -2.5; }
+  else if (shot === 'manta' || shot === 'mantaair') { center = bestSpot((x, z) => -Math.hypot(x + 80, z - 30), 10, 24); depth = -7; radius = 30; speed = 2.6; }
   const sea = () => 0;
   const tmp = new Vector3();
   const fwd = new Vector3();
@@ -164,6 +169,24 @@ export default async function (game) {
       for (let i = 0; i < 34; i++) R._spawnJelly(i, 0, 0, c);
     }
     if (shot === 'rays') { R._underT = 10; R._rayT = -1e9; }
+    if (shot === 'manta' || shot === 'mantaair') {
+      // one manta posed for the camera (slot 0), or the great manta of the shallows (last slot)
+      const Rr = R.rays, giant = shot === 'mantaair';
+      const i = giant ? Rr.max - 1 : 0, k = i * 3;
+      R._rayT = 1e9;
+      const side = 1;
+      const rx = fwd.z, rz = -fwd.x; // the calf's right
+      const x = actor.pos.x + fwd.x * (giant ? 10 : 4) - rx * side * 9, z = actor.pos.z + fwd.z * (giant ? 10 : 4) - rz * side * 9;
+      const s = giant ? 6 : 3.2;
+      Rr.alive[i] = 1; Rr.vr[i] = giant ? 1 : 0; Rr.wait[i] = 0;
+      Rr.P[k] = x; Rr.P[k + 1] = giant ? -1.2 - s * 0.1 : p.has('loop') ? -10 : actor.pos.y; Rr.P[k + 2] = z;
+      Rr.H[k] = x; Rr.H[k + 1] = Rr.P[k + 1]; Rr.H[k + 2] = z;
+      Rr.V[k] = 0; Rr.V[k + 1] = 0; Rr.V[k + 2] = 0;
+      Rr.s[i] = s; Rr.seed[i] = 0.37; Rr.yaw[i] = Math.atan2(fwd.x, fwd.z); Rr.pitch[i] = 0; Rr.roll[i] = 0; Rr.c[i] = 2.4;
+      Rr.floor[i] = floorAt(x, z); Rr.d[i] = 0.3; Rr.t2[i] = 0;
+      if (!giant && !p.has('loop')) { Rr.a[i] = 1; Rr.t[i] = 1e9; Rr.b[i] = side; }
+      else { Rr.a[i] = 0; if (p.has('loop')) { Rr.V[k + 1] = 0.7; R.rayLoop(i, 9); } }
+    }
   };
 
   // ---- camera --------------------------------------------------------------------------------
@@ -214,6 +237,17 @@ export default async function (game) {
     if (shot === 'crabs') {
       pos = tmp.copy(actor.pos).addScaledVector(fwd, -camBack).add(new Vector3(fwd.z * 4, camUp, -fwd.x * 4));
       look = new Vector3().copy(actor.pos).addScaledVector(fwd, lookAhead + 4).setY(floorAt(actor.pos.x + fwd.x * 12, actor.pos.z + fwd.z * 12) + 0.6);
+    } else if ((shot === 'manta' || shot === 'mantaair') && staged) {
+      const Rr = eco.reef.rays, i = shot === 'mantaair' ? Rr.max - 1 : 0, k = i * 3, s = Rr.s[i];
+      const ry = Rr.yaw[i], fx = Math.sin(ry), fz = Math.cos(ry), rx = Math.cos(ry), rz = -Math.sin(ry);
+      const rp = new Vector3(Rr.P[k], Rr.P[k + 1], Rr.P[k + 2]);
+      if (shot === 'mantaair') pos = tmp.copy(rp).add(new Vector3(-fx * 10 - rx * 6, 17, -fz * 10 - rz * 6));
+      else if (view === 'below') pos = tmp.copy(rp).add(new Vector3(fx * s * 0.5 + rx * s * 0.5, -s * 1.3, fz * s * 0.5 + rz * s * 0.5));
+      else if (view === 'front') pos = tmp.copy(rp).add(new Vector3(fx * s * 2.2 + rx * s * 0.5, s * 0.25, fz * s * 2.2 + rz * s * 0.5));
+      else if (view === 'top') pos = tmp.copy(rp).add(new Vector3(-fx * s * 0.6, s * 1.7, -fz * s * 0.6));
+      else pos = tmp.copy(rp).add(new Vector3(-rx * s * 1.9 + fx * s * 1.3, s * 0.45, -rz * s * 1.9 + fz * s * 1.3));
+      look = rp.clone().add(new Vector3(fx * s * 0.15, 0, fz * s * 0.15));
+      if (shot === 'mantaair') { pos.y = Math.max(pos.y, 12); }
     } else if (shot === 'surface' || shot === 'jellies') {
       pos = tmp.copy(actor.pos).addScaledVector(fwd, -camBack).add(new Vector3(0, -3, 0));
       look = new Vector3().copy(actor.pos).addScaledVector(fwd, lookAhead).add(new Vector3(0, shot === 'surface' ? 5 : 2, 0));
@@ -221,7 +255,7 @@ export default async function (game) {
       pos = tmp.copy(actor.pos).addScaledVector(fwd, -camBack).add(new Vector3(fwd.z * 2, camUp, -fwd.x * 2));
       look = new Vector3().copy(actor.pos).addScaledVector(fwd, lookAhead);
     }
-    pos.y = Math.min(pos.y, sea() - 0.8);
+    if (shot !== 'mantaair') pos.y = Math.min(pos.y, sea() - 0.8);
     if (first) { camPos.copy(pos); camLook.copy(look); first = false; }
     if (!p.has('free')) { dampVec3(camPos, pos, 4, dt); dampVec3(camLook, look, 5, dt); }
     game.focus.copy(actor.pos);

@@ -138,7 +138,10 @@ export class ReefLife {
       fan: new Inst(this, 'fan', buildFan(), 110),
       crab: new Inst(this, 'crab', buildCrab(), 70),
       jelly: new Inst(this, 'jelly', buildJelly(), 60, true),
-      ray: new Inst(this, 'ray', buildRay(), 8),
+      // mantas: a detailed mesh near the camera and a coarse one farther out (the last pool slot is
+      // the great manta of the shallows)
+      ray: new Inst(this, 'ray', buildRay(0), 9),
+      rayFar: new Inst(this, 'rayFar', buildRay(1), 9),
       puffer: new Inst(this, 'puffer', buildPuffer(), 40),
       eel: new Inst(this, 'eel', buildEel(), 18),
     };
@@ -153,6 +156,9 @@ export class ReefLife {
     this.focus = new Vector3();
     this.actor = null; // the nearest whale under water (the calf, usually)
     this._actorVel = new Vector3();
+    this._actorHead = 0; // the calf's heading and its turn rate (rad/s), which a manta alongside mirrors
+    this._actorTurn = 0;
+    this._actorHeadOk = false;
     this.food = { pos: new Vector3(), dist: Infinity, species: 'reef', kind: '', count: 1, radius: 1, depth: 0, school: null, swarm: null, reef: true };
     this.stats = { kelp: 0, garden: 0, crabs: 0, jellies: 0, rays: 0, puffers: 0, eels: 0, draws: 0, tris: 0, eaten: 0, scatterMs: 0 };
     this.lastEaten = 0;
@@ -292,28 +298,45 @@ export class ReefLife {
 
   _spawnRay(i, rMin, rMax) {
     const Rr = this.rays, sea = G.uSeaLevel.value;
-    for (let tries = 0; tries < 6; tries++) {
-      const p = this._ring(rMin, rMax);
+    // the last slot is the great manta: larger, it cruises the shallows just under the surface
+    // (seen from the air through the clear water), and only now and then
+    const giant = i === Rr.max - 1;
+    for (let tries = 0; tries < (giant ? 10 : 6); tries++) {
+      const p = this._ring(giant ? rMin * 0.5 : rMin, rMax);
       const y = this.floorAt(p.x, p.z);
       const depth = sea - y;
       // rays glide over shelves, sandbanks and lagoons, not the blue abyss
-      if (depth < 5 || depth > 40) continue;
-      const yy = sea - Math.min(3 + Math.random() * 8, depth * 0.6);
+      if (giant ? depth < 4.5 || depth > 24 : depth < 5 || depth > 40) continue;
+      const s = giant ? 5.2 + Math.random() * 1.3 : 2.4 + Math.random() * 2.2;
+      const yy = giant ? sea - 1.2 - s * 0.1 : sea - Math.min(3 + Math.random() * 8, depth * 0.6);
+      const k = i * 3;
       Rr.alive[i] = 1;
-      Rr.P[i * 3] = p.x; Rr.P[i * 3 + 1] = yy; Rr.P[i * 3 + 2] = p.z;
-      Rr.H[i * 3] = p.x; Rr.H[i * 3 + 1] = yy; Rr.H[i * 3 + 2] = p.z;
+      Rr.vr[i] = giant ? 1 : 0;
+      Rr.P[k] = p.x; Rr.P[k + 1] = yy; Rr.P[k + 2] = p.z;
+      Rr.H[k] = p.x; Rr.H[k + 1] = yy; Rr.H[k + 2] = p.z;
+      Rr.V[k] = 0; Rr.V[k + 1] = 0; Rr.V[k + 2] = 0; // loop angle, feeding 0..1, loops to go
       Rr.yaw[i] = Math.random() * TAU;
-      Rr.s[i] = 2.4 + Math.random() * 2.2;
+      Rr.pitch[i] = 0; Rr.roll[i] = 0; Rr.c[i] = 0;
+      Rr.s[i] = s;
       Rr.seed[i] = Math.random();
       Rr.ph[i] = Math.random() * TAU;
       Rr.a[i] = 0; Rr.b[i] = 0; Rr.t[i] = 0; Rr.t2[i] = Math.random() * 10;
       Rr.floor[i] = y;
-      Rr.d[i] = 0.5 + Math.random() * 0.5; // turn direction & rate
+      Rr.d[i] = giant ? 0.18 + Math.random() * 0.12 : 0.5 + Math.random() * 0.5; // turn direction & rate
       if (Math.random() < 0.5) Rr.d[i] = -Rr.d[i];
       return true;
     }
     Rr.alive[i] = 0;
+    if (giant) Rr.wait[i] = 12 + Math.random() * 18;
     return false;
+  }
+
+  /** Start a run of feeding loops (backward somersaults) for ray i. */
+  rayLoop(i, loops = 2) {
+    const Rr = this.rays;
+    if (!Rr.alive[i]) return false;
+    Rr.V[i * 3 + 2] = loops;
+    return true;
   }
 
   _spawnPuffer(i, rMin, rMax) {
@@ -408,6 +431,7 @@ export class ReefLife {
     }
     // actors: whales near the camera (the calf first), for the GPU and the critters
     this._gatherActors(ctx);
+    this._trackActor(dt);
     const t = ctx.time;
     // a few delightful moments: a jelly bloom ahead of a diving calf, a manta that comes along
     this._moments(dt, t);
@@ -446,6 +470,22 @@ export class ReefLife {
       if (this.actor.vel) this._actorVel.copy(this.actor.vel);
       else this._actorVel.set(0, 0, 0);
     }
+  }
+
+  /** The calf's heading and smoothed turn rate (a manta swimming alongside mirrors its turns). */
+  _trackActor(dt) {
+    const v = this._actorVel;
+    const sp = Math.hypot(v.x, v.z);
+    if (!this.actor || sp < 0.3 || dt <= 0) { this._actorTurn *= Math.exp(-dt * 2); this._actorHeadOk = false; return; }
+    const h = Math.atan2(v.x, v.z);
+    if (this._actorHeadOk) {
+      let dh = h - this._actorHead;
+      dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+      const rate = Math.max(-1.5, Math.min(1.5, dh / dt));
+      this._actorTurn += (rate - this._actorTurn) * Math.min(1, dt * 3);
+    }
+    this._actorHead = h;
+    this._actorHeadOk = true;
   }
 
   /** Distance to the actor (calf) and the unit direction away from it in _v2. */
@@ -494,8 +534,8 @@ export class ReefLife {
     if (this._underT > 4 && t - this._rayT > 50) {
       const Rr = this.rays;
       let pick = -1;
-      for (let i = 0; i < Rr.max; i++) if (Rr.alive[i] && Rr.a[i] < 0.5) { pick = i; break; }
-      if (pick < 0) for (let i = 0; i < Rr.max; i++) if (!Rr.alive[i]) { if (this._spawnRay(i, 30, 40)) pick = i; break; }
+      for (let i = 0; i < Rr.max - 1; i++) if (Rr.alive[i] && Rr.a[i] < 0.5 && Rr.V[i * 3 + 2] <= 0) { pick = i; break; }
+      if (pick < 0) for (let i = 0; i < Rr.max - 1; i++) if (!Rr.alive[i]) { if (this._spawnRay(i, 30, 40)) pick = i; break; }
       if (pick >= 0) {
         this._rayT = t;
         const i = pick;
@@ -610,19 +650,25 @@ export class ReefLife {
   }
 
   _rays(dt, t) {
-    const Rr = this.rays, I = this.inst.ray;
+    const Rr = this.rays, I = this.inst.ray, IF = this.inst.rayFar;
     const sea = G.uSeaLevel.value;
     const R = this.radius;
     const a = this.actor;
-    let n = 0;
+    const cam = this.focus;
+    let n = 0, nf = 0;
     for (let i = 0; i < Rr.max; i++) {
+      const giant = i === Rr.max - 1;
       if (!Rr.alive[i] || (Rr.a[i] < 0.5 && this._far(Rr.P[i * 3], Rr.P[i * 3 + 2], 1.3))) {
+        // the great manta, once it has glided out of sight, stays away a while
+        if (giant && Rr.alive[i]) { Rr.alive[i] = 0; Rr.wait[i] = 15 + Math.random() * 25; }
         if (!Rr.ready(i, dt) || !this._spawnRay(i, R * 0.8, R)) continue;
       }
       const k = i * 3;
       const s = Rr.s[i];
       let tx, ty, tz, speed;
-      if (Rr.a[i] > 0.5 && a) {
+      const following = Rr.a[i] > 0.5 && a && !giant;
+      let looping = Rr.V[k] > 0;
+      if (following) {
         // alongside the calf: a little ahead and off to one side, matching its pace
         Rr.t[i] -= dt;
         if (Rr.t[i] <= 0) { Rr.a[i] = 0; Rr.t2[i] = 0; }
@@ -634,44 +680,94 @@ export class ReefLife {
         ty = Math.min(a.pos.y + 0.5, sea - 1.5 - s * 0.2);
         const dd = Math.hypot(tx - Rr.P[k], tz - Rr.P[k + 2]);
         speed = Math.min(9, Math.max(1.6, sp * 1.0 + dd * 0.25));
+        Rr.V[k + 2] = 0;
       } else {
         // gliding wide loops over home, rising and settling
         Rr.t2[i] += dt;
         const yaw = Rr.yaw[i] + Rr.d[i] * 0.12;
         tx = Rr.P[k] + Math.sin(yaw) * 8; tz = Rr.P[k + 2] + Math.cos(yaw) * 8;
-        ty = Rr.H[k + 1] + Math.sin(Rr.t2[i] * 0.15 + Rr.seed[i] * 10) * 2;
+        ty = Rr.H[k + 1] + Math.sin(Rr.t2[i] * 0.15 + Rr.seed[i] * 10) * (giant ? 0.4 : 2);
         // drift back toward home if wandering off
         const hx = Rr.H[k] - Rr.P[k], hz = Rr.H[k + 2] - Rr.P[k + 2];
         const hd = Math.hypot(hx, hz);
-        if (hd > 40) { tx = Rr.P[k] + hx / hd * 8; tz = Rr.P[k + 2] + hz / hd * 8; }
-        speed = 2.0 + 0.3 * Math.sin(Rr.t2[i] * 0.4);
+        if (hd > (giant ? 60 : 40)) { tx = Rr.P[k] + hx / hd * 8; tz = Rr.P[k + 2] + hz / hd * 8; }
+        speed = (giant ? 1.7 : 2.0) + 0.3 * Math.sin(Rr.t2[i] * 0.4);
         // curious: a calf nearby draws it in for a look
-        if (a && this._threat(Rr.P[k], Rr.P[k + 1], Rr.P[k + 2]) < 22 && Rr.t2[i] > 25) { Rr.a[i] = 1; Rr.t[i] = 14; Rr.b[i] = Math.random() < 0.5 ? -1 : 1; }
+        if (!giant && !looping && a && this._threat(Rr.P[k], Rr.P[k + 1], Rr.P[k + 2]) < 22 && Rr.t2[i] > 25) { Rr.a[i] = 1; Rr.t[i] = 14; Rr.b[i] = Math.random() < 0.5 ? -1 : 1; }
+        // now and then a run of feeding loops (backward somersaults through a plankton patch)
+        else if (!giant && !looping && Rr.V[k + 2] <= 0 && Rr.t2[i] > 15 && Math.random() < dt / 35) Rr.V[k + 2] = 1 + Math.floor(Math.random() * 3);
       }
-      // steer: yaw toward target with a limited turn rate, bank into the turn
-      const want = Math.atan2(tx - Rr.P[k], tz - Rr.P[k + 2]);
-      let dy = want - Rr.yaw[i];
-      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      const turn = Math.max(-0.7, Math.min(0.7, dy * 1.5)) ;
-      Rr.yaw[i] += turn * dt;
-      Rr.roll[i] += (-turn * 0.9 - Rr.roll[i]) * Math.min(1, dt * 2);
-      const sp0 = Rr.c[i] || speed;
-      Rr.c[i] = sp0 + (speed - sp0) * Math.min(1, dt * 0.8);
-      const vy = Math.max(-1.5, Math.min(1.5, (ty - Rr.P[k + 1]) * 0.6));
-      Rr.pitch[i] += (Math.atan2(vy, Rr.c[i]) - Rr.pitch[i]) * Math.min(1, dt * 2);
-      Rr.P[k] += Math.sin(Rr.yaw[i]) * Rr.c[i] * dt;
-      Rr.P[k + 2] += Math.cos(Rr.yaw[i]) * Rr.c[i] * dt;
-      Rr.P[k + 1] += vy * dt;
-      const floor = this.floorAt(Rr.P[k], Rr.P[k + 2]);
-      if (Rr.P[k + 1] < floor + 1.5) Rr.P[k + 1] = floor + 1.5;
-      if (Rr.P[k + 1] > sea - 1) Rr.P[k + 1] = sea - 1;
-      // wing beats: slow and deep, quicker when hurrying
-      const amp = Math.min(1, 0.45 + Math.abs(turn) * 0.5 + Math.max(0, Rr.c[i] - 2.5) * 0.15);
-      Rr.ph[i] += dt * (1.0 + Rr.c[i] * 0.22);
-      I.set(n++, Rr.P[k], Rr.P[k + 1], Rr.P[k + 2], Rr.yaw[i], s, Rr.seed[i], Rr.ph[i], 0, Rr.pitch[i], Rr.roll[i], amp, Rr.a[i] > 0.5 ? 0.8 : 0);
+      // feeding: the lobes unfurl and the mouth opens before the loops, close after
+      const wantFeed = Rr.V[k + 2] > 0 ? 1 : 0;
+      Rr.V[k + 1] += (wantFeed - Rr.V[k + 1]) * Math.min(1, dt * (wantFeed ? 1.2 : 0.6));
+      const rLoop = s * 0.8;
+      if (!looping && Rr.V[k + 2] > 0 && Rr.V[k + 1] > 0.6) {
+        // room for a loop above, under the surface
+        if (Rr.P[k + 1] + rLoop * 2 < sea - 1.2 - s * 0.15) { Rr.V[k] = 1e-4; looping = true; }
+        else Rr.V[k + 2] = 0;
+      }
+      let turn = 0;
+      if (looping) {
+        // a vertical loop: nose up, over on its back, down and level again
+        const sp = Rr.c[i] || 2.4;
+        Rr.V[k] += (sp / rLoop) * dt;
+        if (Rr.V[k] >= TAU) {
+          Rr.V[k + 2] -= 1;
+          Rr.V[k] = Rr.V[k + 2] > 0 ? Rr.V[k] - TAU : 0;
+          if (Rr.V[k] === 0) Rr.t2[i] = 0;
+        }
+        Rr.pitch[i] = Rr.V[k];
+        Rr.roll[i] *= Math.exp(-dt * 2);
+        Rr.c[i] += (2.6 - Rr.c[i]) * Math.min(1, dt);
+        const cp = Math.cos(Rr.pitch[i]);
+        Rr.P[k] += Math.sin(Rr.yaw[i]) * cp * Rr.c[i] * dt;
+        Rr.P[k + 2] += Math.cos(Rr.yaw[i]) * cp * Rr.c[i] * dt;
+        Rr.P[k + 1] += Math.sin(Rr.pitch[i]) * Rr.c[i] * dt;
+        if (Rr.P[k + 1] > sea - 0.8) Rr.P[k + 1] = sea - 0.8;
+      } else {
+        // steer: yaw toward target with a limited turn rate, bank into the turn
+        let want = Math.atan2(tx - Rr.P[k], tz - Rr.P[k + 2]);
+        if (following && this._actorHeadOk) {
+          // once alongside, hold the calf's heading (and so mirror its turns)
+          const dd = Math.hypot(tx - Rr.P[k], tz - Rr.P[k + 2]);
+          let dw = want - this._actorHead;
+          dw = Math.atan2(Math.sin(dw), Math.cos(dw));
+          want = this._actorHead + dw * Math.min(1, dd / 8);
+        }
+        let dy = want - Rr.yaw[i];
+        dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+        const tmax = giant ? 0.3 : 0.7;
+        turn = Math.max(-tmax, Math.min(tmax, dy * 1.5));
+        if (following) turn = Math.max(-1, Math.min(1, turn + this._actorTurn * 0.6));
+        Rr.yaw[i] += turn * dt;
+        const bankTo = -(turn + (following ? this._actorTurn * 0.5 : 0)) * 0.9;
+        Rr.roll[i] += (bankTo - Rr.roll[i]) * Math.min(1, dt * 2);
+        const sp0 = Rr.c[i] || speed;
+        Rr.c[i] = sp0 + (speed - sp0) * Math.min(1, dt * 0.8);
+        const vy = Math.max(-1.5, Math.min(1.5, (ty - Rr.P[k + 1]) * 0.6));
+        let pt = Rr.pitch[i];
+        if (pt > Math.PI) pt -= TAU;
+        Rr.pitch[i] = pt + (Math.atan2(vy, Rr.c[i]) - pt) * Math.min(1, dt * 2);
+        Rr.P[k] += Math.sin(Rr.yaw[i]) * Rr.c[i] * dt;
+        Rr.P[k + 2] += Math.cos(Rr.yaw[i]) * Rr.c[i] * dt;
+        Rr.P[k + 1] += vy * dt;
+        const floor = this.floorAt(Rr.P[k], Rr.P[k + 2]);
+        if (Rr.P[k + 1] < floor + 1.5 + s * 0.1) Rr.P[k + 1] = floor + 1.5 + s * 0.1;
+        if (Rr.P[k + 1] > sea - 1) Rr.P[k + 1] = sea - 1;
+      }
+      // wing beats: slow and deep, quicker when hurrying; strong strokes through the loops
+      const amp = Math.min(1, (giant ? 0.38 : 0.45) + Math.abs(turn) * 0.5 + Math.max(0, Rr.c[i] - 2.5) * 0.15 + (looping ? 0.3 : 0));
+      Rr.ph[i] += dt * (1.0 + Rr.c[i] * 0.22) * (giant ? 0.7 : 1);
+      const dx = Rr.P[k] - cam.x, dy2 = Rr.P[k + 1] - cam.y, dz = Rr.P[k + 2] - cam.z;
+      const lodR = 22 + s * 5;
+      const near = dx * dx + dy2 * dy2 + dz * dz < lodR * lodR;
+      const J = near ? I : IF;
+      J.set(near ? n++ : nf++, Rr.P[k], Rr.P[k + 1], Rr.P[k + 2], Rr.yaw[i], s, Rr.seed[i], Rr.ph[i], Rr.V[k + 1] + (giant ? 2 : 0), Rr.pitch[i], Rr.roll[i], amp, turn / 0.7);
     }
     I.commit(n);
-    this.stats.rays = n;
+    IF.commit(nf);
+    this.stats.rays = n + nf;
+    this.stats.raysNear = n;
   }
 
   _puffers(dt, t) {

@@ -42,7 +42,7 @@ in **Settings**.
 | | Keyboard and mouse | Gamepad |
 |---|---|---|
 | Look and steer (you swim where you look) | Mouse (click once to capture it; or drag) | Right stick |
-| Turn / rise / dive | A D / Space C (or the arrow keys) | Left stick, A / B |
+| Turn / rise / dive | A D / Space C (or the arrow keys) | Left stick (A rises) |
 | Swim | W or left click | RT |
 | Slow down / hover | S | LT |
 | Surge | Shift | L3 |
@@ -55,18 +55,28 @@ in **Settings**.
 | Dash (a dive bomb when pointing down at the sea) | G or double-tap Shift | D-pad right or double-click L3 |
 | Corkscrew | Q / E again mid-roll | LB / RB again |
 | Breach | Dive deep, then race up | same |
+| Bite (a lunge at fish, birds and eels) | B, or a quick single tap | B |
 | Pause | Esc | Start |
 
 On a touch screen: drag to look (you swim while touching), two fingers to hum, double-tap
 and hold to gather a sonic boom, flick sideways to roll, three-finger tap to pause.
 Flick up for a loop, flick down for a tail slap, tap with two fingers to spout, and
-double-tap quickly to dash.
+double-tap quickly to dash. A single quick tap bites.
 
 Controls are also listed under **Settings → Controls** in the floating title menu. That
 menu is the only place text ever appears.
 
 ### Things to try
 
+- Stay with your mother and eat. You grow hungry: a hungry calf flies weakly and the world
+  dims. Ride her slipstream just behind her wing; stray too far and it turns cold and
+  lonely, and the lanternjacks and skimmers grow bold. When you are hungry she leads you to
+  food, and if you are starving she feeds you herself.
+- Copy her: when she swings out ahead, calls and shows you a roll, a tail flick, a spout or
+  a loop, do the same. She makes it harder each round.
+- When she taps you with a flipper and rolls away, it is tag: catch her, then flee.
+- Follow her when she stops and lifts her head: she has found something to show you.
+- Over a school of fish she may blow a bubble net; lunge through the ball when she calls.
 - Fly close to your mother and nuzzle her.
 - Hum. She always answers. Tilt your nose up while humming to sing higher.
 - Dive into the sea at the Feasting Shoals and swim through a bait ball: your mouth opens by

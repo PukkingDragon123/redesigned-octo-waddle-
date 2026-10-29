@@ -13,6 +13,7 @@
 // over a motherScript, never on a playmate the story is running a chase with (c.play).
 import { Vector3 } from 'three';
 import { clamp, damp, lerp, smoothstep, rng, TAU, easeInOut } from '../core/math.js';
+import { spoutColumn } from './Swim.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -1020,11 +1021,15 @@ export class HerdBehaviors {
       em.pos.z += (r() - 0.5) * 1.2;
       const depth = surf - em.pos.y;
       if (depth < 0.5) continue;
-      em.vel.set((r() - 0.5) * 0.5, 1 + r() * 1.5, (r() - 0.5) * 0.5);
-      em.life = clamp(depth / 2.2, 1.2, 9);
-      em.size = 0.2 + r() * 0.35 * (w.L / 20);
-      em.sizeEnd = em.size * 1.6;
-      em.alpha = 0.75;
+      em.vel.set((r() - 0.5) * 0.5, 0.3 + r() * 0.5, (r() - 0.5) * 0.5);
+      // a curtain of every size: mostly fine, a few big wobbling caps that race ahead
+      const u = r();
+      em.size = (0.005 + 0.16 * u * u * u) * clamp(w.L / 20, 0.4, 1.6);
+      em.sizeEnd = em.size * 1.3;
+      em.life = clamp(depth / 0.35, 2, 14);
+      em.alpha = 0.85;
+      em.drag = 1.6; em.gravity = 0; em.kind = 4; em.fadeIn = 0.1;
+      em.color[0] = 1; em.color[1] = 1; em.color[2] = 1;
       mist.emit(em);
     }
   }
@@ -1039,16 +1044,23 @@ export class HerdBehaviors {
     while (B.aux.y >= 1) {
       B.aux.y -= 1;
       if (!mist) continue;
-      em.pos.set(w.pos.x + (r() - 0.5) * 4, sea + 0.3, w.pos.z + (r() - 0.5) * 4);
-      em.vel.set((r() - 0.5) * 0.6, 0.15, (r() - 0.5) * 0.6);
-      em.life = 3 + r() * 1.5;
-      em.size = 1.0 + r() * 0.6;
-      em.sizeEnd = 2.6 + r() * 1.2;
-      em.alpha = 0.38;
-      em.drag = 3;
+      // bubbles bursting: spreading rings on the water and a few jet drops
+      em.pos.set(w.pos.x + (r() - 0.5) * 4, sea + 0.04, w.pos.z + (r() - 0.5) * 4);
+      em.vel.set(0, 0, 0);
+      em.life = 0.9 + r() * 0.8;
+      em.size = 0.1;
+      em.sizeEnd = 0.6 + r() * 0.9;
+      em.alpha = 0.45;
+      em.drag = 0;
       em.gravity = 0;
-      em.kind = 0;
-      em.fadeIn = 0.3;
+      em.kind = 8;
+      em.stretch = 0.08;
+      em.fadeIn = 0.03;
+      mist.emit(em);
+      em.stretch = 4;
+      em.pos.y = sea + 0.05;
+      em.vel.set((r() - 0.5) * 0.8, 1.5 + r() * 2, (r() - 0.5) * 0.8);
+      em.life = 0.5; em.size = 0.006; em.sizeEnd = 0.006; em.alpha = 0.9; em.drag = 0.3; em.gravity = 9.8; em.kind = 3; em.fadeIn = 0.01;
       mist.emit(em);
     }
     em.drag = 0.9; em.gravity = -1.6; em.kind = 4; em.fadeIn = 0.1;
@@ -1064,22 +1076,10 @@ export class HerdBehaviors {
     w.anim?.breathe?.(k);
     const mist = this.game.mist;
     if (!mist) return;
-    const r = this.r;
     const em = this._em;
     const base = _v3.copy(w.pos).addScaledVector(w.fwd, w.L * 0.22).addScaledVector(w.up, w.radius);
-    for (let i = 0; i < 10; i++) {
-      em.pos.copy(base);
-      em.vel.set((r() - 0.5) * 1.2, 4 + r() * 4, (r() - 0.5) * 1.2).multiplyScalar(w.L / 10);
-      em.life = 1.4 + r();
-      em.size = 0.15 * w.L / 4;
-      em.sizeEnd = 0.8 * w.L / 4;
-      em.alpha = 0.45;
-      em.drag = 1.4;
-      em.gravity = 0;
-      em.kind = 0;
-      em.fadeIn = 0.1;
-      mist.emit(em);
-    }
+    // a tall column of fine vapour drifting off with the wind
+    spoutColumn(this.game, base, w, k ?? 1);
     em.drag = 0.9; em.gravity = -1.6; em.kind = 4;
   }
 

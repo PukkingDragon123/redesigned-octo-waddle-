@@ -4,8 +4,8 @@
 // slow motion for the big ones. Moves emit events ('slap', 'spout', 'loop', 'dash', 'breach', ...)
 // that src/game/Activities.js turns into playmate reactions and joy.
 import { Vector3 } from 'three';
-import { clamp, lerp, smoothstep, TAU, wrapAngle, dirFromYawPitch } from '../core/math.js';
-import { seaHeight } from './Swim.js';
+import { clamp, smoothstep, TAU, wrapAngle, dirFromYawPitch } from '../core/math.js';
+import { seaHeight, spoutColumn } from './Swim.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -137,7 +137,7 @@ export class Moves {
       p.y = sea;
       _v2.copy(w.up).multiplyScalar(1.3).addScaledVector(w.fwd, -0.7);
       g.ocean?.splash?.(p, 1.5, w.L * 0.75, _v2);
-      this._spray(p, 1.3, 46, 1.2);
+      this._spray(p, 1.3, 46, 1.2, _v2);
       this.sfx('tailSlap', p, 1);
       g.cameraRig?.addShake?.(0.3);
       g.story?.eco?.scatter?.(p, 26, 0.8);
@@ -150,10 +150,10 @@ export class Moves {
       this.sfx('bubbles', p, 0.7);
       this.emit('kick', 0.6, p);
     } else {
-      // in the air: a fluke flick that kicks the calf forward, a couple of wind strokes off the flukes
+      // in the air: a fluke flick that kicks the calf forward (air shows nothing; at speed a faint
+      // breath of condensation curls off the fluke tips)
       w.vel.addScaledVector(w.fwd, 5).addScaledVector(w.up, 1.2);
-      this._windStroke(p, 0.5, 0.75, 0.4);
-      this._windStroke(p, -0.5, 0.75, 0.4);
+      if (w.vel.length() > 18) { this._tipVapour(p, 0.5); this._tipVapour(p, -0.5); }
       this.sfx('whoosh', p, 0.5, { pitch: 1.3 });
       this.emit('flick', 0.5, p);
     }
@@ -177,18 +177,8 @@ export class Moves {
     const k = this.zone === 'surface' ? 1.7 : 0.9;
     const p = w.blow ? w.blow(g, k) : w.pos;
     if (this.zone === 'surface') {
-      // a tall column of painted vapour puffs with a crown of drawn droplets falling back
-      const E = this._em;
-      for (let i = 0; i < 18; i++) {
-        const drop = i % 3 === 0;
-        E.pos.copy(p);
-        E.vel.copy(w.up).multiplyScalar(9 + Math.random() * 6).add(_v2.set((Math.random() - 0.5) * (drop ? 4 : 2), 0, (Math.random() - 0.5) * (drop ? 4 : 2))).addScaledVector(w.vel, 0.6);
-        if (drop) { E.life = 1.2 + Math.random() * 0.6; E.size = 0.12 + Math.random() * 0.08; E.sizeEnd = 0.08; E.alpha = 0.85; E.drag = 0.4; E.gravity = 9; E.kind = 3; }
-        else { E.life = 1.6 + Math.random(); E.size = 0.4; E.sizeEnd = 2.0 + Math.random() * 1.4; E.alpha = 0.42; E.drag = 1.5; E.gravity = 1.2; E.kind = 0; }
-        E.fadeIn = 0.05;
-        E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-        g.mist?.emit(E);
-      }
+      // a tall column of fine vapour drifting off with the wind, a little rain of drops falling back
+      spoutColumn(g, p, w, 1);
     }
     this.sfx('spout', p, this.zone === 'surface' ? 1 : 0.55);
     this.emit(this.zone === 'surface' ? 'spout' : 'puff', k, p);
@@ -241,6 +231,13 @@ export class Moves {
       w.vel.addScaledVector(w.fwd, Math.max(0, Math.min(14, 32 - sp)));
       this.cur = { name: 'dash', t: 0, dur: 0.7, streakAcc: 0 };
       if (this.zone === 'under') { this._bubbles(p, 30, 1.5); this.sfx('bubbles', p, 0.8, { pitch: 0.8 }); }
+      else if (height < w.radius * 2 + 2.5) {
+        // skimming: the downwash tears a burst of spray and mist off the sea behind the flukes
+        _v.copy(p).setY(sea);
+        _v2.copy(w.fwd).multiplyScalar(-1).setY(0.6);
+        g.ocean?.splash?.(_v, 0.45, w.L * 0.35, _v2);
+        this._spray(_v, 0.6, 26, 0.7, _v2);
+      }
       this.sfx('dash', w.pos, 0.9);
       g.cameraRig?.addShake?.(0.12);
       this.emit('dash', 1, w.pos);
@@ -364,15 +361,17 @@ export class Moves {
     if (c.name === 'dash') {
       w.ctl.thrust = 1;
       w.drive.effort = 1;
-      // in the air: a few short hand-drawn wind streaks trail off the wingtips while the surge lasts
-      if (this.zone !== 'under' && c.t < 0.45) {
-        c.streakAcc += dt * 9;
+      // in the air at speed: faint condensation trails off the wingtips while the surge lasts
+      const sp = w.vel.length();
+      if (this.zone !== 'under' && c.t < 0.6 && sp > 16) {
+        c.streakAcc += dt * 70 * smoothstep(16, 26, sp);
         while (c.streakAcc > 1) {
           c.streakAcc -= 1;
-          const side = Math.random() < 0.5 ? 'R' : 'L';
+          c.tip = !c.tip;
+          const side = c.tip ? 'R' : 'L';
           const m = w.model;
           if (m.wingTipPos) m.wingTipPos(side, _v3); else _v3.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
-          this._windStroke(_v3, 0, 0.85, 0.5);
+          this._tipVapour(_v3, 0, 0.16 * (1 - c.t / 0.6));
         }
       }
       if (c.t > c.dur) this.cur = null;
@@ -405,69 +404,103 @@ export class Moves {
   _trails(dt) {
     const w = this.w, g = this.game, c = this.cur;
     const tricking = (c && (c.name === 'loop' || c.name === 'dash' || c.name === 'diveBomb')) || this.chain >= 2 || this.breach.air;
-    const rate = (tricking ? 70 : 0) + Math.max(0, this.joy - 0.35) * 40;
-    if (rate <= 0 || !g.glow) return;
+    const under = this.zone === 'under';
+    const sp = w.vel.length();
+    // real trails only: wingtip vortices condense in the air at speed; under water they cavitate
+    // into fine streams of bubbles
+    const rate = ((tricking ? 50 : 0) + Math.max(0, this.joy - 0.35) * 24) * (under ? smoothstep(5, 12, sp) : smoothstep(13, 24, sp));
+    if (rate <= 0 || !g.mist) return;
     this.trailAcc += rate * dt;
     const m = w.model, E = this._em;
-    const under = this.zone === 'under';
     while (this.trailAcc > 1) {
       this.trailAcc -= 1;
-      const star = Math.random() < 0.22;
       const side = Math.random() < 0.5 ? 'R' : 'L';
-      if (m.wingTipPos) m.wingTipPos(side, E.pos); else E.pos.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
-      E.vel.copy(w.vel).multiplyScalar(0.1).add(_v.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6));
-      // mostly soft painted dots, now and then a little four-point star
-      E.life = 0.9 + Math.random() * 0.6; E.size = star ? 0.3 + Math.random() * 0.15 : 0.16 + Math.random() * 0.12; E.sizeEnd = 0.05; E.alpha = star ? 0.9 : 0.8;
-      E.drag = 1.2; E.gravity = under ? -0.5 : 0.3; E.kind = star ? 2 : 1; E.fadeIn = 0.02;
-      const warm = Math.random();
-      E.color[0] = lerp(0.55, 1.0, warm); E.color[1] = lerp(0.85, 0.82, warm); E.color[2] = lerp(1.0, 0.55, warm);
-      g.glow.emit(E);
-    }
-  }
-
-  /** A sheet of spray and droplets thrown up from the sea at p. */
-  _spray(p, k, n, up) {
-    const g = this.game, E = this._em;
-    if (!g.mist) return;
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * TAU, rr = Math.random();
-      E.pos.set(p.x + Math.cos(a) * 1.2 * rr, p.y + 0.2, p.z + Math.sin(a) * 1.2 * rr);
-      E.vel.set(Math.cos(a) * (1.5 + 4 * rr) * k, (4 + 8 * Math.random()) * up * Math.min(1.6, 0.5 + k * 0.6), Math.sin(a) * (1.5 + 4 * rr) * k);
-      const drop = i % 2 === 0; // half drawn droplets (a crown of teardrops), half painted spray puffs
-      E.life = 0.9 + Math.random() * 0.7; E.size = drop ? 0.12 + 0.1 * k : 0.4 + 0.4 * k; E.sizeEnd = drop ? 0.1 : 1.4 + 1.8 * k;
-      E.alpha = drop ? 0.9 : 0.55; E.drag = drop ? 0.2 : 0.6; E.gravity = drop ? 9 : 6; E.kind = drop ? 3 : 0; E.fadeIn = 0.03;
-      E.color[0] = 0.95; E.color[1] = 0.98; E.color[2] = 1.0;
-      g.mist.emit(E);
-    }
-  }
-
-  _bubbles(p, n, speed) {
-    const g = this.game, E = this._em;
-    if (!g.mist) return;
-    for (let i = 0; i < n; i++) {
-      E.pos.set(p.x + (Math.random() - 0.5) * 0.8, p.y + (Math.random() - 0.5) * 0.8, p.z + (Math.random() - 0.5) * 0.8);
-      E.vel.set((Math.random() - 0.5) * speed, 1 + Math.random() * speed, (Math.random() - 0.5) * speed);
-      E.life = 1.4 + Math.random(); E.size = 0.06 + Math.random() * 0.14; E.sizeEnd = 0.16; E.alpha = 0.75;
-      E.drag = 1.0; E.gravity = -2.0; E.kind = 4; E.fadeIn = 0.03;
-      E.color[0] = 0.85; E.color[1] = 0.95; E.color[2] = 1.0;
+      if (m.wingTipPos) m.wingTipPos(side, _v3); else _v3.copy(w.pos).addScaledVector(w.right, (side === 'R' ? 1 : -1) * w.L * 0.5);
+      if (!under) { this._tipVapour(_v3, 0, 0.12); continue; }
+      E.pos.copy(_v3);
+      E.vel.copy(w.vel).multiplyScalar(0.05).add(_v.set((Math.random() - 0.5) * 0.3, Math.random() * 0.3, (Math.random() - 0.5) * 0.3));
+      const u = Math.random();
+      E.life = 6; E.size = 0.004 + 0.02 * u * u * u; E.sizeEnd = E.size * 1.15; E.alpha = 0.8;
+      E.drag = 2; E.gravity = 0; E.kind = 4; E.fadeIn = 0.05;
+      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
       g.mist.emit(E);
     }
   }
 
   /**
-   * One short hand-drawn wind stroke at p, travelling with the calf (keep 0..1 of its speed) and
-   * drifting a little to the side (side -1..1 along w.right), so it trails behind and tapers away.
+   * Whitewater thrown up from the sea at p: the crown sheet breaking into fine droplets (spray
+   * clusters), heavier drops arcing out and falling back, and a veil of mist drifting downwind.
+   * k scales the impact (0.5 a skim .. 3 a dive bomb), n the number of pieces, up the throw;
+   * dir (optional) fans it one way, as from a slap.
    */
-  _windStroke(p, side, keep, alpha) {
+  _spray(p, k, n, up, dir = null) {
+    const g = this.game, E = this._em;
+    if (!g.mist) return;
+    let fx = 0, fz = 0;
+    if (dir) { const l = Math.hypot(dir.x, dir.z); if (l > 1e-4) { fx = dir.x / l; fz = dir.z / l; } }
+    const fan = fx !== 0 || fz !== 0;
+    const R = 0.6 + 0.5 * k;
+    for (let i = 0; i < n; i++) {
+      const a = fan ? Math.atan2(fz, fx) + (Math.random() - 0.5) * 1.8 : Math.random() * TAU;
+      const rr = Math.sqrt(Math.random());
+      E.pos.set(p.x + Math.cos(a) * R * rr, p.y + 0.1, p.z + Math.sin(a) * R * rr);
+      const vu = (2.5 + 5.5 * Math.random()) * up * Math.sqrt(k) * 0.8;
+      const vo = (1 + 3.5 * rr) * Math.sqrt(k) * (fan ? 2 : 1);
+      E.vel.set(Math.cos(a) * vo, vu, Math.sin(a) * vo);
+      const kind = i % 4 === 0 ? 3 : 9;
+      if (kind === 3) {
+        // a heavier drop: a refractive sphere of a centimetre or two
+        E.life = 0.8 + Math.random() * 0.9; E.size = 0.008 + 0.014 * Math.random(); E.sizeEnd = E.size;
+        E.alpha = 0.95; E.drag = 0.15; E.gravity = 9.8; E.fadeIn = 0.01;
+      } else {
+        // a torn piece of the sheet, breaking up into fine droplets as it flies
+        E.life = 0.7 + Math.random() * 0.7; E.size = 0.14 + 0.12 * k * Math.random(); E.sizeEnd = E.size * 2.4;
+        E.alpha = 0.85; E.drag = 0.5; E.gravity = 9.8; E.fadeIn = 0.01;
+      }
+      E.kind = kind;
+      E.color[0] = 0.96; E.color[1] = 0.98; E.color[2] = 1.0;
+      g.mist.emit(E);
+    }
+    // the mist the spray leaves hanging over the impact, drifting off downwind
+    const m = Math.round(3 + 4 * Math.min(k, 2.5));
+    for (let i = 0; i < m; i++) {
+      const a = Math.random() * TAU;
+      E.pos.set(p.x + Math.cos(a) * R * 0.7, p.y + 0.3 + Math.random() * R, p.z + Math.sin(a) * R * 0.7);
+      E.vel.set(Math.cos(a) * 1.2 + fx * 2, (0.8 + Math.random() * 1.8) * Math.sqrt(k), Math.sin(a) * 1.2 + fz * 2);
+      E.life = 2 + Math.random() * 1.6; E.size = 0.5 * R; E.sizeEnd = (1.6 + Math.random()) * R;
+      E.alpha = 0.22; E.drag = 1.2; E.gravity = 0.3; E.kind = 0; E.fadeIn = 0.12;
+      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+      g.mist.emit(E);
+    }
+  }
+
+  /** A burst of air: bubbles of many sizes (mostly millimetres, a few big wobbling ones). */
+  _bubbles(p, n, speed) {
+    const g = this.game, E = this._em;
+    if (!g.mist) return;
+    for (let i = 0; i < n; i++) {
+      E.pos.set(p.x + (Math.random() - 0.5) * 0.8, p.y + (Math.random() - 0.5) * 0.8, p.z + (Math.random() - 0.5) * 0.8);
+      E.vel.set((Math.random() - 0.5) * speed, Math.random() * speed * 0.6, (Math.random() - 0.5) * speed);
+      const u = Math.random();
+      E.life = 8; E.size = 0.004 + 0.07 * u * u * u; E.sizeEnd = E.size * 1.25; E.alpha = 0.85;
+      E.drag = 1.6; E.gravity = 0; E.kind = 4; E.fadeIn = 0.03;
+      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+      g.mist.emit(E);
+    }
+  }
+
+  /**
+   * A wisp of condensation in a wingtip vortex at p, left hanging in the air (it hardly moves with
+   * the calf) so a line of them reads as a faint trail; side drifts it along w.right.
+   */
+  _tipVapour(p, side, alpha = 0.14) {
     const g = this.game, w = this.w, E = this._em;
     if (!g.mist) return;
-    E.pos.copy(p).addScaledVector(w.fwd, -0.4 - Math.random() * 0.6);
-    E.vel.copy(w.vel).multiplyScalar(keep).addScaledVector(w.right, side * 1.5 + (Math.random() - 0.5) * 0.6).addScaledVector(w.up, (Math.random() - 0.5) * 0.6);
-    E.life = 0.4 + Math.random() * 0.25; E.size = 0.18 + Math.random() * 0.1; E.sizeEnd = E.size * 0.85;
-    E.alpha = alpha; E.drag = 0.6; E.gravity = 0; E.kind = 6; E.fadeIn = 0.02;
+    E.pos.copy(p).addScaledVector(w.fwd, -0.3 - Math.random() * 0.4);
+    E.vel.copy(w.vel).multiplyScalar(0.06).addScaledVector(w.right, side * 0.8 + (Math.random() - 0.5) * 0.4).addScaledVector(w.up, (Math.random() - 0.5) * 0.3);
+    E.life = 0.6 + Math.random() * 0.5; E.size = 0.06 + Math.random() * 0.04; E.sizeEnd = 0.35 + Math.random() * 0.2;
+    E.alpha = alpha; E.drag = 1.2; E.gravity = 0; E.kind = 0; E.fadeIn = 0.04;
     E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-    E.stretch = 5 + Math.random() * 3;
     g.mist.emit(E);
-    E.stretch = 4;
   }
 }

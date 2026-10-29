@@ -23,6 +23,8 @@ import { G } from '../render/Globals.js';
 import { clamp, damp, lerp, smoothstep, rng, TAU, dirFromYawPitch, easeInOut } from '../core/math.js';
 
 const _mOff = new Vector3();
+// one reused particle record for the story's ambient effects (Particles.emit copies it)
+const _pfx = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 1, sizeEnd: 1, alpha: 1, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.1 };
 const _avA = new Vector3();
 const _avB = new Vector3();
 const _avD = new Vector3();
@@ -1586,9 +1588,14 @@ export class Story {
       this.mistAcc = (this.mistAcc || 0) + rate * dt;
       while (this.mistAcc > 1) {
         this.mistAcc -= 1;
-        for (const side of [-1, 1]) {
-          const tip = calf.pos.clone().addScaledVector(calf.right, side * calf.L * 0.55).addScaledVector(calf.fwd, -calf.L * 0.1);
-          g.mist.emit({ pos: tip, vel: calf.vel.clone().multiplyScalar(0.15), life: 1.6, size: 0.6, sizeEnd: 3.2, alpha: 0.55, drag: 1.2, kind: 0 });
+        // the wingtips' vortices stir the cloud into curling wisps that hang behind
+        for (let side = -1; side <= 1; side += 2) {
+          const E = _pfx;
+          E.pos.copy(calf.pos).addScaledVector(calf.right, side * calf.L * 0.55).addScaledVector(calf.fwd, -calf.L * 0.1);
+          E.vel.copy(calf.vel).multiplyScalar(0.08);
+          E.life = 1.4 + Math.random() * 0.6; E.size = 0.3; E.sizeEnd = 1.8 + Math.random(); E.alpha = 0.35; E.drag = 1.2; E.gravity = 0;
+          E.kind = 0; E.fadeIn = 0.1; E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+          g.mist.emit(E);
         }
       }
     }
@@ -1619,13 +1626,15 @@ export class Story {
     const wind = g.wind.base;
     while (this.petalT > 0.06) {
       this.petalT -= 0.06;
-      const p = calf.pos.clone().add(new Vector3((Math.random() - 0.5) * 90, (Math.random() - 0.2) * 45, (Math.random() - 0.5) * 90));
+      const E = _pfx;
+      E.pos.copy(calf.pos).add(_mOff.set((Math.random() - 0.5) * 90, (Math.random() - 0.2) * 45, (Math.random() - 0.5) * 90));
+      E.vel.set(wind.x * 0.6 + (Math.random() - 0.5) * 1.5, -0.4 - Math.random() * 0.6, wind.z * 0.6 + (Math.random() - 0.5) * 1.5);
+      // a real petal: a couple of centimetres, tumbling as it falls, lit through when backlit
       const pink = Math.random();
-      g.mist.emit({
-        pos: p, vel: new Vector3(wind.x * 0.6 + (Math.random() - 0.5) * 1.5, -0.4 - Math.random() * 0.6, wind.z * 0.6 + (Math.random() - 0.5) * 1.5),
-        life: 7 + Math.random() * 5, size: 0.22 + Math.random() * 0.12, sizeEnd: 0.2,
-        color: [1.0, lerp(0.72, 0.93, pink), lerp(0.8, 0.93, pink)], alpha: 0.85, drag: 0.15, kind: 0, fadeIn: 1.2,
-      });
+      E.life = 7 + Math.random() * 5; E.size = 0.035 + Math.random() * 0.02; E.sizeEnd = E.size;
+      E.color[0] = 1.0; E.color[1] = lerp(0.72, 0.9, pink); E.color[2] = lerp(0.8, 0.9, pink);
+      E.alpha = 0.95; E.drag = 0.15; E.gravity = 0; E.kind = 10; E.fadeIn = 1.2;
+      g.mist.emit(E);
     }
   }
 
@@ -1644,8 +1653,13 @@ export class Story {
       // churning spray where the fall meets the cloud ocean, plus a fine veil along it
       const k = Math.random();
       const y = lip.y - (0.55 + 0.45 * k) * drop;
-      const p = lip.clone().addScaledVector(out, 4 + k * 10).add(new Vector3((Math.random() - 0.5) * w.userData.width * 2, y - lip.y, (Math.random() - 0.5) * w.userData.width * 2));
-      g.mist.emit({ pos: p, vel: new Vector3((Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3), life: 4, size: w.userData.width * 1.2, sizeEnd: w.userData.width * 4, alpha: 0.35, drag: 0.4, kind: 0, fadeIn: 0.8 });
+      const E = _pfx;
+      E.pos.copy(lip).addScaledVector(out, 4 + k * 10).add(_mOff.set((Math.random() - 0.5) * w.userData.width * 2, y - lip.y, (Math.random() - 0.5) * w.userData.width * 2));
+      E.vel.set((Math.random() - 0.5) * 3, 1 + Math.random() * 2, (Math.random() - 0.5) * 3);
+      // the fall's spray billowing up as fine vapour, eroding into wisps on the breeze
+      E.life = 4 + Math.random() * 2; E.size = w.userData.width * 1.0; E.sizeEnd = w.userData.width * (3.5 + Math.random());
+      E.alpha = 0.3; E.drag = 0.4; E.gravity = -0.05; E.kind = 0; E.fadeIn = 0.8; E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+      g.mist.emit(E);
     }
   }
 

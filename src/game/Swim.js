@@ -96,9 +96,10 @@ export function waterStep(w, dt, game, opts = {}) {
       const E = _em;
       for (let i = 0; i < 3 && game.mist; i++) {
         E.pos.copy(_p).add(_v.set((Math.random() - 0.5) * 0.3, Math.random() * 0.2, (Math.random() - 0.5) * 0.3));
-        E.vel.set((Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 1.2, (Math.random() - 0.5) * 0.4);
-        E.life = 1.6; E.size = 0.06 + Math.random() * 0.08; E.sizeEnd = 0.14; E.alpha = 0.7; E.drag = 0.6; E.gravity = -1.5;
-        E.color[0] = 0.85; E.color[1] = 0.95; E.color[2] = 1.0; E.kind = 4; E.fadeIn = 0.05;
+        E.vel.set((Math.random() - 0.5) * 0.4, 0.3 + Math.random() * 0.4, (Math.random() - 0.5) * 0.4);
+        const u = Math.random();
+        E.life = 9; E.size = 0.004 + 0.03 * u * u; E.sizeEnd = E.size * 1.2; E.alpha = 0.85; E.drag = 1.6; E.gravity = 0;
+        E.color[0] = 1; E.color[1] = 1; E.color[2] = 1; E.kind = 4; E.fadeIn = 0.05;
         game.mist.emit(E);
       }
     }
@@ -107,14 +108,7 @@ export function waterStep(w, dt, game, opts = {}) {
       // first breath after a dive: a vapour spout from the blowholes
       s.wasDeep = false;
       _p.copy(w.pos).addScaledVector(w.fwd, w.L * 0.22).addScaledVector(w.up, w.radius);
-      const E = _em;
-      for (let i = 0; i < 14 && game.mist; i++) {
-        E.pos.copy(_p);
-        E.vel.set((Math.random() - 0.5) * 1.2, 4 + Math.random() * 4, (Math.random() - 0.5) * 1.2).multiplyScalar(w.L / 8);
-        E.life = 1.4 + Math.random(); E.size = 0.15 * w.L / 4; E.sizeEnd = 0.9 * w.L / 4; E.alpha = 0.5; E.drag = 1.4; E.gravity = 0;
-        E.color[0] = 1; E.color[1] = 1; E.color[2] = 1; E.kind = 0; E.fadeIn = 0.1;
-        game.mist.emit(E);
-      }
+      spoutColumn(game, _p, w, 0.9);
       opts.onSplash?.('spout', _p, 0.5);
     }
     s.underT = 0;
@@ -123,20 +117,62 @@ export function waterStep(w, dt, game, opts = {}) {
   return s;
 }
 
-/** A splash: painted spray puffs and a crown of drawn droplets thrown up around p. */
+/** A splash: whitewater breaking into fine spray, heavier drops and a little mist around p. */
 function spray(game, p, w, k, up) {
   if (!game.mist) return;
-  const n = Math.round(10 + 22 * Math.min(k, 1.5));
+  const n = Math.round(12 + 26 * Math.min(k, 1.5));
   const E = _em;
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, rr = Math.random();
-    const drop = i % 3 === 0;
-    E.pos.set(p.x + Math.cos(a) * w.radius * rr, p.y + 0.2, p.z + Math.sin(a) * w.radius * rr);
-    E.vel.set(Math.cos(a) * (1 + 3 * rr), (3 + 6 * Math.random()) * up * Math.min(1.4, 0.5 + k) * (drop ? 1.25 : 1), Math.sin(a) * (1 + 3 * rr)).addScaledVector(w.vel, 0.25);
-    E.life = 0.9 + Math.random() * 0.5;
-    E.size = drop ? 0.1 + 0.08 * k : 0.3 + 0.4 * k; E.sizeEnd = drop ? 0.08 : 1.2 + 1.6 * k;
-    E.alpha = drop ? 0.9 : 0.6; E.drag = drop ? 0.2 : 0.5; E.gravity = drop ? 9 : 7;
-    E.color[0] = 0.95; E.color[1] = 0.98; E.color[2] = 1.0; E.kind = drop ? 3 : 0; E.fadeIn = 0.03;
+    const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random());
+    const drop = i % 4 === 0;
+    E.pos.set(p.x + Math.cos(a) * w.radius * rr, p.y + 0.1, p.z + Math.sin(a) * w.radius * rr);
+    E.vel.set(Math.cos(a) * (1 + 3 * rr), (2.5 + 5 * Math.random()) * up * Math.min(1.4, 0.5 + k), Math.sin(a) * (1 + 3 * rr)).addScaledVector(w.vel, 0.25);
+    E.life = 0.8 + Math.random() * 0.6;
+    E.size = drop ? 0.006 + 0.012 * Math.random() : 0.12 + 0.12 * k * Math.random(); E.sizeEnd = drop ? E.size : E.size * 2.4;
+    E.alpha = drop ? 0.95 : 0.85; E.drag = drop ? 0.15 : 0.5; E.gravity = 9.8;
+    E.color[0] = 0.96; E.color[1] = 0.98; E.color[2] = 1.0; E.kind = drop ? 3 : 9; E.fadeIn = 0.01;
     game.mist.emit(E);
+  }
+  for (let i = 0; i < 3 + Math.round(3 * Math.min(k, 1.5)); i++) {
+    const a = Math.random() * Math.PI * 2;
+    E.pos.set(p.x + Math.cos(a) * w.radius, p.y + 0.4, p.z + Math.sin(a) * w.radius);
+    E.vel.set(Math.cos(a) * 0.8, 0.8 + Math.random() * 1.2, Math.sin(a) * 0.8).addScaledVector(w.vel, 0.2);
+    E.life = 1.8 + Math.random() * 1.2; E.size = w.radius * 0.5; E.sizeEnd = w.radius * (1.6 + Math.random());
+    E.alpha = 0.2; E.drag = 1.2; E.gravity = 0.3; E.kind = 0; E.fadeIn = 0.1;
+    E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
+    game.mist.emit(E);
+  }
+}
+
+const _sv = new Vector3();
+const _sc = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.3, sizeEnd: 1, alpha: 0.5, drag: 1, gravity: 0, kind: 0, color: [1, 1, 1], fadeIn: 0.05 };
+/**
+ * A whale's blow at the surface: a tall column of fine vapour shot up from the blowholes, slowing as
+ * it rises, widening, and drifting off with the wind as it dissipates; a few fine drops fall back.
+ * Height scales with the whale (a calf about 3 m, a mother about 9 m). Shared by Swim and the herd.
+ */
+export function spoutColumn(g, p, w, k = 1) {
+  if (!g.mist) return;
+  const E = _sc;
+  const L = w.L || 4;
+  const sc = Math.sqrt(L / 4.2);
+  const n = Math.round((w.isCalf || L < 8 ? 34 : 48) * Math.min(k, 1.5));
+  for (let i = 0; i < n; i++) {
+    const u = i / n;
+    E.pos.copy(p);
+    // a fast jet (up to ~16 m/s on a calf, more on adults), heavy drag: puffs hang at every height
+    const speed = (4 + 12 * Math.pow(Math.random(), 0.7)) * sc * Math.min(1.2, 0.6 + k * 0.4);
+    E.vel.copy(w.up).multiplyScalar(speed).add(_sv.set((Math.random() - 0.5) * 2.2 * sc, 0, (Math.random() - 0.5) * 2.2 * sc)).addScaledVector(w.vel, 0.5);
+    E.life = 2.4 + Math.random() * 2.2; E.size = (0.18 + 0.2 * u) * sc; E.sizeEnd = (1.0 + 1.0 * Math.random()) * sc;
+    E.alpha = 0.3 + 0.15 * Math.random(); E.drag = 2.6 + Math.random(); E.gravity = -0.15; E.kind = 0; E.fadeIn = 0.04;
+    E.color[0] = 0.97; E.color[1] = 0.98; E.color[2] = 1.0;
+    g.mist.emit(E);
+  }
+  for (let i = 0; i < Math.round(10 * sc); i++) {
+    E.pos.copy(p);
+    E.vel.copy(w.up).multiplyScalar((5 + 6 * Math.random()) * sc).add(_sv.set((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5)).addScaledVector(w.vel, 0.5);
+    E.life = 1.2 + Math.random() * 0.8; E.size = 0.004 + 0.006 * Math.random(); E.sizeEnd = E.size;
+    E.alpha = 0.9; E.drag = 0.4; E.gravity = 9.8; E.kind = 3; E.fadeIn = 0.01;
+    g.mist.emit(E);
   }
 }

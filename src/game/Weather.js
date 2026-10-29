@@ -18,19 +18,26 @@ uniform float uRain;
 uniform vec3 uRainOff; // wind-carried offset, integrated on the CPU
 varying float vA;
 varying vec2 vUv;
+varying vec3 vC;
 void main() {
   vec3 vel = vec3(uWind.x * 0.8, -uFall * aDrop.w, uWind.z * 0.8);
   vec3 p = aDrop.xyz + uRainOff + vec3(0.0, vel.y * uTime * 0.07, 0.0);
   p = mod(p - uBoxCenter + uBox * 0.5, uBox) - uBox * 0.5 + uBoxCenter;
-  // stretch the drop along its velocity, facing the camera
+  // a drop of a millimetre or two, motion-blurred along its fall over the exposure (a thin streak,
+  // never thicker than its pixel); it is drawn at least a pixel wide with its coverage as alpha
   vec3 dir = normalize(vel);
   vec3 toCam = normalize(uCamPos - p);
   vec3 side = normalize(cross(dir, toCam));
-  float len = 1.6 + length(vel) * 0.05;
-  vec3 wp = p + side * position.x * 0.025 + dir * position.y * len;
-  vUv = position.xy;
   float d = length(uCamPos - p);
-  vA = uRain * smoothstep(uBox * 0.5, uBox * 0.15, d) * smoothstep(0.5, 2.0, d) * (0.35 + 0.65 * fract(aDrop.w * 13.0));
+  float pxM = d / (projectionMatrix[1][1] * uResolution.y * 0.5);
+  float wdt = max(0.0015, pxM * 0.6);
+  float len = 0.35 + length(vel) * 0.022;
+  vec3 wp = p + side * position.x * wdt + dir * position.y * len;
+  vUv = position.xy;
+  vA = uRain * smoothstep(uBox * 0.5, uBox * 0.15, d) * smoothstep(0.8, 3.0, d) * (0.35 + 0.65 * fract(aDrop.w * 13.0)) * min(1.0, 0.0015 / wdt * 3.0);
+  // lit by the sky behind it, brighter where the sun or a flash shines through it
+  float mu = dot(normalize(p - uCamPos), uSunDir);
+  vC = mix(uSkyHorizon, uSkyZenith, 0.4) * 0.8 + uSunColor * pow(max(mu, 0.0), 6.0) * 0.5 + vec3(0.8, 0.85, 1.0) * uFlash * 0.8;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
 `;
@@ -38,10 +45,10 @@ const RAIN_FRAG = /* glsl */ `
 ${UNIFORMS}
 varying float vA;
 varying vec2 vUv;
+varying vec3 vC;
 void main() {
-  float a = vA * (1.0 - abs(vUv.x)) * smoothstep(-1.0, 0.2, vUv.y) * (1.0 - smoothstep(0.6, 1.0, vUv.y));
-  vec3 c = mix(uSkyAmbient, vec3(0.85, 0.9, 1.0), 0.5) * 0.6 + vec3(0.8, 0.85, 1.0) * uFlash * 0.8;
-  gl_FragColor = vec4(c * a, a);
+  float a = vA * (1.0 - abs(vUv.x)) * (1.0 - abs(vUv.y)) * 0.55;
+  gl_FragColor = vec4(vC * a, a);
 }
 `;
 
@@ -104,6 +111,33 @@ export class Weather {
     this.rainMesh.visible = false;
     this.rainMesh.renderOrder = 40;
     game.engine.sceneT.add(this.rainMesh);
+  }
+
+  /** Rain hitting the sea near the camera: a capillary ring and a tiny crown of drops each. */
+  _splashes(dt) {
+    const g = this.game, mist = g.mist, oc = g.ocean;
+    if (!mist || !oc?.heightApprox || this.rain < 0.05 || dt <= 0 || G.uUnderwater.value > 0.5) return;
+    const cam = g.engine.camera.position;
+    if (cam.y - G.uSeaLevel.value > 40) return;
+    this._spAcc = (this._spAcc || 0) + dt * 90 * this.rain;
+    const E = this._spE || (this._spE = { pos: new Vector3(), vel: new Vector3(), color: [1, 1, 1] });
+    let n = Math.min(6, Math.floor(this._spAcc));
+    this._spAcc -= n;
+    while (n-- > 0) {
+      const a = this.r() * Math.PI * 2, rr = 2 + Math.sqrt(this.r()) * 26;
+      const x = cam.x + Math.cos(a) * rr, z = cam.z + Math.sin(a) * rr;
+      const y = oc.heightApprox(x, z);
+      E.pos.set(x, y + 0.03, z); E.vel.set(0, 0, 0);
+      E.life = 0.45 + this.r() * 0.3; E.size = 0.02; E.sizeEnd = 0.14 + this.r() * 0.12; E.alpha = 0.5;
+      E.drag = 0; E.gravity = 0; E.kind = 8; E.fadeIn = 0.02; E.stretch = 0.12;
+      mist.emit(E);
+      if (this.r() < 0.5) {
+        E.pos.y = y + 0.02;
+        E.vel.set((this.r() - 0.5) * 0.6, 0.8 + this.r() * 0.9, (this.r() - 0.5) * 0.6);
+        E.life = 0.3; E.size = 0.0025; E.sizeEnd = 0.0025; E.alpha = 0.9; E.drag = 0.2; E.gravity = 9.8; E.kind = 3; E.fadeIn = 0.01; E.stretch = 4;
+        mist.emit(E);
+      }
+    }
   }
 
   set(storm, opts = {}) {
@@ -198,6 +232,7 @@ export class Weather {
     off.x = (off.x + w.x * 0.056 * dt) % box;
     off.z = (off.z + w.z * 0.056 * dt) % box;
     G.uWet.value = damp(G.uWet.value, this.rain, 0.3, dt);
+    this._splashes(dt);
     // lightning
     if (this.lightningRate > 0 && L > 0.5 && this.r() < this.lightningRate * dt * L) this.strike();
     this.flashT += dt;

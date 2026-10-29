@@ -76,14 +76,21 @@ void main() {
   float r2 = dot(vUv, vUv);
   if (r2 > 1.0) discard;
   float r = sqrt(r2);
-  // clear centre, bright rim (total internal reflection) and a glint toward the light
-  float a = smoothstep(0.5, 0.86, r) * smoothstep(1.0, 0.88, r) * 0.85 + 0.08;
-  vec2 g = vUv - vec2(-0.32, 0.36);
-  a += exp(-dot(g, g) * 38.0) * 0.9;
+  // an air bubble in water: clear in the middle (it shows what is behind it), a silver rim where
+  // the light reflects totally inside (past the 48.6 degree critical angle), the bright surface
+  // mirrored across its top, a sharp highlight of the sun and a soft caustic opposite it
+  float tir = smoothstep(0.62, 0.8, r) * (1.0 - smoothstep(0.93, 1.0, r) * 0.5);
+  float topRefl = smoothstep(-0.2, 0.7, vUv.y) * tir;
+  vec2 g = vUv - vec2(-0.3, 0.42);
+  float spec = exp(-dot(g, g) * 90.0) * 1.4;
+  vec2 cg = vUv - vec2(0.18, -0.4);
+  float caus = exp(-dot(cg, cg) * 22.0) * 0.3;
+  float a = 0.08 + tir * 0.55 + topRefl * 0.25 + spec + caus;
+  vec3 c = vCol * (0.35 + 0.9 * tir + 0.6 * topRefl) + vec3(1.0) * (spec + caus) * 1.2;
   float soft = clamp((sceneDepthAt(gl_FragCoord.xy / uResolution) - vViewZ) / max(vR * 2.0, 0.05), 0.0, 1.0);
   a *= vA * soft;
   if (a < 0.003) discard;
-  gl_FragColor = vec4(vCol * a, a * 0.85);
+  gl_FragColor = vec4(c * a, min(a, 1.0) * 0.85);
 }
 `;
 

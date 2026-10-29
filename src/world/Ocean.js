@@ -1436,10 +1436,7 @@ export class Ocean {
         const y = this._whirlH(x, z, G.uTime.value) + 0.6 + Math.random() * 2.5;
         const vt = sp * r * 0.5 * dir;
         v.set(-Math.sin(a) * vt, 0.25 + Math.random() * 0.5, Math.cos(a) * vt);
-        mist.emit({
-          pos: this._tp(x, y, z), vel: v, life: 6 + Math.random() * 5, size: 3 + Math.random() * 4, sizeEnd: 10 + Math.random() * 10,
-          color: [1, 1, 1], alpha: 0.12 * w.s, drag: 0.15, gravity: -0.02, kind: 0, fadeIn: 0.35,
-        });
+        this._pe(mist, x, y, z, v.x, v.y, v.z, 6 + Math.random() * 5, 3 + Math.random() * 4, 10 + Math.random() * 10, 1, 0.12 * w.s, 0.15, -0.02, 0, 0.35);
       }
       // spray flicking off the churned lip of the eye
       w._lipAcc = (w._lipAcc || 0) + dt * 14 * w.s;
@@ -1451,10 +1448,9 @@ export class Ocean {
         const y = this._whirlH(x, z, G.uTime.value) + 0.1;
         const vt = sp * w.radius * 0.18 * dir;
         v.set(-Math.sin(a) * vt, 1 + Math.random() * 1.8, Math.cos(a) * vt);
-        mist.emit({
-          pos: this._tp(x, y, z), vel: v, life: 0.8 + Math.random() * 0.8, size: 0.08 + Math.random() * 0.12, sizeEnd: 0.04,
-          color: [0.92, 0.95, 0.97], alpha: 0.75, drag: 0.3, gravity: 9.8, kind: 3, fadeIn: 0.02,
-        });
+        // torn whitewater off the lip: fine spray clusters and the odd heavier drop
+        const cl = Math.random() < 0.7;
+        this._pe(mist, x, y, z, v.x, v.y, v.z, 0.7 + Math.random() * 0.7, cl ? 0.12 + Math.random() * 0.15 : 0.01, cl ? 0.35 : 0.01, 0.96, 0.85, cl ? 0.5 : 0.2, 9.8, cl ? 9 : 3, 0.01);
       }
       // from below: bubbles and motes drawn round the vortex near the camera
       if (this.underwater > 0.5) {
@@ -1469,12 +1465,10 @@ export class Ocean {
             this.whirlFlowAt(x, z, v);
             const bubble = Math.random() < 0.45;
             v.y = bubble ? 0.5 + Math.random() * 0.6 : (Math.random() - 0.5) * 0.15;
-            mist.emit({
-              pos: this._tp(x, y, z), vel: v, life: 3 + Math.random() * 4,
-              size: bubble ? 0.04 + Math.random() * 0.08 : 0.03 + Math.random() * 0.05, sizeEnd: bubble ? 0.1 : 0.03,
-              color: [0.9, 1, 1], alpha: bubble ? 0.7 : 0.55, drag: 0.02, gravity: bubble ? -0.6 : 0, kind: bubble ? 4 : 5,
-              fadeIn: 0.4,
-            });
+            const u = Math.random();
+            const bs = 0.004 + 0.03 * u * u;
+            this._pe(mist, x, y, z, v.x, v.y, v.z, bubble ? 9 : 3 + Math.random() * 4, bubble ? bs : 0.01 + Math.random() * 0.02, bubble ? bs * 1.2 : 0.015,
+              1, bubble ? 0.85 : 0.5, bubble ? 0.3 : 0.02, 0, bubble ? 4 : 5, 0.4);
           }
         }
       }
@@ -1679,6 +1673,18 @@ export class Ocean {
     }
   }
 
+  /** Emit one particle from a reused record (no allocation): see Particles.emit for the fields. */
+  _pe(sys, x, y, z, vx, vy, vz, life, size, sizeEnd, c, alpha, drag, gravity, kind, fadeIn, stretch = 4) {
+    const E = this._rec();
+    E.pos.x = x; E.pos.y = y; E.pos.z = z; E.vel.x = vx; E.vel.y = vy; E.vel.z = vz;
+    E.life = life; E.size = size; E.sizeEnd = sizeEnd; E.alpha = alpha; E.drag = drag; E.gravity = gravity;
+    E.kind = kind; E.fadeIn = fadeIn; E.stretch = stretch;
+    E.color[0] = c; E.color[1] = c; E.color[2] = c;
+    sys.emit(E);
+  }
+
+  _rec() { return this._peRec || (this._peRec = { pos: { x: 0, y: 0, z: 0 }, vel: { x: 0, y: 0, z: 0 }, color: [1, 1, 1] }); }
+
   /** A reused position for particle emission (Particles.emit copies it at once). */
   _tp(x, y, z) {
     const p = this._tpos || (this._tpos = { x: 0, y: 0, z: 0 });
@@ -1773,13 +1779,12 @@ export class Ocean {
       if (J > this.foamJ * 0.8 || d.y < this.rms * 0.6) continue;
       const k = clamp((this.foamJ - J) * 2, 0.2, 1.2);
       const px = x + d.x, pz = z + d.z, py = this.level + d.y;
-      for (let i = 0; i < 6; i++) {
+      // spindrift: the crest torn into spray and streaming spume, carried off by the gale
+      for (let i = 0; i < 7; i++) {
         v.set(wx * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2, 1.5 + Math.random() * 3 * k, wz * (0.6 + Math.random() * 0.5) + (Math.random() - 0.5) * 2);
-        this.game.mist.emit({
-          pos: this._tp(px + (Math.random() - 0.5) * 4, py + 0.3, pz + (Math.random() - 0.5) * 4), vel: v,
-          life: 1.2 + Math.random() * 1.4, size: 0.8 + Math.random() * 1.2, sizeEnd: 3.5 + Math.random() * 3,
-          color: [0.92, 0.95, 1.0], alpha: 0.32 * k, drag: 0.7, gravity: 2.5, kind: 0, fadeIn: 0.1,
-        });
+        const qx = px + (Math.random() - 0.5) * 4, qz = pz + (Math.random() - 0.5) * 4;
+        if (i < 4) this._pe(this.game.mist, qx, py + 0.2, qz, v.x, v.y, v.z, 0.8 + Math.random() * 0.8, 0.25 + Math.random() * 0.3, 0.8 + Math.random() * 0.5, 0.95, 0.75 * k, 0.6, 9.8, 9, 0.02);
+        else this._pe(this.game.mist, qx, py + 0.3, qz, v.x, v.y, v.z, 1.6 + Math.random() * 1.4, 0.7 + Math.random() * 0.8, 3 + Math.random() * 3, 0.95, 0.2 * k, 0.9, 0.6, 0, 0.1);
       }
     }
   }
@@ -1796,11 +1801,8 @@ export class Ocean {
       const a = Math.random() * TAU, r = 1.5 + Math.random() * 14, y = (Math.random() - 0.5) * 12;
       const py = Math.min(cam.y + y, this.camSurface - 0.3);
       v.set((Math.random() - 0.5) * 0.15, -0.05 - Math.random() * 0.1, (Math.random() - 0.5) * 0.15);
-      mist.emit({
-        pos: this._tp(cam.x + Math.cos(a) * r, py, cam.z + Math.sin(a) * r), vel: v,
-        life: 5 + Math.random() * 4, size: 0.025 + Math.random() * 0.04, sizeEnd: 0.03,
-        color: [1, 1, 1], alpha: 0.5 + Math.random() * 0.4, drag: 0.05, gravity: 0, kind: 5, fadeIn: 1.2,
-      });
+      this._pe(mist, cam.x + Math.cos(a) * r, py, cam.z + Math.sin(a) * r, v.x, v.y, v.z, 5 + Math.random() * 4, 0.012 + Math.random() * 0.025, 0.02,
+        1, 0.45 + Math.random() * 0.4, 0.05, 0, 5, 1.2);
     }
     // drifting plankton: tiny living motes that catch the light (and glow blue-green at night)
     const glow = this.game.glow;
@@ -1812,13 +1814,15 @@ export class Ocean {
       const a = Math.random() * TAU, r = 2 + Math.random() * 12, y = (Math.random() - 0.5) * 10;
       const py = Math.min(cam.y + y, this.camSurface - 0.4);
       v.set((Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * 0.25);
-      const warm = Math.random() < 0.25;
-      glow.emit({
-        pos: this._tp(cam.x + Math.cos(a) * r, py, cam.z + Math.sin(a) * r), vel: v,
-        life: 3 + Math.random() * 4, size: 0.03 + Math.random() * 0.05, sizeEnd: 0.02,
-        color: warm ? [0.9, 0.6, 1.0] : [0.25, 0.95, 0.85], alpha: (0.1 + 0.6 * night) * (0.5 + Math.random() * 0.5),
-        drag: 0.1, gravity: 0, kind: 1, fadeIn: 0.8,
-      });
+      // dinoflagellate blue-green, now and then a softer violet; sizes vary like bokeh
+      const warm = Math.random() < 0.2;
+      const E = this._rec();
+      E.pos.x = cam.x + Math.cos(a) * r; E.pos.y = py; E.pos.z = cam.z + Math.sin(a) * r;
+      E.vel.x = v.x; E.vel.y = v.y; E.vel.z = v.z;
+      E.life = 3 + Math.random() * 4; E.size = 0.02 + Math.random() * 0.06; E.sizeEnd = E.size * 0.6;
+      E.color[0] = warm ? 0.55 : 0.25; E.color[1] = warm ? 0.5 : 0.8; E.color[2] = warm ? 0.9 : 0.85;
+      E.alpha = (0.1 + 0.6 * night) * (0.5 + Math.random() * 0.5); E.drag = 0.1; E.gravity = 0; E.kind = 1; E.fadeIn = 0.8; E.stretch = 4;
+      glow.emit(E);
     }
     // now and then a stream of bubbles rises from the sea floor below
     this._bubAcc = (this._bubAcc || 0) + dt * 0.6;
@@ -1828,13 +1832,11 @@ export class Ocean {
       const bx = cam.x + Math.cos(a) * r, bz = cam.z + Math.sin(a) * r;
       const floor = this.game.story?.world?.seabedAt?.(bx, bz) ?? this.game.ecoFloor?.(bx, bz) ?? cam.y - 12;
       const by = Math.max(floor, cam.y - 16);
-      for (let i = 0; i < 10; i++) {
-        v.set((Math.random() - 0.5) * 0.15, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.15);
-        mist.emit({
-          pos: this._tp(bx + (Math.random() - 0.5) * 0.3, by + i * 0.35, bz + (Math.random() - 0.5) * 0.3), vel: v,
-          life: 4 + Math.random() * 3, size: 0.03 + Math.random() * 0.06, sizeEnd: 0.08,
-          color: [0.9, 1, 1], alpha: 0.7, drag: 0.3, gravity: -0.8, kind: 4, fadeIn: 0.1,
-        });
+      for (let i = 0; i < 14; i++) {
+        const u = Math.random();
+        const bs = 0.003 + 0.02 * u * u;
+        this._pe(mist, bx + (Math.random() - 0.5) * 0.3, by + i * 0.3, bz + (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.15, 0.3, (Math.random() - 0.5) * 0.15,
+          12, bs, bs * 1.3, 1, 0.85, 1.6, 0, 4, 0.1);
       }
     }
   }
@@ -1852,13 +1854,16 @@ export class Ocean {
     this._sources.push({ x, z, r, imp, foam, glow, ring });
   }
 
+  /**
+   * Whitewater from an impact: the crown (or a fan along dir) as sheets breaking into fine
+   * droplets, heavier drops arcing out, and a veil of mist drifting off downwind. Sized by the
+   * impact: s ~0.2 (a skim) .. 3 (a big whale landing).
+   */
   _spray(pos, s, radius, mistK = 1, dir = null) {
     const g = this.game;
     const mist = g.mist, glow = g.glow;
     if (!mist) return;
-    const v = this._v2;
-    const n = Math.round(8 + 40 * Math.min(s, 2.5));
-    const lit = 0.9;
+    const n = Math.round(10 + 46 * Math.min(s, 2.5));
     // a slap throws a fan of water along dir instead of a crown
     let dx = 0, dz = 0;
     if (dir) {
@@ -1866,40 +1871,41 @@ export class Ocean {
       if (l > 1e-4) { dx = dir.x / l; dz = dir.z / l; }
     }
     const fan = dx !== 0 || dz !== 0 ? 1 : 0;
+    const ss = Math.sqrt(s);
     for (let i = 0; i < n; i++) {
       const a = fan ? Math.atan2(dz, dx) + (Math.random() - 0.5) * 1.6 : Math.random() * TAU;
       const rr = Math.sqrt(Math.random()) * radius * 0.8;
-      const up = (3 + Math.random() * 7) * Math.sqrt(s) * (fan ? 0.8 : 1);
-      const out = (1.5 + Math.random() * 3) * Math.sqrt(s) * (fan ? 2.4 : 1);
-      v.set(Math.cos(a) * out, up, Math.sin(a) * out);
-      mist.emit({
-        pos: this._tp(pos.x + Math.cos(a) * rr, pos.y + 0.2, pos.z + Math.sin(a) * rr), vel: v,
-        life: 0.9 + Math.random() * 1.2, size: 0.12 + Math.random() * 0.2, sizeEnd: 0.05,
-        color: [lit, lit, lit], alpha: 0.9, drag: 0.25, gravity: 9.8, kind: 3, fadeIn: 0.02,
-      });
+      const up = (2.5 + Math.random() * 6) * ss * (fan ? 0.8 : 1);
+      const out = (1.5 + Math.random() * 3) * ss * (fan ? 2.4 : 1);
+      const drop = i % 3 === 0;
+      this._pe(mist, pos.x + Math.cos(a) * rr, pos.y + 0.1, pos.z + Math.sin(a) * rr, Math.cos(a) * out, up, Math.sin(a) * out,
+        drop ? 0.9 + Math.random() * 1.0 : 0.7 + Math.random() * 0.8,
+        drop ? 0.006 + Math.random() * 0.016 : (0.12 + Math.random() * 0.18) * Math.min(1.6, 0.5 + ss * 0.5),
+        drop ? 0.012 : (0.35 + Math.random() * 0.3) * Math.min(1.6, 0.5 + ss * 0.5),
+        0.96, drop ? 0.95 : 0.85, drop ? 0.15 : 0.5, 9.8, drop ? 3 : 9, 0.01);
     }
     // a thin veil of mist over the crown, drifting off downwind
     const m = Math.round((2 + 5 * Math.min(s, 2.5)) * mistK);
     for (let i = 0; i < m; i++) {
       const a = Math.random() * TAU;
       const rr = (0.5 + Math.random() * 0.5) * radius * 0.8;
-      v.set(Math.cos(a) * 1.2, (0.8 + Math.random() * 2.2) * Math.sqrt(s), Math.sin(a) * 1.2);
-      mist.emit({
-        pos: this._tp(pos.x + Math.cos(a) * rr, pos.y + 0.6, pos.z + Math.sin(a) * rr), vel: v,
-        life: 1.8 + Math.random() * 1.6, size: radius * 0.25 * Math.sqrt(s), sizeEnd: radius * 0.9 * Math.sqrt(s),
-        color: [1, 1, 1], alpha: 0.2, drag: 1.1, gravity: 0.4, kind: 0, fadeIn: 0.1,
-      });
+      this._pe(mist, pos.x + Math.cos(a) * rr, pos.y + 0.5, pos.z + Math.sin(a) * rr, Math.cos(a) * 1.2, (0.8 + Math.random() * 2.2) * ss, Math.sin(a) * 1.2,
+        2 + Math.random() * 1.8, radius * 0.22 * ss, radius * (0.7 + Math.random() * 0.4) * ss, 1, 0.18, 1.1, 0.3, 0, 0.12);
     }
+    // spreading rings where the water falls back
+    if (s >= 0.3) this._pe(mist, pos.x, pos.y + 0.05, pos.z, 0, 0, 0, 1.6 + s * 0.4, radius * 0.6, radius * (1.6 + s * 0.6), 1, 0.35, 0, 0, 8, 0.05, 0.1);
     if (glow && G.uWaterParams.value.z > 0.05) {
+      // at night the churned water lights its plankton: soft blue-green bokeh in the spray
       const q = Math.round(6 + 14 * Math.min(s, 2));
+      const E = this._rec();
       for (let i = 0; i < q; i++) {
         const a = Math.random() * TAU;
-        v.set(Math.cos(a) * 2, 2 + Math.random() * 4, Math.sin(a) * 2);
-        glow.emit({
-          pos: this._tp(pos.x + Math.cos(a) * radius * 0.5, pos.y + 0.3, pos.z + Math.sin(a) * radius * 0.5), vel: v,
-          life: 0.8 + Math.random(), size: 0.18, sizeEnd: 0.06, color: [0.25, 0.75, 1.0],
-          alpha: 0.6 * G.uWaterParams.value.z, drag: 0.4, gravity: 9.8, kind: 1,
-        });
+        E.pos.x = pos.x + Math.cos(a) * radius * 0.5; E.pos.y = pos.y + 0.3; E.pos.z = pos.z + Math.sin(a) * radius * 0.5;
+        E.vel.x = Math.cos(a) * 2; E.vel.y = 2 + Math.random() * 4; E.vel.z = Math.sin(a) * 2;
+        E.life = 0.8 + Math.random(); E.size = 0.06 + Math.random() * 0.12; E.sizeEnd = E.size * 0.4;
+        E.color[0] = 0.25; E.color[1] = 0.7; E.color[2] = 0.95;
+        E.alpha = 0.6 * G.uWaterParams.value.z; E.drag = 0.4; E.gravity = 9.8; E.kind = 1; E.fadeIn = 0.02; E.stretch = 4;
+        glow.emit(E);
       }
     }
   }

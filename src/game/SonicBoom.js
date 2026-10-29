@@ -1,6 +1,7 @@
 // Sonic booms from the throat resonator: a pressure wave that blows clouds apart (they slowly reform),
-// bursts out as a painted 2D effect (a soft flash and a few hand-drawn arcs and strokes of wind, never a
-// perfect ring or a lens circle), shakes the camera, scatters creatures and knocks back the falcon.
+// shows as a real condensation flash (a thin vapour shell or cone that forms around the whale and
+// evaporates within a second, plus a pressure ripple racing over the sea below), shakes the camera,
+// scatters creatures and knocks back the falcon.
 // Adults' booms are far larger and can be synchronised into one enormous protective wave.
 import { Vector3 } from 'three';
 import { G } from '../render/Globals.js';
@@ -11,7 +12,6 @@ const _u = new Vector3();
 const _w = new Vector3();
 const _d = new Vector3();
 const _hz = new Vector3();
-const TAU = Math.PI * 2;
 
 export class SonicBooms {
   constructor(game) {
@@ -35,7 +35,7 @@ export class SonicBooms {
     G.uBoomParams.value[i].set(radius, strength, speed, 0);
     const b = { center: center.clone(), t: 0, radius, speed, power, hitFalcon: false, source: opts.source };
     this.active.push(b);
-    this._paint(center, radius, speed, power);
+    this._paint(center, radius, speed, power, opts.source);
     // camera shake by proximity
     const camD = g.engine.camera.position.distanceTo(center);
     g.cameraRig.addShake(clamp(1.2 - camD / (radius * 2.5), 0, 1) * (0.4 + power * 0.4));
@@ -84,57 +84,65 @@ export class SonicBooms {
   }
 
   /**
-   * The boom as a painted burst: a soft flash at the throat and a few hand-drawn arcs of wind flung
-   * outward (uneven angles, radii and lengths, so it never closes into a ring), with a handful of
-   * straight-ish speed strokes between them. Laid out across the view so it reads on screen.
+   * The boom made visible the way air shows it: the pressure drop condenses the humid air into a
+   * thin vapour shell for a moment (a cone opening back from the nose when a whale makes it, a
+   * sphere otherwise), dense at first and eroding away in under a second; a dark ripple of
+   * roughened water races out over the sea below.
    */
-  _paint(center, radius, speed, power) {
+  _paint(center, radius, speed, power, src) {
     const g = this.game, E = this._em;
     if (!g.mist) return;
-    const cam = g.engine.camera;
-    cam.getWorldDirection(_f);
+    const L = src?.L ?? clamp(radius * 0.08, 3, 30);
+    const cone = !!src?.fwd;
+    if (cone) _f.copy(src.fwd); else _f.set(0, 1, 0);
     _u.set(0, 1, 0).cross(_f);
     if (_u.lengthSq() < 1e-6) _u.set(1, 0, 0);
     _u.normalize();
     _w.copy(_f).cross(_u).normalize();
-    const camD = Math.max(1, cam.position.distanceTo(center));
-    const width = clamp(radius * 0.026, 0.15, 6) * clamp(camD / 25, 0.6, 1.6);
-    const out = speed * 0.32;
-    // soft flash: a few overlapping painted glow dots, quick
-    if (g.glow) {
-      for (let k = 0; k < 4; k++) {
-        E.pos.copy(center).addScaledVector(_u, (Math.random() - 0.5) * radius * 0.04).addScaledVector(_w, (Math.random() - 0.5) * radius * 0.04);
-        E.vel.set(0, 0, 0);
-        E.life = 0.16 + Math.random() * 0.1; E.size = clamp(radius * 0.03, 0.4, 9) * (0.6 + Math.random() * 0.6); E.sizeEnd = E.size * 1.5;
-        E.alpha = 0.4; E.drag = 0; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
-        E.color[0] = 1; E.color[1] = 0.96; E.color[2] = 0.88;
-        g.glow.emit(E);
+    // the shell: big enough to wrap the whale, bigger for bigger booms
+    const R = clamp(L * 0.55 + radius * 0.012, 1.5, 40);
+    const n = Math.round(clamp(70 + power * 30, 70, 150));
+    const puff = R * (cone ? 0.24 : 0.2);
+    for (let k = 0; k < n; k++) {
+      // even coverage: a golden-angle spiral over the shell
+      const u = (k + 0.5) / n;
+      const az = k * 2.39996 + Math.random() * 0.3;
+      let along, rad;
+      if (cone) {
+        // a bell from just behind the head flaring back past the wings
+        along = -u * R * 1.5;
+        rad = R * (0.35 + 0.75 * Math.sqrt(u));
+      } else {
+        const ct = 1 - 2 * u;
+        along = ct * R;
+        rad = Math.sqrt(Math.max(0, 1 - ct * ct)) * R;
       }
-    }
-    const arcs = Math.round(clamp(5 + power * 3, 5, 10));
-    const a0 = Math.random() * TAU;
-    for (let k = 0; k < arcs; k++) {
-      const a = a0 + ((k + (Math.random() - 0.5) * 0.7) / arcs) * TAU;
-      _d.copy(_u).multiplyScalar(Math.cos(a)).addScaledVector(_w, Math.sin(a)).addScaledVector(_f, (Math.random() - 0.5) * 0.3).normalize();
-      const sp = out * lerp(0.6, 1.05, Math.random());
-      E.pos.copy(center).addScaledVector(_d, radius * lerp(0.04, 0.1, Math.random()));
-      E.vel.copy(_d).multiplyScalar(sp);
-      E.life = lerp(0.6, 0.9, Math.random()); E.size = width * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 1.4;
-      E.alpha = 0.75; E.drag = 2.4; E.gravity = 0; E.kind = 7; E.fadeIn = 0.02;
-      E.stretch = lerp(2.2, 3.4, Math.random());
-      E.color[0] = 0.97; E.color[1] = 0.99; E.color[2] = 1.0;
+      _d.copy(_u).multiplyScalar(Math.cos(az) * rad).addScaledVector(_w, Math.sin(az) * rad).addScaledVector(_f, along);
+      E.pos.copy(center).add(_d);
+      // it barely moves: the vapour forms in place, swells a little, and is left behind
+      _d.normalize();
+      E.vel.copy(_d).multiplyScalar(R * lerp(0.4, 0.9, Math.random()));
+      if (src?.vel) E.vel.addScaledVector(src.vel, 0.25);
+      E.life = lerp(0.45, 0.9, Math.random()) * (cone ? 1 : 1.2); E.size = puff * lerp(0.8, 1.2, Math.random()); E.sizeEnd = E.size * 1.7;
+      E.alpha = lerp(0.35, 0.55, Math.random()) * (cone ? 1 - 0.4 * u : 1); E.drag = 3.5; E.gravity = 0; E.kind = 0; E.fadeIn = 0.015;
+      E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
       g.mist.emit(E);
-      // a speed stroke between this arc and the next
-      if (Math.random() < 0.45) {
-        const b = a + (TAU / arcs) * lerp(0.35, 0.65, Math.random());
-        _d.copy(_u).multiplyScalar(Math.cos(b)).addScaledVector(_w, Math.sin(b)).normalize();
-        E.pos.copy(center).addScaledVector(_d, radius * lerp(0.06, 0.14, Math.random()));
-        E.vel.copy(_d).multiplyScalar(sp * 1.1);
-        E.life = lerp(0.35, 0.55, Math.random()); E.size = width * 0.55; E.sizeEnd = E.size * 0.8;
-        E.alpha = 0.55; E.kind = 6; E.stretch = lerp(3, 4.5, Math.random());
+    }
+    // the pressure ripple on the sea, if the boom is low enough to touch it
+    const sea = g.ocean?.heightApprox ? g.ocean.heightApprox(center.x, center.z) : G.uSeaLevel.value;
+    const h = center.y - sea;
+    if (h < radius * 0.9 && h > -2) {
+      const reach = Math.sqrt(Math.max(radius * radius - h * h, 1)) * 0.9;
+      for (let k = 0; k < 2; k++) {
+        E.pos.set(center.x, sea + 0.05, center.z);
+        E.vel.set(0, 0, 0);
+        E.life = clamp(reach / speed, 0.4, 3) * (1.1 + k * 0.5); E.size = Math.max(1, h * 0.3); E.sizeEnd = reach * (1 - k * 0.35);
+        E.alpha = 0.4 * clamp(1.4 - h / radius, 0.2, 1) * (1 - k * 0.4); E.drag = 0; E.gravity = 0; E.kind = 8; E.fadeIn = 0.03;
+        E.stretch = 0.14 + k * 0.08;
+        E.color[0] = 0.95; E.color[1] = 0.97; E.color[2] = 1.0;
         g.mist.emit(E);
       }
+      E.stretch = 4;
     }
-    E.stretch = 4;
   }
 }

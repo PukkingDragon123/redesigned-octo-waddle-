@@ -380,14 +380,16 @@ export class WhaleEgg {
     const v = this._v;
     const sea = this._sea;
     if (mist) {
+      // the shell's fluid bursting out: sheets breaking into fine spray, and heavier drops
       for (let i = 0; i < 70; i++) {
         const th = this._rand() * TAU;
         const out = 1 + this._rand() * 3.5;
         v.set(Math.cos(th) * out, 2 + this._rand() * 5, Math.sin(th) * out);
+        const drop = i % 3 === 0;
         mist.emit({
           pos: this._tp(c.x + Math.cos(th) * b * 0.8, c.y + b * 0.4, c.z + Math.sin(th) * b * 0.8), vel: v,
-          life: 0.8 + this._rand(), size: 0.07 + this._rand() * 0.12, sizeEnd: 0.04,
-          color: [1, 0.95, 0.88], alpha: 0.85, drag: 0.3, gravity: 9.8, kind: 3, fadeIn: 0.02,
+          life: 0.8 + this._rand(), size: drop ? 0.006 + this._rand() * 0.012 : 0.1 + this._rand() * 0.12, sizeEnd: drop ? 0.012 : 0.3,
+          color: [1, 0.97, 0.92], alpha: drop ? 0.95 : 0.85, drag: drop ? 0.15 : 0.5, gravity: 9.8, kind: drop ? 3 : 9, fadeIn: 0.01,
         });
       }
       // a warm cloud of fluid spilling over the water
@@ -404,10 +406,11 @@ export class WhaleEgg {
       for (let i = 0; i < 60; i++) {
         const th = this._rand() * TAU, rr = this._rand() * b * 1.4;
         v.set(Math.cos(th) * 0.4, 0.6 + this._rand() * 1.2, Math.sin(th) * 0.4);
+        const bs = 0.004 + 0.05 * Math.pow(this._rand(), 3);
         mist.emit({
           pos: this._tp(c.x + Math.cos(th) * rr, sea - 0.3 - this._rand() * b * 1.2, c.z + Math.sin(th) * rr), vel: v,
-          life: 1.5 + this._rand() * 2, size: 0.04 + this._rand() * 0.1, sizeEnd: 0.12,
-          color: [1, 0.97, 0.92], alpha: 0.8, drag: 0.3, gravity: -1.2, kind: 4, fadeIn: 0.05,
+          life: 8, size: bs, sizeEnd: bs * 1.3,
+          color: [1, 1, 1], alpha: 0.85, drag: 1.6, gravity: 0, kind: 4, fadeIn: 0.05,
         });
       }
     }

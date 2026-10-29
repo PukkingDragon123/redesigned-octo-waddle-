@@ -63,8 +63,10 @@ void main() {
   float cover = 1.0;
   if ((kind > 1.5 && kind < 5.5) || kind > 9.5) {
     float px0 = s * pxPerM;
-    float grow = max(1.0, 0.8 / max(px0, 1e-3));
-    cover = 1.0 / (grow * grow);
+    // bubbles flash as bright silver points even when tiny (light reflects totally inside them)
+    bool bub = kind > 3.5 && kind < 4.5;
+    float grow = max(1.0, (bub ? 1.6 : 0.8) / max(px0, 1e-3));
+    cover = bub ? 1.0 / grow : 1.0 / (grow * grow);
     s *= grow;
   }
   vec2 ax = vec2(1.0, 0.0);
@@ -308,6 +310,10 @@ void main() {
     col += vec3(0.06, 0.45, 0.8) * uWaterParams.z * 0.3;
     col *= vCol.rgb;
     a = edge * (0.1 + 0.75 * tir + min(spec + caus, 1.0) * 0.8);
+    // a bubble only a few pixels wide reads as a silver glint, as on film
+    float tiny = 1.0 - smoothstep(1.5, 4.0, vPx);
+    col = mix(col, (surf * 1.25 + vSunIso * 0.45) * vCol.rgb, tiny);
+    a = mix(a, edge * (0.55 + 0.4 * (1.0 - rr)), tiny);
   } else if (kind < 5.5) {
     // ---- marine snow: a soft, slightly out-of-focus fleck lit by the water light
     float r = length(p);

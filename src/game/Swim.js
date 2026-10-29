@@ -156,15 +156,18 @@ export function spoutColumn(g, p, w, k = 1) {
   const E = _sc;
   const L = w.L || 4;
   const sc = Math.sqrt(L / 4.2);
-  const n = Math.round((w.isCalf || L < 8 ? 34 : 48) * Math.min(k, 1.5));
+  // many faint, overlapping puffs: a narrow jet at the blowhole that blooms into a bushy plume
+  // (the faster, higher puffs spread wider) and drifts off with the wind, never a stack of balls
+  const n = Math.round((w.isCalf || L < 8 ? 72 : 100) * Math.min(k, 1.5));
   for (let i = 0; i < n; i++) {
-    const u = i / n;
-    E.pos.copy(p);
-    // a fast jet (up to ~16 m/s on a calf, more on adults), heavy drag: puffs hang at every height
-    const speed = (4 + 12 * Math.pow(Math.random(), 0.7)) * sc * Math.min(1.2, 0.6 + k * 0.4);
-    E.vel.copy(w.up).multiplyScalar(speed).add(_sv.set((Math.random() - 0.5) * 2.2 * sc, 0, (Math.random() - 0.5) * 2.2 * sc)).addScaledVector(w.vel, 0.5);
-    E.life = 2.4 + Math.random() * 2.2; E.size = (0.18 + 0.2 * u) * sc; E.sizeEnd = (1.0 + 1.0 * Math.random()) * sc;
-    E.alpha = 0.3 + 0.15 * Math.random(); E.drag = 2.6 + Math.random(); E.gravity = -0.15; E.kind = 0; E.fadeIn = 0.04;
+    const u = Math.random();
+    const speed = (3 + 13 * Math.pow(u, 0.6)) * sc * Math.min(1.2, 0.6 + k * 0.4);
+    const spread = (0.5 + 2.9 * u) * sc;
+    const a = Math.random() * 6.2832, r = Math.sqrt(Math.random());
+    E.pos.copy(p).addScaledVector(w.up, Math.random() * 0.35 * sc);
+    E.vel.copy(w.up).multiplyScalar(speed).add(_sv.set(Math.cos(a) * r * spread, 0, Math.sin(a) * r * spread)).addScaledVector(w.vel, 0.5);
+    E.life = 2.6 + Math.random() * 2.4; E.size = (0.12 + 0.18 * Math.random()) * sc; E.sizeEnd = (0.7 + 1.3 * u + 0.5 * Math.random()) * sc;
+    E.alpha = 0.16 + 0.12 * Math.random(); E.drag = 2.2 + Math.random() * 1.2; E.gravity = -0.15; E.kind = 0; E.fadeIn = 0.05;
     E.color[0] = 0.97; E.color[1] = 0.98; E.color[2] = 1.0;
     g.mist.emit(E);
   }

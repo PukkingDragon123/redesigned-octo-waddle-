@@ -101,8 +101,10 @@ export class SonicBooms {
     _w.copy(_f).cross(_u).normalize();
     // the shell: big enough to wrap the whale, bigger for bigger booms
     const R = clamp(L * 0.55 + radius * 0.012, 1.5, 40);
-    const n = Math.round(clamp(70 + power * 30, 70, 150));
-    const puff = R * (cone ? 0.24 : 0.2);
+    // many small, faint puffs that overlap into one smooth translucent veil (a real condensation
+    // shell is thin and glassy, gone in a blink; a few big puffs read as a ball of cotton)
+    const n = Math.round(clamp(220 + power * 80, 220, 380));
+    const puff = R * (cone ? 0.12 : 0.1);
     for (let k = 0; k < n; k++) {
       // even coverage: a golden-angle spiral over the shell
       const u = (k + 0.5) / n;
@@ -121,10 +123,10 @@ export class SonicBooms {
       E.pos.copy(center).add(_d);
       // it barely moves: the vapour forms in place, swells a little, and is left behind
       _d.normalize();
-      E.vel.copy(_d).multiplyScalar(R * lerp(0.4, 0.9, Math.random()));
+      E.vel.copy(_d).multiplyScalar(R * lerp(0.25, 0.55, Math.random()));
       if (src?.vel) E.vel.addScaledVector(src.vel, 0.25);
-      E.life = lerp(0.45, 0.9, Math.random()) * (cone ? 1 : 1.2); E.size = puff * lerp(0.8, 1.2, Math.random()); E.sizeEnd = E.size * 1.7;
-      E.alpha = lerp(0.35, 0.55, Math.random()) * (cone ? 1 - 0.4 * u : 1); E.drag = 3.5; E.gravity = 0; E.kind = 0; E.fadeIn = 0.015;
+      E.life = lerp(0.3, 0.6, Math.random()) * (cone ? 1 : 1.15); E.size = puff * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 2.3;
+      E.alpha = lerp(0.09, 0.18, Math.random()) * (cone ? 1 - 0.45 * u : 1); E.drag = 4; E.gravity = 0; E.kind = 0; E.fadeIn = 0.012;
       E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
       g.mist.emit(E);
     }

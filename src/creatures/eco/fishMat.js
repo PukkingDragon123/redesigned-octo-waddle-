@@ -482,7 +482,7 @@ void main() {
     float ray = vR.w;
     float s = vF.z;
 #if SPECIES == 0
-    vec3 fin = part < 1.5 ? mix(vec3(0.5, 0.53, 0.55), pC, 0.18 + 0.2 * (1.0 - s)) : mix(vec3(0.45, 0.5, 0.53), pA, 0.45);
+    vec3 fin = part < 1.5 ? mix(vec3(0.62, 0.62, 0.5), pC, 0.35 + 0.25 * (1.0 - s)) : mix(vec3(0.5, 0.55, 0.55), pA, 0.45);
     float nR = part < 1.5 ? 14.0 : 8.0;
 #elif SPECIES == 1
     vec3 fin = part > 1.5 && part < 2.5 ? pC * 0.7 : (part > 7.5 ? vec3(0.32, 0.28, 0.14) : mix(pA, pB, 0.5));
@@ -496,7 +496,7 @@ void main() {
     float rays = smoothstep(0.42, 0.18, abs(fract(ray * nR * br + 0.08 * sin(s * 7.0 + ray * 11.0)) - 0.5)) * smoothstep(0.02, 0.15, s);
     rays *= 0.8 + 0.2 * smoothstep(0.3, 0.8, sin(s * 60.0 + ray * 3.0));
     // hyaline membrane with fine, slightly darker rays
-    albedo = fin * (1.0 - rays * 0.3) * 0.7;
+    albedo = fin * (1.0 - rays * 0.35) * 0.9;
     // translucent membrane, thicker and darker at the margins
     float margin = smoothstep(0.82, 1.0, s);
     albedo = mix(albedo, albedo * 0.4, margin * 0.6);
@@ -530,7 +530,7 @@ void main() {
 #elif SPECIES == 1
     float memA = part > 1.5 && part < 2.5 ? 0.78 : 0.66;
 #else
-    float memA = 0.7;
+    float memA = 0.8;
 #endif
     alpha = (1.0 - smoothstep(edge - 0.035, edge + 0.01, s)) * mix(memA, min(memA + 0.12, 1.0), max(rays, smoothstep(0.3, 0.0, s)));
     if (dot(N, V) < 0.0) N = -N;

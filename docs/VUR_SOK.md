@@ -237,6 +237,20 @@ User: *"I hate the new particles. All particles: I want realistic, ultra-realist
   - Sonic boom: a realistic condensation flash or vapour cone that dissipates in a moment.
 - Keep them grounded in the natural film grade, and never veil the camera.
 
+### 0.10 Real effects systems, a hunting whale (newest)
+User: *"Remove the giant tree, and fix the weird puff particle, I hate that particle. Make a new system for
+splash and wind line effects and wind effects etc instead. Remove the weird red dot on the mouth too, it's a
+little weird. Make the whale eat and be able to be hostile, and remove crabs."*
+- **Giant trees:** removed (done by the lead).
+- **No puff particles:** the round vapour puffs are gone everywhere. They are replaced by purpose-built effect
+  systems:
+  - a splash system: water sheets, crowns, droplets and foam on the sea;
+  - wind lines: thin flowing streamlines that show the wind and the whale's speed;
+  - wind effects: gusts over the sea, spray blown off crests, and the like.
+- **Whale mouth:** no red dot.
+- **Hunting:** the whale can hunt, bite and eat, and can be hostile to other creatures, which react with fear.
+- **No crabs.**
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

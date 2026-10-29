@@ -30,9 +30,9 @@ const STRIDE = 20; // floats per fish in the GPU layout (5 x vec4)
 // 14 special, 15 flash | 16 seed, 17 length, 18 palette+tint, 19 surface height
 
 export const FISH_SPECIES = {
-  glintfin: { max: 24576, nearMax: 1400, len: [0.22, 0.34], cruise: 1.25, burst: 7, beat: 5.2, amp: 0.07, nearPx: 30, minPx: 0.75, edible: 0.25, spacing: 1.65, react: 1 },
-  spiralback: { max: 4096, nearMax: 420, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 1, spacing: 1.45, react: 0.8 },
-  lanternjack: { max: 64, nearMax: 32, len: [2.6, 4.1], cruise: 2.1, burst: 11, beat: 1.25, amp: 0.06, nearPx: 46, minPx: 0.9, edible: 0, spacing: 0, react: 0.3 },
+  glintfin: { max: 24576, nearMax: 1400, heroMax: 40, heroPx: 95, len: [0.22, 0.34], cruise: 1.25, burst: 7, beat: 5.2, amp: 0.07, nearPx: 30, minPx: 0.75, edible: 0.25, spacing: 1.65, react: 1 },
+  spiralback: { max: 4096, nearMax: 420, heroMax: 28, heroPx: 100, len: [0.8, 1.35], cruise: 1.9, burst: 8, beat: 2.8, amp: 0.075, nearPx: 34, minPx: 0.8, edible: 1, spacing: 1.45, react: 0.8 },
+  lanternjack: { max: 64, nearMax: 32, heroMax: 6, heroPx: 110, len: [2.6, 4.1], cruise: 2.1, burst: 11, beat: 1.25, amp: 0.06, nearPx: 46, minPx: 0.9, edible: 0, spacing: 0, react: 0.3 },
 };
 
 const _v = new Vector3();
@@ -66,32 +66,38 @@ class Pool {
     this.LV = new Float32Array(max * 3); // leap exit velocity
     // instance buffers: near (detailed) and far
     const mk = (n) => new InstancedInterleavedBuffer(new Float32Array(n * STRIDE), STRIDE).setUsage(DynamicDrawUsage);
+    // the hero LOD: the nearest few dozen fish get the sculpted, densely lofted mesh
+    this.heroBuf = mk(spec.heroMax);
     this.nearBuf = mk(spec.nearMax);
     this.farBuf = mk(max);
+    this.heroN = 0;
     this.nearN = 0;
     this.farN = 0;
+    this.lodHero = new Vector4(spec.heroPx * 0.5, 1, 0, 0);
     this.lodNear = new Vector4(spec.nearPx * 0.5, 1, 0, 0);
     this.lodFar = new Vector4(spec.minPx, 1, 0, 0);
     const build = name === 'glintfin' ? buildGlintfin : name === 'spiralback' ? buildSpiralback : buildLanternjack;
-    const mkMesh = (near) => {
-      const geo = build(near);
-      const buf = near ? this.nearBuf : this.farBuf;
+    const mkMesh = (near, hero = false) => {
+      const geo = build(near, hero);
+      const buf = hero ? this.heroBuf : near ? this.nearBuf : this.farBuf;
       geo.setAttribute('iPos', new InterleavedBufferAttribute(buf, 4, 0));
       geo.setAttribute('iVel', new InterleavedBufferAttribute(buf, 4, 4));
       geo.setAttribute('iAnim', new InterleavedBufferAttribute(buf, 4, 8));
       geo.setAttribute('iMisc', new InterleavedBufferAttribute(buf, 4, 12));
       geo.setAttribute('iSeed', new InterleavedBufferAttribute(buf, 4, 16));
       geo.instanceCount = 0;
-      const mat = fishMaterial(name, near, near ? this.lodNear : this.lodFar);
+      const mat = fishMaterial(name, near, hero ? this.lodHero : near ? this.lodNear : this.lodFar);
       const mesh = new Mesh(geo, mat);
       mesh.frustumCulled = false;
-      mesh.name = `${name}-${near ? 'near' : 'far'}`;
+      mesh.name = `${name}-${hero ? 'hero' : near ? 'near' : 'far'}`;
       mesh.visible = false;
       sys.game.engine.scene.add(mesh);
       return mesh;
     };
+    this.hero = mkMesh(true, true);
     this.near = mkMesh(true);
     this.far = mkMesh(false);
+    this.trisHero = triCount(this.hero.geometry);
     this.trisNear = triCount(this.near.geometry);
     this.trisFar = triCount(this.far.geometry);
   }
@@ -267,9 +273,9 @@ export class FishSystem {
     this.schools.length = 0;
     this.jacks.length = 0;
     for (const p of Object.values(this.pools)) {
-      p.n = 0; p.nearN = 0; p.farN = 0;
-      p.near.visible = p.far.visible = false;
-      p.near.geometry.instanceCount = p.far.geometry.instanceCount = 0;
+      p.n = 0; p.heroN = 0; p.nearN = 0; p.farN = 0;
+      p.hero.visible = p.near.visible = p.far.visible = false;
+      p.hero.geometry.instanceCount = p.near.geometry.instanceCount = p.far.geometry.instanceCount = 0;
     }
   }
 
@@ -1071,8 +1077,9 @@ export class FishSystem {
     const camx = ctx.cam.x, camy = ctx.cam.y, camz = ctx.cam.z;
     for (const pool of this.poolList) {
       const spec = pool.spec;
-      const NB = pool.nearBuf.array, FB = pool.farBuf.array, S = pool.S, EAT = pool.EAT;
-      let nn = 0, nf = 0;
+      const HB = pool.heroBuf.array, NB = pool.nearBuf.array, FB = pool.farBuf.array, S = pool.S, EAT = pool.EAT;
+      let nh = 0, nn = 0, nf = 0;
+      const heroMax = spec.heroMax, heroPx = spec.heroPx;
       const nearMax = spec.nearMax, farMax = pool.max;
       const nearPx = spec.nearPx, minPx = spec.minPx;
       for (const sc of list) {
@@ -1085,10 +1092,14 @@ export class FishSystem {
           const px = (S[o + 17] * pxPerM) / d;
           if (px < minPx) continue;
           let B, q;
-          if (px > nearPx && nn < nearMax) { B = NB; q = nn * STRIDE; nn++; } else if (nf < farMax) { B = FB; q = nf * STRIDE; nf++; } else continue;
+          if (px > heroPx && nh < heroMax) { B = HB; q = nh * STRIDE; nh++; } else if (px > nearPx && nn < nearMax) { B = NB; q = nn * STRIDE; nn++; } else if (nf < farMax) { B = FB; q = nf * STRIDE; nf++; } else continue;
           for (let k = 0; k < STRIDE; k++) B[q + k] = S[o + k];
         }
       }
+      pool.heroN = nh;
+      pool.hero.geometry.instanceCount = nh;
+      pool.hero.visible = nh > 0;
+      if (nh) markAll(pool.heroBuf, nh);
       pool.nearN = nn;
       pool.farN = nf;
       pool.near.geometry.instanceCount = nn;
@@ -1097,12 +1108,13 @@ export class FishSystem {
       pool.far.visible = nf > 0;
       if (nn) markAll(pool.nearBuf, nn);
       if (nf) markAll(pool.farBuf, nf);
-      fish += nn + nf;
-      tris += nn * pool.trisNear + nf * pool.trisFar;
+      fish += nh + nn + nf;
+      tris += nh * pool.trisHero + nn * pool.trisNear + nf * pool.trisFar;
     }
     this.stats.fish = fish;
     this.stats.tris = tris;
     this.stats.near = this.pools.glintfin.nearN + this.pools.spiralback.nearN + this.pools.lanternjack.nearN;
+    this.stats.hero = this.pools.glintfin.heroN + this.pools.spiralback.heroN + this.pools.lanternjack.heroN;
     this.stats.far = this.pools.glintfin.farN + this.pools.spiralback.farN + this.pools.lanternjack.farN;
   }
 
@@ -1247,7 +1259,7 @@ export class FishSystem {
 
   dispose() {
     for (const p of Object.values(this.pools)) {
-      for (const m of [p.near, p.far]) {
+      for (const m of [p.hero, p.near, p.far]) {
         m.removeFromParent();
         m.geometry.dispose();
         m.material.dispose();

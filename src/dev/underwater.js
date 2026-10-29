@@ -270,6 +270,8 @@ export default async function (game) {
               : view === 'q' ? f.clone().multiplyScalar(0.7 * k).addScaledVector(r, 0.85 * k).add(new Vector3(0, 0.35 * k, 0))
                 : r.clone().multiplyScalar(1.2 * k).add(new Vector3(0, 0.12 * k, 0));
         camPos.copy(c).add(off); camLook.copy(c);
+        // a fish cruising just under the surface is seen from a little below it
+        if (c.y > -2 && view !== 'top') camPos.y = Math.min(camPos.y, c.y - 0.45 * k);
         camPos.y = Math.min(camPos.y, sea() - 0.3);
         actor.pos.set(c.x + 300, -30, c.z + 300);
         game.focus.copy(c);

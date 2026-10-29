@@ -118,7 +118,8 @@ void main() {
       vec3 pr = c0 + dir * q2.x + cn * q2.y - root;
       // fold back about the root (x axis) until the ray lies almost flat along the back
       float rake = atan(-dir.z, max(dir.y, 1e-3));
-      float fold = (1.0 - special) * max(1.48 - rake, 0.0);
+      // cruising, the sail stays half raised (its coil still shows); alarmed or leaping it stands
+      float fold = (1.0 - max(special, 0.4)) * max(1.48 - rake, 0.0);
       pr = rotX(-fold) * pr;
       p = root + pr;
       p.x += s * s * 0.012 * sin(ph * 0.55 + aR.w * 7.0 - s * 3.0) * (0.3 + 0.7 * special);
@@ -439,7 +440,7 @@ void main() {
     // eyeshine: a tapetum returns light toward its source (lures, moon, the viewer's side)
     vec2 qe = vec2(L.z - EYE_Z, L.y - EYE_Y) / EYE_R;
     float pupilK = smoothstep(0.5, 0.4, length(qe)) * eye.a;
-    emis += pC * pupilK * pow(max(dot(N, V), 0.0), 6.0) * (1.2 * uNight + 0.8 * special) * 0.35;
+    emis += pC * pupilK * pow(max(dot(N, V), 0.0), 6.0) * (1.2 * uNight + 0.3 * special) * 0.35;
 #endif
     albedo = mix(albedo, albedo * 0.45, operLine * 0.8);
     mirror *= 1.0 - operLine * 0.7;
@@ -482,7 +483,7 @@ void main() {
     float ray = vR.w;
     float s = vF.z;
 #if SPECIES == 0
-    vec3 fin = part < 1.5 ? mix(vec3(0.62, 0.62, 0.5), pC, 0.35 + 0.25 * (1.0 - s)) : mix(vec3(0.5, 0.55, 0.55), pA, 0.45);
+    vec3 fin = part < 1.5 ? mix(pA * 0.9, pC * 0.8, 0.25 + 0.45 * (1.0 - s)) : mix(vec3(0.5, 0.55, 0.55), pA, 0.45);
     float nR = part < 1.5 ? 14.0 : 8.0;
 #elif SPECIES == 1
     vec3 fin = part > 1.5 && part < 2.5 ? pC * 0.7 : (part > 7.5 ? vec3(0.32, 0.28, 0.14) : mix(pA, pB, 0.5));
@@ -502,7 +503,7 @@ void main() {
     albedo = mix(albedo, albedo * 0.4, margin * 0.6);
 #if SPECIES == 0
     // the tail fork's dark tips
-    if (part < 1.5) albedo = mix(albedo, vec3(0.05, 0.06, 0.07), smoothstep(0.8, 1.0, s) * smoothstep(0.25, 0.9, abs(ray - 0.5) * 2.0));
+    if (part < 1.5) albedo = mix(albedo, vec3(0.04, 0.05, 0.06), smoothstep(0.62, 0.98, s) * (0.55 + 0.45 * smoothstep(0.25, 0.9, abs(ray - 0.5) * 2.0)));
 #elif SPECIES == 1
     if (part > 1.5 && part < 2.5) {
       // sail: dark eye-spots ringed in gold between the rays, a dusky base, a gold crest that

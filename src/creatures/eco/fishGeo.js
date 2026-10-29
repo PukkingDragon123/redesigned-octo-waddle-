@@ -18,8 +18,8 @@ export const FISH_ATTRS = { aF: 4, aR: 4 };
 const GLINT = {
   z: [0.5, 0.494, 0.48, 0.455, 0.42, 0.37, 0.3, 0.22, 0.14, 0.06, -0.02, -0.1, -0.18, -0.24, -0.28, -0.3],
   hw: [0, 0.012, 0.02, 0.028, 0.035, 0.04, 0.043, 0.044, 0.042, 0.038, 0.032, 0.025, 0.018, 0.013, 0.01, 0.0085],
-  ht: [0, 0.013, 0.024, 0.035, 0.046, 0.055, 0.062, 0.066, 0.065, 0.06, 0.052, 0.041, 0.029, 0.02, 0.0145, 0.013],
-  hb: [0, 0.014, 0.025, 0.037, 0.049, 0.06, 0.068, 0.073, 0.072, 0.066, 0.055, 0.042, 0.028, 0.019, 0.0145, 0.013],
+  ht: [0, 0.012, 0.022, 0.032, 0.041, 0.049, 0.055, 0.058, 0.057, 0.053, 0.046, 0.037, 0.027, 0.019, 0.014, 0.0125],
+  hb: [0, 0.015, 0.028, 0.041, 0.054, 0.066, 0.075, 0.08, 0.079, 0.072, 0.059, 0.044, 0.029, 0.019, 0.014, 0.0125],
   cy: [-0.004, -0.003, -0.001, 0.001, 0.003, 0.004, 0.005, 0.006, 0.006, 0.006, 0.007, 0.008, 0.008, 0.008, 0.008, 0.008],
 };
 const SPIRAL = {
@@ -99,9 +99,9 @@ function body(B, P, nA, nS, zTail, opts = {}) {
 // the caudal peduncle. The mouth and gill-cover curves match the ones fishMat.js paints.
 const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 export const FISH_HEAD = {
-  glintfin: { oper: 0.352, plate: 0.0022, mouthZ: 0.455, mouth: (z) => { const g = z - 0.5; return -0.006 + g * 0.05 - g * g * 2.2; }, mw: 0.0032, crease: 0.0026, lip: 0.0011, gape: 0.0016, under: 0, keel: 0.0006, belly: 0.3 },
-  spiralback: { oper: 0.345, plate: 0.003, mouthZ: 0.445, mouth: (z) => { const g = z - 0.5; return -0.012 + g * 0.06 - g * g * 2.0; }, mw: 0.0038, crease: 0.0034, lip: 0.0014, gape: 0.002, under: 0, keel: 0.0035, belly: 0.16 },
-  lanternjack: { oper: 0.32, plate: 0.0055, mouthZ: 0.405, mouth: (z) => -0.036 - (z - 0.5) * 0.3 + (z - 0.43) * (z - 0.43) * 3.0, mw: 0.006, crease: 0.0065, lip: 0.0028, gape: 0.004, under: 0.012, keel: 0.005, belly: 0.12 },
+  glintfin: { oper: 0.352, plate: 0.0042, mouthZ: 0.455, mouth: (z) => { const g = z - 0.5; return -0.006 + g * 0.05 - g * g * 2.2; }, mw: 0.0034, crease: 0.0045, lip: 0.0019, gape: 0.0028, under: 0, keel: 0.0006, belly: 0.3 },
+  spiralback: { oper: 0.345, plate: 0.0052, mouthZ: 0.445, mouth: (z) => { const g = z - 0.5; return -0.012 + g * 0.06 - g * g * 2.0; }, mw: 0.004, crease: 0.0055, lip: 0.0024, gape: 0.0034, under: 0, keel: 0.0035, belly: 0.16 },
+  lanternjack: { oper: 0.32, plate: 0.0075, mouthZ: 0.405, mouth: (z) => -0.036 - (z - 0.5) * 0.3 + (z - 0.43) * (z - 0.43) * 3.0, mw: 0.0065, crease: 0.009, lip: 0.0038, gape: 0.006, under: 0.016, keel: 0.005, belly: 0.12 },
 };
 function sculpt(p, th, P, H, eye) {
   let [x, y, z] = p;

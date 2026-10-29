@@ -806,10 +806,11 @@ export class Lessons {
       const sea = seaHeight(g, ball.x, ball.z);
       _v.copy(ball).setY(sea + m.radius + 4);
       const dc = m.pos.distanceTo(calf.pos);
-      const d = this._go(_v, dc > 70 ? 3 : 11, 10, 0, dc > 45 ? calf.pos : ball);
+      // a purposeful glide out to the school (not a long cruise): she waits only if the calf lags
+      const d = this._go(_v, dc > 70 ? 4 : 16, 10, 0, dc > 45 ? calf.pos : ball);
       if (calf.pos.distanceTo(ball) < 160) this._hintAt(ball, 0.15, 5);
       if (dc > 60 && callT <= 0) { S.voiceCall(m, 'answer'); callT = 8; }
-      if (d < 18 && calf.pos.distanceTo(ball) < 60) { ready = true; break; }
+      if (d < 24 && calf.pos.distanceTo(ball) < 75) { ready = true; break; }
     }
     if (!ready) { this.note('hunt: the calf did not come'); return; }
     this.note('hunt: dive');

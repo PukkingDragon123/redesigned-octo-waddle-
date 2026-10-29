@@ -661,6 +661,18 @@ void main() {
     }
     float shadow = seaShadow(P + vec3(0.0, 0.3, 0.0));
     vec3 spec = seaGlitter(N, V, uSunDir, s2 + 1.2e-4, uSunColor) * shadow * (1.0 - uStorm * 0.85);
+    // where single ripple facets still cover a pixel, the sun path breaks into twinkling points
+    // (two drifting layers of fine relief cross; the mean stays ~1 so the path keeps its energy,
+    // and the effect hands over to the smooth statistical glitter as the footprint grows)
+    float pxw = length(fwidth(p));
+    float glN = (1.0 - smoothstep(0.03, 0.14, pxw)) * (1.0 - farK);
+    {
+      // (sampled outside any branch: mip selection needs derivatives in uniform control flow)
+      float g1 = texture2D(uNoise, p / 6.0 + uWindDir * uTime * 0.05).b;
+      float g2 = texture2D(uNoise, p / 4.3 - vec2(-uWindDir.y, uWindDir.x) * uTime * 0.07 + 0.41).b;
+      float spark = 0.4 + 4.0 * smoothstep(0.1, 0.3, g1 + g2 - 1.0);
+      spec *= mix(1.0, spark, glN);
+    }
     spec += seaGlitter(N, V, uMoonDir, s2 + 1.2e-4, uMoonColor * 0.9) * uNight;
 
     // what lies below: refracted scene through the water column
@@ -692,9 +704,16 @@ void main() {
     float sunUp = smoothstep(-0.05, 0.2, uSunDir.y);
     float lowSun = mix(1.0, 0.45, smoothstep(0.3, 0.8, uSunDir.y));
     float sss = crest * toward * (0.25 + face * 1.6) * sunUp * lowSun * mix(0.35, 1.0, shadow);
+    // with the sun behind the viewer the waves still glow from inside: daylight scattered back up
+    // through the thin upper part of each wave, softer and bluer than the backlit turquoise
+    float hN = clamp(vDispY / max(uSeaFar.z * 2.2, 0.06), -1.0, 1.5);
+    float lift = smoothstep(-0.2, 1.0, hN);
+    sss += (crest * 0.45 + lift * 0.35) * (1.0 - toward) * (0.3 + face) * sunUp * 0.3 * mix(0.35, 1.0, shadow);
     sss *= (1.0 - farK);
-    // light scattered up from inside the water dims under island and cloud shade
-    vec3 body = (uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) + uSeaScatter * sss) * mix(0.6, 1.0, shadow);
+    // light scattered up from inside the water dims under island and cloud shade; wave crests hold
+    // thinner, lighter water and the troughs read a touch deeper (form in the swell, not a flat tint)
+    float swellTone = 1.0 + 0.22 * hN * (1.0 - farK);
+    vec3 body = (uSeaBody * (0.75 + 0.5 * pow(1.0 - nv, 3.0)) * swellTone + uSeaScatter * sss) * mix(0.6, 1.0, shadow);
     if (uWhirlOn > 0.5) {
       // the funnel glows a deep luminous blue: daylight pours down its walls into deep water
       float wk = clamp(wf.y, 0.0, 1.0);
@@ -736,13 +755,18 @@ void main() {
     float pat = clamp((bubbles * 0.6 + lace * 0.4 - 0.3) * 2.0, 0.0, 1.0);
     float thr = 1.0 - min(cover, 1.2);
     float foamA = smoothstep(thr - 0.12, thr + 0.06, pat) * smoothstep(0.0, 0.12, cover);
+    // thin lace at the edges is a veil the water shows through; the heaped cores are solid and
+    // brightest (foam has body: thick, lit crowns and thin, cooler fringes)
+    float thick = smoothstep(thr - 0.04, thr + 0.38, pat);
     // far away the lace is below a pixel: show its average cover instead of sparkling specks
     float farFoam = smoothstep(60.0, 500.0, dist);
+    foamA *= mix(mix(0.62, 1.0, thick), 1.0, farFoam);
     foamA = mix(foamA, clamp(cover * 0.75, 0.0, 0.9), farFoam);
     foamA = clamp(foamA, 0.0, 1.0) * (1.0 - farK * 0.6);
     vec3 foamLit = uSunColor * (max(dot(N, uSunDir), 0.0) * 0.8 + 0.2) * mix(0.35, 1.0, shadow) + uSkyAmbient * 0.9;
     foamLit += uMoonColor * uNight * 0.5;
-    vec3 foamCol = foamLit * mix(0.78, 0.95, bub2);
+    vec3 foamCol = foamLit * mix(0.78, 0.95, bub2) * mix(mix(0.84, 1.04, thick), 1.0, farFoam);
+    foamCol = mix(foamCol, foamCol * vec3(0.86, 0.97, 1.0), (1.0 - thick) * (1.0 - farFoam) * 0.6);
     // churned water full of bubbles glows pale turquoise around and under the foam
     float aer = smoothstep(0.04, 0.7, cover) * (1.0 - foamA) * (1.0 - farK);
     col += (uSeaScatter * 1.6 + uSkyAmbient * 0.12) * mix(0.4, 1.0, shadow) * aer * 0.55 * (1.0 - f);

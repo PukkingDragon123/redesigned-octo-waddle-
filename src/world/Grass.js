@@ -27,6 +27,7 @@ ${UNIFORMS}
 attribute vec4 iPos;   // root xyz, scale
 attribute vec4 iPrm;   // seed, flower, -, -
 uniform vec2 uGrassFade;
+uniform sampler2D uNoise;
 varying vec2 vUv;
 varying vec3 vWorld;
 varying vec3 vN;
@@ -49,7 +50,10 @@ void main() {
   // wind waves rolling over the meadow (the terrain's meadow waves: whole multiples of the phase)
   vec2 wd = normalize(uWind.xz + vec2(1e-3));
   float wl = length(uWind);
-  float wave = sin(dot(base.xz, wd) * 0.08 - uWavePhase + iPrm.x * 0.6);
+  // (bent by the same broad patch noise as the terrain's meadow waves, so the gust fronts are
+  // wandering hand-drawn curves, not ruled parallel bands, and grass and ground roll together)
+  float patchW = textureLod(uNoise, base.xz / 120.0, 0.0).r;
+  float wave = sin(dot(base.xz, wd) * 0.08 - uWavePhase + patchW * 5.0 + iPrm.x * 0.35);
   float crest = smoothstep(0.4, 1.0, wave);
   vWave = crest;
   float bend = (0.08 + 0.3 * crest) * (0.35 + 0.65 * smoothstep(0.0, 8.0, wl)) + 0.05 * sin(uTime * 1.9 + iPrm.x * 40.0 + base.x * 0.31);
@@ -103,10 +107,19 @@ void main() {
   vec3 g = mix(uGrassDark, uGrassLight, smoothstep(0.25, 0.75, patchA));
   g = mix(g, uGrassTeal, smoothstep(0.55, 0.85, patchB) * 0.45);
   g = mix(g, uGrassDry, smoothstep(0.6, 0.92, texture2D(uNoise, wp / 61.0 + 0.71).g) * 0.4);
+  // the meadow's mid-scale life (as the terrain): warm yellowing swells and cool lush patches
+  float mv = texture2D(uNoise, wp / 7.5 + 0.13).g;
+  g *= 0.9 + 0.2 * mv;
+  g = mix(g, g * vec3(1.07, 1.01, 0.82), smoothstep(0.55, 0.85, mv) * 0.55);
+  g = mix(g, g * vec3(0.84, 1.0, 1.04), smoothstep(0.45, 0.15, mv) * 0.45);
+  // and every clump a little its own: value, and a few gone sun-bleached at the tips
+  float cj = fract(vSeed * 91.7);
+  g *= 0.9 + 0.2 * cj;
   // painted value per blade, dark roots, lighter warm tips
   vec3 col = g * (0.66 + 0.5 * t.r);
   col *= mix(0.62, 1.0, smoothstep(0.0, 0.55, t.g));
   col = mix(col, col * vec3(1.16, 1.14, 0.86) + vec3(0.035, 0.035, 0.0), smoothstep(0.55, 1.0, t.g) * 0.75);
+  col = mix(col, col * vec3(1.12, 1.06, 0.78) + vec3(0.03, 0.025, 0.0), smoothstep(0.6, 1.0, t.g) * step(0.72, fract(vSeed * 37.1)) * 0.6);
   // flower heads on some clumps: violet, cream, coral
   if (vFlower > 0.5 && t.b > 0.5) {
     float h = fract(vSeed * 13.7);
@@ -119,7 +132,8 @@ void main() {
   Surface s = makeSurface(col, N, vWorld);
   s.shadow = sampleShadow(vWorld, vec3(0.0, 1.0, 0.0));
   s.ao = mix(0.6, 1.0, smoothstep(0.0, 0.6, t.g));
-  s.trans = 0.35;
+  // thin blade tips let the most light through; the dense base hardly any
+  s.trans = 0.18 + 0.5 * smoothstep(0.3, 1.0, t.g);
   s.wrap = 0.35;
   s.rim = 0.22;
   vec3 c = stylizedLight(s);

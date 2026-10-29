@@ -463,10 +463,10 @@ export class Moves {
     if (!g.mist) return;
     E.pos.copy(p).addScaledVector(w.fwd, -0.4 - Math.random() * 0.6);
     E.vel.copy(w.vel).multiplyScalar(keep).addScaledVector(w.right, side * 1.5 + (Math.random() - 0.5) * 0.6).addScaledVector(w.up, (Math.random() - 0.5) * 0.6);
-    E.life = 0.4 + Math.random() * 0.25; E.size = 0.09 + Math.random() * 0.06; E.sizeEnd = E.size * 0.8;
+    E.life = 0.4 + Math.random() * 0.25; E.size = 0.18 + Math.random() * 0.1; E.sizeEnd = E.size * 0.85;
     E.alpha = alpha; E.drag = 0.6; E.gravity = 0; E.kind = 6; E.fadeIn = 0.02;
     E.color[0] = 1; E.color[1] = 1; E.color[2] = 1;
-    E.stretch = 7 + Math.random() * 5;
+    E.stretch = 5 + Math.random() * 3;
     g.mist.emit(E);
     E.stretch = 4;
   }

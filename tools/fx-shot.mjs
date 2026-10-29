@@ -21,7 +21,9 @@ let k = 0;
 for (const a of after) {
   await waitF(f0 + a);
   const o = after.length > 1 ? out.replace(/\.png$/, `-${k}.png`) : out;
-  await page.screenshot({ path: o });
+  const durl = await page.evaluate(() => { try { return document.getElementById('c').toDataURL('image/png'); } catch (e) { return null; } });
+  if (durl && durl.length > 1000) (await import('fs')).writeFileSync(o, Buffer.from(durl.split(',')[1], 'base64'));
+  else await page.screenshot({ path: o, timeout: 300000 });
   console.log('shot', o, 'frame', await page.evaluate(() => window.__skysong.frame));
   k++;
 }

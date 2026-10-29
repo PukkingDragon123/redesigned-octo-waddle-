@@ -32,6 +32,7 @@ export default async function (game) {
   const calf = new Whale(CALF);
   calf.place(new Vector3(0, 14, 40), Math.PI);
   calf.model.prepare?.();
+  if (p.has('lowfur')) calf.furQuality = 0.25; // cheaper close-ups on software GL
   game.engine.scene.add(calf.group);
   if (calf.model.castShadows) calf.model.castShadows(game.engine.shadows);
   const player = new PlayerController(game, calf);
@@ -72,7 +73,7 @@ export default async function (game) {
     add('skitter', new Vector3(-30, sea(-30, 60), 60), { count: 30, radius: 6, dir: new Vector3(-0.4, 0, 1), drift: 1.2, seaY: sea(-30, 60) });
   }
   if (eat) {
-    add('moth', new Vector3(0, 14.5, 18), { count: 14, radius: 2.6 });
+    add('moth', new Vector3(0, 14.2, 31), { count: 14, radius: 2.2 }); // right in front of the mouth
     add('moth', new Vector3(1, 14, -6), { count: 16, radius: 3 });
     add('moth', new Vector3(-1, 14.5, -30), { count: 16, radius: 3 });
   }

@@ -43,6 +43,8 @@ const _m = new Matrix4();
 const ZERO = new Vector3();
 const SPINE = ['spine1', 'spine2', 'tail1', 'tail2', 'tail3', 'fluke'];
 const SPINE_W = [0.12, 0.3, 0.55, 0.8, 1.0, 1.15];
+const SIDES = [1, -1];
+const clearWing = (w) => { w.flap = 0; w.sweep = 0; w.twist = 0; w.elbow = 0; w.wrist = 0; w.rear = 0; w.billow = 0; return w; };
 
 const env = (u, a, r) => smoothstep(0, a, u) * (1 - smoothstep(1 - r, 1, u));
 // a tent bump of the swallowed bolus at position p around c (width w)
@@ -501,7 +503,7 @@ export class WhaleAnimator {
     const jawWant = this.snapHold > 0 ? 0 : this.mouth * P.jawMax * (1 + this.reachS * 0.35);
     let jx = this.jawS.update(dt, jawWant);
     if (jx < -0.01) { jx = this.jawS.x = -0.01; if (this.jawS.v < 0) this.jawS.v *= -0.38; }
-    const chew = this.chew * this.chew * Math.max(0, Math.sin(this.chewT * 17.0)) * P.jawMax * 0.16;
+    const chew = this.chew * this.chew * Math.max(0, Math.sin(this.chewT * 17.0)) * P.jawMax * 0.28;
     b.jaw.rotation.set(jx + chew + gp.jaw, 0, 0);
     this.jawAngle = jx + chew;
 
@@ -509,7 +511,8 @@ export class WhaleAnimator {
     const amp = this.amp;
     const dihedral = P.dihedral * (1 - this.dive) + glideMix * 0.05 - this.sleep * 0.3;
     const fu = m.finU;
-    for (const side of [1, -1]) {
+    for (let si = 0; si < 2; si++) {
+      const side = SIDES[si];
       const sname = side > 0 ? 'R' : 'L';
       const outer = side > 0 ? -turn : turn; // the outer wing works harder in a turn
       const a = amp * (1 + clamp(outer, -0.5, 0.5) * 0.45);
@@ -620,7 +623,8 @@ export class WhaleAnimator {
       wing: { R: {}, L: {} },
     });
     for (let i = 0; i < 6; i++) { gp.spinePitch[i] = 0; gp.spineYaw[i] = 0; gp.spineRoll[i] = 0; }
-    for (const s of ['R', 'L']) Object.assign(gp.wing[s], { flap: 0, sweep: 0, twist: 0, elbow: 0, wrist: 0, rear: 0, billow: 0 });
+    clearWing(gp.wing.R);
+    clearWing(gp.wing.L);
     gp.rootPitch = gp.rootYaw = gp.rootRoll = gp.rootY = 0;
     gp.headPitch = gp.headYaw = gp.headRoll = gp.chestPitch = 0;
     gp.jaw = gp.throat = gp.crest = gp.crestFlare = gp.flukeFlex = 0;

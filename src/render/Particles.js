@@ -170,11 +170,12 @@ void main() {
     // it bowed the way it travels (7). It draws on fast and wipes away from its tail.
     float arc = step(6.5, kind);
     float sd = h1(seed + 1.7);
-    float bend = mix((sd - 0.5) * 0.9, -0.5 - 0.2 * sd, arc); // arcs: local +y points back along the motion
+    // the quad is a few line-widths wide so the stroke has room to bow; arcs: local +y points back
+    float bend = mix((sd - 0.5) * 1.5, -0.55 - 0.25 * sd, arc);
     float x = p.x;
-    float yc = bend * (0.5 - x * x) + 0.06 * sin(x * (2.0 + vLen) + seed * 4.0);
-    float tp = pow(max(1.0 - x * x, 0.0), 0.6) * mix(0.65 + 0.35 * x, 1.0, arc);
-    float hw = 0.22 * tp * (1.0 - 0.45 * age) * (0.8 + 0.4 * h1(seed + 3.3));
+    float yc = bend * (0.5 - x * x) + 0.07 * sin(x * (2.0 + vLen * 0.7) + seed * 4.0);
+    float tp = pow(max(1.0 - x * x, 0.0), 0.6) * mix(0.6 + 0.4 * x, 1.0, arc);
+    float hw = 0.13 * tp * (1.0 - 0.45 * age) * (0.8 + 0.4 * h1(seed + 3.3));
     float d = abs(p.y - yc) - hw;
     float head = -1.0 + 2.3 * clamp(age / 0.16, 0.0, 1.0);
     float tail = -1.05 + 2.2 * smoothstep(0.3, 1.0, age);

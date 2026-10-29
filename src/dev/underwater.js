@@ -1,5 +1,7 @@
 // Dev scene: under the sea of Vur Sok, from the calf's point of view.
-// ?debug&test=underwater&shot=kelp|crabs|jellies|rays|reef|night|surface|manta|mantaair
+// ?debug&test=underwater&shot=kelp|crabs|jellies|rays|reef|night|surface|manta|mantaair|fishmacro
+//   &shot=fishmacro&species=puffer|eel|glintfin|spiralback|lanternjack&view=side|front|top|q|under
+//   (&inflate puffs the puffer up, &dist=k scales the camera distance)
 //   manta: a close-up of a manta swimming alongside the calf (&view=side|below|front|top,
 //   &loop: a free manta doing feeding loops instead); mantaair: the great manta of the shallows
 //   seen from the air through the water.
@@ -110,6 +112,9 @@ export default async function (game) {
   // a few fish schools over the reef too
   eco.addFishSchool(new Vector3(70, -6, 40), 'glintfin', 700, { seed: 3, mode: 'mill' });
   eco.addFishSchool(new Vector3(-60, -9, 70), 'spiralback', 120, { seed: 7 });
+  const macro = shot === 'fishmacro' ? (p.get('species') || 'puffer') : null;
+  const macroFish = macro === 'glintfin' || macro === 'spiralback' || macro === 'lanternjack';
+  let macroSchool = null;
 
   // ---- the calf ------------------------------------------------------------------------------
   let calf = null;
@@ -136,6 +141,8 @@ export default async function (game) {
   else if (shot === 'night') { center = kelpAt; depth = Math.max(kelpAt.y + 4, -7); radius = 14; }
   else if (shot === 'surface') { center = reefAt; depth = -3; radius = 18; camUp = -2.5; }
   else if (shot === 'manta' || shot === 'mantaair') { center = bestSpot((x, z) => -Math.hypot(x + 80, z - 30), 10, 24); depth = -7; radius = 30; speed = 2.6; }
+  else if (macro) { center = reefAt; depth = reefAt.y + 3; radius = 40; speed = 0.5; fov = +(p.get('fov') || 40); }
+  if (macroFish) macroSchool = eco.addFishSchool(new Vector3(reefAt.x, Math.min(reefAt.y + 3, -2.5), reefAt.z), macro, macro === 'lanternjack' ? 1 : 8, { seed: 5 });
   const sea = () => 0;
   const tmp = new Vector3();
   const fwd = new Vector3();
@@ -169,6 +176,15 @@ export default async function (game) {
       for (let i = 0; i < 34; i++) R._spawnJelly(i, 0, 0, c);
     }
     if (shot === 'rays') { R._underT = 10; R._rayT = -1e9; }
+    if (macro === 'puffer') {
+      const P = R.puffers, x = center.x, z = center.z, y = floorAt(x, z) + 2.2;
+      P.alive[0] = 1; P.P[0] = x; P.P[1] = y; P.P[2] = z; P.H[0] = x; P.H[1] = y; P.H[2] = z;
+      P.V[0] = 0; P.V[1] = 0; P.V[2] = 0; P.floor[0] = floorAt(x, z); P.s[0] = 1.6; P.seed[0] = 0.31; P.yaw[0] = 0.6; P.t[0] = 1e9; P.a[0] = 0;
+    }
+    if (macro === 'eel') {
+      const E = R.eels, x = center.x, z = center.z, y = floorAt(x, z) + 2.5;
+      E.alive[0] = 1; E.P[0] = x; E.P[1] = y; E.P[2] = z; E.H[0] = x; E.H[1] = y; E.H[2] = z; E.floor[0] = floorAt(x, z); E.s[0] = 2.6; E.seed[0] = +(p.get('morph') || 0.2);
+    }
     if (shot === 'manta' || shot === 'mantaair') {
       // one manta posed for the camera (slot 0), or the great manta of the shallows (last slot)
       const Rr = R.rays, giant = shot === 'mantaair';
@@ -196,6 +212,7 @@ export default async function (game) {
   game.cameraRig.update = () => {
     cam.position.copy(camPos);
     cam.lookAt(camLook);
+    if (macro && cam.near > 0.03) { cam.near = 0.03; cam.updateProjectionMatrix(); }
     if (Math.abs(cam.fov - fov) > 0.01) { cam.fov = fov; cam.updateProjectionMatrix(); }
   };
   game.engine.shadows.radius = 90;
@@ -234,6 +251,31 @@ export default async function (game) {
     if (!staged && game.time > 0.2) stage();
     // camera: behind and above the calf, looking a little ahead
     let pos, look;
+    if (macro && staged) {
+      // a macro portrait of one creature, framed by its own heading
+      let c = null, yaw = 0, size = 1, fv = null;
+      if (macro === 'puffer') { const P = eco.reef.puffers; P.H[0] = P.P[0]; P.H[1] = P.P[1]; P.H[2] = P.P[2]; P.t[0] = 1e9; if (p.has('inflate')) P.t2[0] = 3; c = new Vector3(P.P[0], P.P[1], P.P[2]); yaw = P.yaw[0]; size = P.s[0] * 0.75; }
+      else if (macro === 'eel') { const E = eco.reef.eels; c = new Vector3(E.P[0], E.P[1], E.P[2]); yaw = E.yaw[0]; size = E.s[0] * 0.55; c.add(new Vector3(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(E.s[0] * 0.25)); }
+      else if (macroSchool) {
+        const S = macroSchool.pool.S, o = (macroSchool.start + (+(p.get('idx') || 0) % macroSchool.count)) * 20;
+        c = new Vector3(S[o], S[o + 1], S[o + 2]); fv = new Vector3(S[o + 4], S[o + 5], S[o + 6]); size = S[o + 17] * 1.25;
+        yaw = Math.atan2(fv.x, fv.z);
+      }
+      if (c) {
+        const f = new Vector3(Math.sin(yaw), 0, Math.cos(yaw)), r = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        const k = size * +(p.get('dist') || 1);
+        const off = view === 'front' ? f.clone().multiplyScalar(1.1 * k).addScaledVector(r, 0.35 * k).add(new Vector3(0, 0.15 * k, 0))
+          : view === 'top' ? new Vector3(0, 1.3 * k, 0).addScaledVector(f, -0.25 * k)
+            : view === 'under' ? new Vector3(0, -1.1 * k, 0).addScaledVector(r, 0.4 * k)
+              : view === 'q' ? f.clone().multiplyScalar(0.7 * k).addScaledVector(r, 0.85 * k).add(new Vector3(0, 0.35 * k, 0))
+                : r.clone().multiplyScalar(1.2 * k).add(new Vector3(0, 0.12 * k, 0));
+        camPos.copy(c).add(off); camLook.copy(c);
+        camPos.y = Math.min(camPos.y, sea() - 0.3);
+        actor.pos.set(c.x + 300, -30, c.z + 300);
+        game.focus.copy(c);
+        return;
+      }
+    }
     if (shot === 'crabs') {
       pos = tmp.copy(actor.pos).addScaledVector(fwd, -camBack).add(new Vector3(fwd.z * 4, camUp, -fwd.x * 4));
       look = new Vector3().copy(actor.pos).addScaledVector(fwd, lookAhead + 4).setY(floorAt(actor.pos.x + fwd.x * 12, actor.pos.z + fwd.z * 12) + 0.6);

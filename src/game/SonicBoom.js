@@ -98,15 +98,15 @@ export class SonicBooms {
     _u.normalize();
     _w.copy(_f).cross(_u).normalize();
     const camD = Math.max(1, cam.position.distanceTo(center));
-    const width = clamp(radius * 0.022, 0.12, 5) * clamp(camD / 25, 0.6, 1.6);
+    const width = clamp(radius * 0.026, 0.15, 6) * clamp(camD / 25, 0.6, 1.6);
     const out = speed * 0.32;
     // soft flash: a few overlapping painted glow dots, quick
     if (g.glow) {
       for (let k = 0; k < 4; k++) {
         E.pos.copy(center).addScaledVector(_u, (Math.random() - 0.5) * radius * 0.04).addScaledVector(_w, (Math.random() - 0.5) * radius * 0.04);
         E.vel.set(0, 0, 0);
-        E.life = 0.22 + Math.random() * 0.12; E.size = clamp(radius * 0.05, 0.6, 14) * (0.7 + Math.random() * 0.5); E.sizeEnd = E.size * 1.6;
-        E.alpha = 0.55; E.drag = 0; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
+        E.life = 0.16 + Math.random() * 0.1; E.size = clamp(radius * 0.03, 0.4, 9) * (0.6 + Math.random() * 0.6); E.sizeEnd = E.size * 1.5;
+        E.alpha = 0.4; E.drag = 0; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
         E.color[0] = 1; E.color[1] = 0.96; E.color[2] = 0.88;
         g.glow.emit(E);
       }
@@ -119,19 +119,19 @@ export class SonicBooms {
       const sp = out * lerp(0.6, 1.05, Math.random());
       E.pos.copy(center).addScaledVector(_d, radius * lerp(0.04, 0.1, Math.random()));
       E.vel.copy(_d).multiplyScalar(sp);
-      E.life = lerp(0.45, 0.75, Math.random()); E.size = width * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 1.5;
+      E.life = lerp(0.6, 0.9, Math.random()); E.size = width * lerp(0.8, 1.25, Math.random()); E.sizeEnd = E.size * 1.4;
       E.alpha = 0.75; E.drag = 2.4; E.gravity = 0; E.kind = 7; E.fadeIn = 0.02;
-      E.stretch = lerp(3.5, 6, Math.random());
+      E.stretch = lerp(2.2, 3.4, Math.random());
       E.color[0] = 0.97; E.color[1] = 0.99; E.color[2] = 1.0;
       g.mist.emit(E);
       // a speed stroke between this arc and the next
-      if (Math.random() < 0.7) {
+      if (Math.random() < 0.45) {
         const b = a + (TAU / arcs) * lerp(0.35, 0.65, Math.random());
         _d.copy(_u).multiplyScalar(Math.cos(b)).addScaledVector(_w, Math.sin(b)).normalize();
         E.pos.copy(center).addScaledVector(_d, radius * lerp(0.06, 0.14, Math.random()));
         E.vel.copy(_d).multiplyScalar(sp * 1.1);
         E.life = lerp(0.35, 0.55, Math.random()); E.size = width * 0.55; E.sizeEnd = E.size * 0.8;
-        E.alpha = 0.6; E.kind = 6; E.stretch = lerp(6, 10, Math.random());
+        E.alpha = 0.55; E.kind = 6; E.stretch = lerp(3, 4.5, Math.random());
         g.mist.emit(E);
       }
     }

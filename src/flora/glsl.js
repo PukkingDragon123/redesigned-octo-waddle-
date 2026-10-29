@@ -211,9 +211,12 @@ vec3 floraLight(vec3 albedo, vec3 N, vec3 P, float ao, float trans, float thin, 
   vec3 rimLight = hemiAmbient(N) * 0.6 + uSunColor * (0.08 + 0.5 * backV) * mix(0.3, 1.0, s.shadow);
   col += fres * rim * rimLight * saturation(albedo, 1.3) * 1.6 * (0.6 + 0.4 * ao);
   // light passing through the leaf from its sunlit back face: warm and saturated
+  // (thin tissue scatters forward: brightest looking into the sun through it, a soft glow from
+  // the side, and the light deepens toward the leaf's own saturated colour as it passes)
   float back = max(-ndl, 0.0) * thin;
-  vec3 through = saturation(albedo, 1.25) * 1.15;
-  col += through * uSunColor * back * trans * 0.45 * s.shadow * vec3(1.0, 0.94, 0.78);
+  float fwd = pow(max(dot(-s.V, uSunDir), 0.0), 3.0);
+  vec3 through = saturation(albedo, 1.25 + 0.25 * fwd) * 1.15;
+  col += through * uSunColor * back * trans * (0.3 + 0.55 * fwd) * s.shadow * vec3(1.0, 0.94, 0.78);
   return col;
 }
 `;

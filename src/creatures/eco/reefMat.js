@@ -46,6 +46,19 @@ float actorNear(vec3 P, out vec3 away) {
   return near;
 }
 
+// the puffer's stomach balloons: belly most, the head and the peduncle hardly at all
+float puffW(vec3 p) { return smoothstep(-0.2, -0.06, p.z) * (1.0 - smoothstep(0.17, 0.27, p.z)); }
+vec3 puff(vec3 p, float inf) {
+  float w = puffW(p);
+  vec3 c = vec3(0.0, 0.0, 0.02);
+  vec3 d = p - c;
+  float r = length(d);
+  float R0 = 0.265 + 0.03 * smoothstep(0.0, -0.15, d.y);
+  vec3 q = mix(p, c + d / max(r, 1e-4) * R0, inf * 0.85 * w);
+  q.y -= inf * 0.025 * w;
+  return q;
+}
+
 void main() {
   vec3 pos = position;
   vec3 nrm = normal;
@@ -294,25 +307,60 @@ void main() {
   info.z = thin;
   info.w = aP.z;
 #elif KIND == 8
-  // ---- lantern puffers: inflate into a spiky ball when startled ---------------------------------
+  // ---- lantern puffers: scull along on dorsal and anal fins, pectorals whirring; startled, the
+  // belly balloons (the head and tail stay put) and the prickles rise out of their pockets -------
   float inf = iB.w;
+  float ph = iB.z;
   vec3 p = pos;
-  float grow = 1.0 + 0.7 * inf;
-  if (part < 40.5) {
-    p = mix(p, normalize(p) * 0.23, inf * 0.8) * grow;
+  vec3 hinge = aQ.xyz;
+  if (part < 40.5 || part > 43.5) {
+    float w = puffW(p);
+    nrm = normalize(mix(nrm, normalize(p - vec3(0.0, 0.0, 0.02)), inf * 0.8 * w));
+    p = puff(p, inf);
+    // the beak and lips work as it breathes (water over the gills)
+    if (part > 43.5 || p.z > 0.25) {
+      float br = sin(uTime * 2.6 + seed * 11.0) * 0.5 + 0.5;
+      p.y += (p.y + 0.038) * 0.12 * br * smoothstep(0.25, 0.275, pos.z);
+    }
   } else if (part < 41.5) {
-    p *= mix(1.0, 1.55, inf);
-  } else if (part < 42.5) {
-    vec3 hinge = aQ.xyz;
+    // the eyes swivel independently in their orbits
     vec3 rel = p - hinge;
-    rel.y += sin(uTime * 13.0 + aP.z * 1.7 + seed * 5.0) * 0.05 * aP.w;
-    rel.x += sin(iB.z) * 0.07 * aP.y * (1.0 - aP.w);
-    p = hinge * mix(1.0, 1.5, inf) + rel;
+    float side = aQ.w;
+    float look = 0.28 * sin(uTime * 0.53 + seed * 9.0 + side * 1.7) + 0.12 * sin(uTime * 1.37 + side);
+    rel = rotY(look) * rel;
+    nrm = rotY(look) * nrm;
+    p = puff(hinge, inf) + rel * (1.0 + 0.15 * inf);
+  } else if (part < 42.5) {
+    vec3 rel = p - hinge;
+    float s = aP.y, u = aP.z, id = aP.w, side = aQ.w;
+    if (id < 0.5) {
+      // the tail: a slow rudder, curled aside when puffed up
+      float a = sin(ph * 0.35 + seed * 3.0) * 0.18 + inf * 0.7;
+      rel.x += (sin(ph * 0.35 - s * 1.5) * 0.02 + inf * 0.05) * s;
+      rel = rotY(a * 0.5) * rel;
+      rel.y *= mix(0.86, 1.0, s) - inf * 0.25;
+    } else if (id < 2.5) {
+      // dorsal and anal sculling in step: a wave runs back along each fin as it sweeps
+      float sc = sin(ph - u * 2.2 - s * 0.8);
+      rel.x += sc * 0.045 * s * (0.6 + 0.4 * s);
+    } else {
+      // pectorals: fast fanning, a ripple running across the rays
+      float f = uTime * 13.0 + seed * 7.0 + side;
+      rel = rotY(side * (0.32 * sin(f) - 0.25)) * rel;
+      rel.x += side * sin(f - u * 4.0 - s * 1.5) * 0.018 * s;
+    }
+    p = puff(hinge, inf) + rel;
   } else {
-    vec3 root = aQ.xyz;
+    // prickles: lying back in their skin pockets, erect when inflated
+    vec3 root = hinge;
+    vec3 n = normalize(vec3(aP.z, aP.w, aQ.w));
     vec3 rel = p - root;
-    vec3 r2 = mix(root, normalize(root) * 0.23, inf * 0.8) * grow;
-    p = r2 + rel * (0.25 + 1.6 * inf);
+    vec3 ax = cross(n, vec3(0.0, 0.0, -1.0));
+    float la = length(ax);
+    float fold = (1.0 - smoothstep(0.15, 0.85, inf)) * 1.35;
+    if (la > 1e-3) { rel = rotAxis(rel, ax / la, fold); nrm = rotAxis(nrm, ax / la, fold); }
+    rel *= mix(0.42, 1.0, smoothstep(0.1, 0.9, inf));
+    p = puff(root, inf) + rel;
   }
   mat3 O = R * rotX(-iC.x) * rotZ(iC.y);
   W = base + O * (p * iB.x);
@@ -320,19 +368,32 @@ void main() {
   info.z = inf;
   info.w = iC.z;
 #else
-  // ---- ribbon eels: a travelling wave down a long flat body -------------------------------------
+  // ---- ribbon eels: an anguilliform wave runs the whole length; the fins ripple ----------------
   float L = iB.x;
   float wph = iB.z;
   vec3 p = pos;
   float t = aP.y;
-  float wv = sin(t * 8.5 - wph) * (0.05 + 0.16 * t);
-  p *= vec3(0.6 + L * 0.25, 0.6 + L * 0.25, L);
-  p.x += wv * L * 0.5;
-  if (part > 50.5) p.x += sin(t * 40.0 - uTime * 9.0) * 0.025 * aP.z * L;
+  float alarm = iB.w;
+  float k = 6.2831853 * 1.7;
+  float amp = (0.018 + 0.085 * t) * (1.0 + alarm * 0.5);
+  float w = k * t - wph;
+  float X = amp * sin(w);
+  float dX = 0.085 * (1.0 + alarm * 0.5) * sin(w) + amp * k * cos(w);
+  float zs = 0.5 - t;
+  float sl = -dX;
+  float c = inversesqrt(1.0 + sl * sl), sn = sl * c;
+  if (part > 50.5 && part < 51.5) p.x += sin(t * 70.0 - uTime * 11.0 + aP.w) * 0.0022 * aP.z;
+  if (part > 52.5) {
+    // nostril flaps and barbels tremble in the flow
+    p.x += sin(uTime * 9.0 + aP.w * 2.0 + seed * 5.0) * 0.0008 * aP.y;
+  }
+  vec3 q = vec3(p.x, p.y, p.z - zs);
+  p = vec3(X + q.x * c + q.z * sn, q.y + 0.004 * sin(w * 0.5 + 1.0) * t, zs - q.x * sn + q.z * c);
+  nrm = vec3(nrm.x * c + nrm.z * sn, nrm.y, -nrm.x * sn + nrm.z * c);
   mat3 O = R * rotX(-iC.x) * rotZ(iC.y);
-  W = base + O * p;
+  W = base + O * (p * L);
   nrm = O * nrm;
-  info.z = iB.w;
+  info.z = alarm;
   info.w = t;
 #endif
   // creatures and plants at the edge of the living radius grow in and out instead of popping
@@ -568,35 +629,160 @@ void main() {
   emis = bc * bead * nightK * (0.55 + 0.45 * sin(uTime * 1.1 - ax * 9.0 + seed * 20.0)) * 1.4;
   emis += bc * 0.05 * nightK * smoothstep(0.85, 1.0, ax) * topW;
 #elif KIND == 8
+  // ---- lantern puffer: a map-puffer maze of hand-drawn dark lines over olive-gold skin, a pale
+  // belly with wavy pinstripes, photophores that wake at night or when it puffs up, glossy eyes
   float inf = vI.z;
+  vec3 Lc = vLoc;
+  float dep = uSeaLevel - vWorldPos.y;
   if (part < 40.5) {
-    // mottled sand-gold with dark saddles, a pale belly
-    float saddle = smoothstep(0.3, 0.7, sin(vLoc.z * 30.0) * 0.5 + 0.5) * step(0.0, vLoc.y);
-    albedo = mix(vec3(0.75, 0.6, 0.3), vec3(0.2, 0.18, 0.12), saddle * 0.7);
-    albedo = mix(albedo, vec3(0.85, 0.85, 0.75), smoothstep(0.0, -0.12, vLoc.y));
-    spec = 0.4; rim = 0.6;
-    emis = vec3(0.1, 0.5, 0.6) * inf * 0.3;
+    float t = vP.y;
+    float topK = smoothstep(-0.06, 0.07, Lc.y - 0.012 * sin(Lc.z * 31.0 + seed * 6.0));
+    vec3 back = mix(vec3(0.2, 0.18, 0.08), vec3(0.27, 0.22, 0.1), hs);
+    vec3 belly = vec3(0.8, 0.79, 0.7);
+    albedo = mix(belly, back, topK);
+    // the maze: warped noise iso-lines, thick here and thin there, broken into strokes
+    vec2 mp = vec2(Lc.z * 19.0, atan(Lc.x, Lc.y + 0.01) * 2.8);
+    vec2 wq = mp + vec2(vnoise(mp * 1.7 + seed * 13.0), vnoise(mp * 1.7 + 4.1)) * 0.9;
+    float iso = abs(fract(vnoise(wq * 1.3) * 3.2 + vnoise(wq * 3.1) * 0.35) - 0.5);
+    float wid = 0.07 + 0.06 * vnoise(wq * 2.3 + 7.0);
+    float maze = smoothstep(wid, wid * 0.35, iso) * smoothstep(0.18, 0.55, vnoise(wq * 0.9 + 2.0) + 0.25);
+    maze *= smoothstep(-0.11, 0.0, Lc.y) * smoothstep(-0.215, -0.17, Lc.z);
+    albedo = mix(albedo, vec3(0.05, 0.045, 0.03), maze * 0.85);
+    // lines radiate from the eye (puffers wear them like a sunburst)
+    vec2 eo = vec2(Lc.z - 0.17, Lc.y - 0.094);
+    float er = length(eo);
+    float rays = smoothstep(0.65, 0.95, sin(atan(eo.y, eo.x) * 9.0 + vnoise(eo * 60.0) * 2.0)) * smoothstep(0.04, 0.05, er) * smoothstep(0.11, 0.06, er) * step(0.05, abs(Lc.x));
+    albedo = mix(albedo, vec3(0.04), rays * 0.8);
+    // dark saddles over the back
+    float sad = smoothstep(0.35, 0.75, sin(Lc.z * 22.0 + 1.2 + vnoise(Lc.xz * 18.0) * 1.5)) * smoothstep(0.04, 0.12, Lc.y);
+    albedo = mix(albedo, back * 0.35, sad * 0.55);
+    // belly: fine wavy pinstripes, and a dusky chin
+    float pin = smoothstep(0.35, 0.0, abs(fract(Lc.y * 70.0 + sin(Lc.z * 40.0 + Lc.x * 30.0) * 0.6 + vnoise(Lc.xz * 30.0) * 0.8) - 0.5) - 0.1) * (1.0 - topK) * smoothstep(0.24, 0.16, Lc.z);
+    albedo = mix(albedo, vec3(0.32, 0.3, 0.24), pin * 0.45);
+    // pale spots on the flanks
+    vec2 sp = vec2(Lc.z * 34.0, Lc.y * 34.0 + sign(Lc.x) * 0.5);
+    vec2 cell = floor(sp), f = fract(sp) - 0.5;
+    vec2 jt = hash22(cell + seed * 7.0) - 0.5;
+    float spot = smoothstep(0.2, 0.11, length(f - jt * 0.5)) * step(0.45, hash12(cell + 3.0)) * topK * (1.0 - maze);
+    albedo = mix(albedo, vec3(0.85, 0.82, 0.62), spot * 0.7);
+    // photophores: a dotted line along each flank and round the lips
+    float lineY = 0.02 - 0.07 * smoothstep(0.2, -0.2, Lc.z) + 0.006 * sin(Lc.z * 25.0 + seed * 4.0);
+    float dots = smoothstep(0.3, 0.1, length(vec2(fract(Lc.z * 26.0) - 0.5, (Lc.y - lineY) * 26.0))) * smoothstep(-0.19, -0.12, Lc.z) * smoothstep(0.2, 0.12, Lc.z);
+    vec3 lum = mix(vec3(0.25, 0.95, 0.85), vec3(0.6, 1.0, 0.45), hs);
+    emis += lum * dots * (0.12 + 1.4 * uNight + 1.6 * inf);
+    // gill slit: a dark crescent before the pectoral base
+    float gz = Lc.z - 0.09 - 0.012 * (Lc.y - 0.02) * (Lc.y - 0.02) * 400.0 * 0.03;
+    float gill = smoothstep(0.0045, 0.0015, abs(gz)) * smoothstep(0.045, 0.02, abs(Lc.y - 0.012)) * step(0.12, abs(Lc.x));
+    albedo = mix(albedo, vec3(0.03, 0.02, 0.02), gill);
+    // prickle pockets and leathery micro relief
+    float pk = vnoise(Lc.zy * 160.0 + sign(Lc.x) * 9.0);
+    albedo *= 0.9 + 0.2 * pk;
+    vec3 bump = vec3(vnoise(Lc.yz * 140.0) - 0.5, vnoise(Lc.zx * 140.0 + 3.0) - 0.5, vnoise(Lc.xy * 140.0 + 7.0) - 0.5);
+    N = normalize(N + bump * 0.22 * (1.0 - inf * 0.6));
+    // stretched taut and pale when inflated
+    albedo = mix(albedo, albedo * 1.25 + 0.04, inf * (1.0 - topK) * 0.6);
+    spec = 0.55 + 0.25 * inf; gloss = 0.72; rim = 0.6; wrap = 0.26; trans = 0.12;
+    ao = mix(0.65, 1.0, smoothstep(-0.14, 0.02, Lc.y));
+    // caustics on the back in the shallows
+    if (dep > 0.15 && N.y > 0.0 && uWaterParams.x > 0.0) {
+      float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
+      emis += vec3(0.5, 0.7, 0.65) * uSunColor * waterCaustics(vWorldPos, dep) * 0.12 * N.y * sunUp * exp(-dep * 0.12) / max(glowK, 0.3);
+    }
   } else if (part < 41.5) {
-    // the lanterns: big glowing eyes with a dark pupil
-    float pupil = smoothstep(0.75, 0.9, vP.w);
-    albedo = vec3(0.05);
-    emis = mix(vec3(0.3, 1.0, 0.8), vec3(0.02), pupil) * (1.0 + inf * 1.5 + vI.w);
-    spec = 1.0; gloss = 0.95;
+    // a glossy eye: dark pupil, a lantern-gold iris ring, cornea catchlight
+    vec2 q = vP.zw;
+    float d = length(q - vec2(0.05, 0.0));
+    float pupil = smoothstep(0.42, 0.36, length((q - vec2(0.06, 0.02)) * vec2(0.85, 1.15)));
+    float iris = smoothstep(0.92, 0.84, d);
+    float stri = 0.75 + 0.25 * sin(atan(q.y, q.x) * 27.0 + d * 11.0 + vnoise(q * 9.0) * 2.0);
+    vec3 irisC = mix(vec3(0.55, 0.4, 0.1), vec3(0.22, 0.4, 0.26), smoothstep(0.42, 0.85, d)) * stri;
+    albedo = mix(vec3(0.05, 0.045, 0.03), irisC, iris);
+    albedo = mix(albedo, vec3(0.006, 0.007, 0.01), pupil);
+    emis = mix(vec3(0.2, 0.9, 0.7), vec3(0.0), pupil) * smoothstep(0.5, 0.8, d) * iris * (1.2 * uNight + 1.5 * inf);
+    spec = 1.8; gloss = 0.97; rim = 0.9; trans = 0.0;
+    // a fixed soft catchlight on the cornea (the bright water overhead)
+    float cl = pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 120.0);
+    emis += vec3(0.9, 0.95, 1.0) * cl * 1.2 / max(glowK, 0.3);
   } else if (part < 42.5) {
-    albedo = vec3(0.6, 0.55, 0.4); trans = 1.0;
+    // fins: translucent amber membranes with fine branching rays and a dusky margin
+    float s = vP.y, u = vP.z, id = vP.w;
+    float nR = id < 0.5 ? 13.0 : (id < 2.5 ? 9.0 : 11.0);
+    float rr = u * (nR - 1.0) + 0.5;
+    float split = s > 0.55 ? 2.0 : 1.0;
+    float ray = smoothstep(0.38, 0.12, abs(fract(rr * split + 0.15 * sin(s * 6.0 + u * 5.0)) - 0.5)) * smoothstep(0.02, 0.12, s);
+    float joints = 0.85 + 0.15 * smoothstep(0.6, 1.0, sin(s * 38.0));
+    vec3 mem = mix(vec3(0.62, 0.5, 0.24), vec3(0.5, 0.46, 0.3), hs);
+    albedo = mem * (1.0 - ray * 0.35 * joints);
+    albedo = mix(albedo, vec3(0.12, 0.1, 0.06), smoothstep(0.82, 0.98, s) * 0.55);
+    // the tail wears a dark crescent bar
+    if (id < 0.5) albedo = mix(albedo, vec3(0.08, 0.07, 0.04), smoothstep(0.05, 0.0, abs(s - 0.62 - 0.04 * sin(u * 9.0))) * 0.7);
+    trans = 1.1; spec = 0.4; gloss = 0.75; rim = 0.6; wrap = 0.4;
+    // the edge: scalloped between ray tips, slightly ragged
+    float edge = 0.94 + 0.05 * cos(rr * 6.2831853) + 0.02 * (vnoise(vec2(u * 30.0, seed * 9.0)) - 0.5);
+    if (s > edge) discard;
+  } else if (part < 43.5) {
+    // prickles: ivory spines, darker at the base
+    albedo = mix(vec3(0.3, 0.27, 0.16), vec3(0.88, 0.84, 0.7), vP.y);
+    emis = vec3(0.3, 0.9, 1.0) * inf * 0.25 * vP.y;
+    spec = 0.5; gloss = 0.8;
+  } else if (part < 44.5) {
+    // the beak: fused ivory tooth plates
+    albedo = vec3(0.86, 0.82, 0.68) * (0.85 + 0.15 * sin(vP.y * 30.0));
+    spec = 0.8; gloss = 0.85; rim = 0.5;
   } else {
-    albedo = vec3(0.9, 0.8, 0.6);
-    emis = vec3(0.3, 0.9, 1.0) * inf * 0.5;
+    albedo = vec3(0.04, 0.02, 0.02);
+    spec = 0.1;
   }
 #elif KIND == 9
+  // ---- ribbon eel: velvet skin (blue males, black juveniles, gold females), yellow fins with a
+  // white margin and fine rays, a gold jaw and nostril leaves, a small glossy eye
   float t = vI.w;
-  vec3 c = mix(vec3(0.15, 0.25, 0.9), vec3(0.85, 0.75, 0.15), hs);
-  float stripe = smoothstep(0.3, 0.6, sin(t * 60.0 + vnoise(vec2(t * 20.0, vLoc.y * 30.0 + seed * 9.0)) * 2.5) * 0.5 + 0.5);
-  albedo = mix(c * 0.35, c, stripe);
-  if (part > 50.5) { albedo = mix(vec3(0.9, 0.85, 0.3), c, 0.4); trans = 1.0; emis = c * 0.25 * vP.z; }
-  spec = 0.6; gloss = 0.8; rim = 0.8;
-  emis += vec3(0.4, 0.9, 1.0) * smoothstep(0.03, 0.0, t) * 0.8;
-  emis *= 1.0 + vI.z * 2.0;
+  float alarm = vI.z;
+  vec3 Lc = vLoc;
+  float morph = hs;
+  vec3 bodyC = morph < 0.55 ? vec3(0.02, 0.09, 0.42) : (morph < 0.8 ? vec3(0.025, 0.028, 0.04) : vec3(0.78, 0.62, 0.08));
+  vec3 finC = morph < 0.8 ? vec3(0.95, 0.78, 0.08) : vec3(0.95, 0.85, 0.3);
+  if (part < 50.5) {
+    float topK = smoothstep(-0.006, 0.01, Lc.y);
+    albedo = bodyC * mix(1.25, 0.75, topK);
+    // a velvet sheen band along the upper flank
+    albedo += bodyC * 0.35 * exp(-pow((Lc.y - 0.007) / 0.004, 2.0));
+    // the head: gold jaw and a pale lip line drawn by hand
+    float head = smoothstep(0.075, 0.03, t);
+    float jaw = smoothstep(0.0, -0.004, Lc.y - 0.0015 * sin(t * 220.0 + seed * 5.0)) * head;
+    albedo = mix(albedo, finC * 0.9, jaw * 0.85);
+    float lip = smoothstep(0.0012, 0.0002, abs(Lc.y + 0.0018 + (0.5 - Lc.z) * 0.05 + 0.0004 * sin(Lc.z * 2000.0))) * smoothstep(0.035, 0.012, t);
+    albedo = mix(albedo, vec3(0.02), lip);
+    // gill pore and a faint lateral line of pores
+    float ll = smoothstep(0.0009, 0.0, abs(Lc.y - 0.006 * (1.0 - t))) * smoothstep(0.55, 0.85, fract(t * 140.0 + 0.3 * sin(t * 30.0))) * smoothstep(0.08, 0.12, t);
+    albedo = mix(albedo, albedo * 2.0 + 0.04, ll * 0.6);
+    // velvet micro relief and mucus gloss
+    N = normalize(N + (vec3(vnoise(Lc.zy * 900.0), vnoise(Lc.zx * 900.0 + 3.0), 0.0) - 0.5) * 0.12);
+    spec = 0.75; gloss = 0.8; rim = 0.8; wrap = 0.24; trans = 0.25;
+    emis += vec3(0.4, 0.9, 1.0) * ll * (0.3 * uNight + alarm * 1.2);
+  } else if (part < 51.5) {
+    float s = vP.z;
+    float ray = smoothstep(0.35, 0.1, abs(fract(t * 260.0 + s * 0.4) - 0.5)) * smoothstep(0.05, 0.3, s);
+    albedo = finC * (1.0 - ray * 0.3);
+    float marg = smoothstep(0.72, 0.9, s + 0.06 * sin(t * 90.0 + seed * 7.0));
+    albedo = mix(albedo, vec3(0.95, 0.95, 0.9), marg * 0.85);
+    albedo = mix(albedo, bodyC, smoothstep(0.25, 0.0, s) * 0.6);
+    trans = 1.2; spec = 0.4; gloss = 0.75; rim = 0.7; wrap = 0.4;
+    emis += vec3(0.35, 0.95, 1.0) * marg * (0.25 * uNight + alarm * 0.9);
+    float edge = 0.97 + 0.03 * cos(t * 260.0 * 6.2831853);
+    if (s > edge) discard;
+  } else if (part < 52.5) {
+    vec2 q = vP.zw;
+    float d = length(q);
+    float pupil = smoothstep(0.5, 0.42, d);
+    albedo = mix(finC * 0.8, vec3(0.005), pupil);
+    albedo = mix(albedo, vec3(0.04), smoothstep(0.85, 1.0, d));
+    spec = 1.8; gloss = 0.97; rim = 0.9;
+    emis += vec3(0.9, 0.95, 1.0) * pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 90.0) * 1.2 / max(glowK, 0.3);
+  } else {
+    albedo = finC;
+    trans = 1.0; spec = 0.4; rim = 0.8;
+  }
 #endif
 
 #if KIND == 6
@@ -677,7 +863,7 @@ export function reefMaterial(kind, actors, fade = null) {
       uTintA: { value: new Color(0.5, 0.5, 0.5) },
       uGlow: { value: new Color(0.3, 0.8, 1.0) },
     }),
-    side: kind === 'kelp' || kind === 'fan' || kind === 'eel' || kind === 'ray' || kind === 'rayFar' || jelly ? DoubleSide : FrontSide,
+    side: kind === 'kelp' || kind === 'fan' || kind === 'eel' || kind === 'puffer' || kind === 'ray' || kind === 'rayFar' || jelly ? DoubleSide : FrontSide,
   };
   if (jelly) Object.assign(params, { transparent: true, depthWrite: false, blending: AdditiveBlending });
   return new ShaderMaterial(params);

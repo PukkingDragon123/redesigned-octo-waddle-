@@ -221,7 +221,7 @@ varying vec4 vSeed;
 // eye: a domed eye with a metallic iris (it mirrors the light like the flank does), a large
 // dark pupil and a wet corneal highlight. Returns albedo in .rgb, coverage in .a; iris weight
 // (for the mirror) in irisK, and the cornea's gloss in specK.
-vec4 fishEye(vec3 L, vec3 eyeC, float r, float split, out float irisK, out float specK) {
+vec4 fishEye(vec3 L, vec3 eyeC, float r, float split, vec3 irisTint, out float irisK, out float specK) {
   vec2 q = vec2(L.z - eyeC.z, L.y - eyeC.y) / r;
   float d = length(q);
   irisK = 0.0;
@@ -243,9 +243,14 @@ vec4 fishEye(vec3 L, vec3 eyeC, float r, float split, out float irisK, out float
   // the orbit: a thin dark ring of skin around the eye
   vec3 col = mix(vec3(0.05, 0.06, 0.07), vec3(0.02), eye);
   irisK = eye * (1.0 - pupil);
-  // radial striations in the iris
-  float stri = 0.75 + 0.25 * sin(atan(q.y, q.x) * 23.0 + d * 9.0);
-  col = mix(col, vec3(0.12, 0.11, 0.09) * stri, irisK);
+  // radial striations in the iris (wobbling, broken like brush strokes), a dark limbal ring and
+  // a bright inner ring round the pupil
+  float an = atan(q.y, q.x);
+  float stri = 0.72 + 0.28 * sin(an * 23.0 + d * 9.0 + 0.6 * sin(an * 5.0 + d * 4.0));
+  vec3 iris = mix(irisTint * 0.55, irisTint * 1.25, smoothstep(0.85, 0.62, d)) * stri;
+  iris = mix(iris, vec3(0.03, 0.03, 0.025), smoothstep(0.8, 0.97, d));
+  iris += irisTint * 0.25 * smoothstep(0.08, 0.0, abs(d - 0.7 - 0.02 * sin(an * 7.0)));
+  col = mix(col, iris, irisK);
   if (split > 0.5) col = mix(col, vec3(0.16, 0.13, 0.08), smoothstep(0.05, 0.0, abs(q.y)) * eye * 0.6);
   col = mix(col, vec3(0.006, 0.007, 0.01), pupil * eye);
   specK = eye;
@@ -318,9 +323,9 @@ void main() {
     vec3 back = pA * (0.7 + 0.3 * tint);
     // silvered skin is nearly all mirror: very little diffuse light, the rest is reflection
     vec3 silver = vec3(0.7, 0.75, 0.8);
-    albedo = mix(silver * 0.06, back, dors);
-    albedo = mix(albedo, vec3(0.86, 0.88, 0.9) * 0.16, belly);
-    mirror = mix(0.97, 0.03, dors);
+    albedo = mix(silver * 0.3, back, dors);
+    albedo = mix(albedo, vec3(0.86, 0.88, 0.9) * 0.5, belly);
+    mirror = mix(0.62, 0.03, dors);
     // the gold lateral band and a row of dark spots above it
     float bandC = 1.18 - 0.12 * t;
     float band = exp(-pow((phi - bandC) * 10.0, 2.0)) * smoothstep(0.05, 0.22, t) * smoothstep(0.85, 0.55, t);
@@ -351,9 +356,9 @@ void main() {
     mirror *= 1.0 - mouth;
     // eye
     float irisK;
-    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, irisK, eyeSpec);
+    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, vec3(0.75, 0.6, 0.28), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.5 * irisK, eye.a);
+    mirror = mix(mirror, 0.3 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(1.1, 0.95, 0.7), eye.a);
 #elif SPECIES == 1
     // ---- spiralback: teal back with dark helical bands, silver-bronze flanks, white belly
@@ -362,10 +367,10 @@ void main() {
     float bandsK = smoothstep(0.15, 0.0, abs(fract(helix) - 0.5) - 0.17) * smoothstep(1.95, 0.9, phi);
     bandsK *= smoothstep(0.08, 0.2, t) * smoothstep(0.98, 0.84, t);
     vec3 flankC = vec3(0.66, 0.72, 0.7);
-    albedo = mix(flankC * 0.08, back, dors);
+    albedo = mix(flankC * 0.3, back, dors);
     albedo = mix(albedo, pB, bandsK * 0.92);
-    albedo = mix(albedo, vec3(0.9, 0.9, 0.86) * 0.2, belly);
-    mirror = mix(0.9, 0.05, dors) * (1.0 - bandsK * 0.85);
+    albedo = mix(albedo, vec3(0.9, 0.9, 0.86) * 0.5, belly);
+    mirror = mix(0.58, 0.05, dors) * (1.0 - bandsK * 0.85);
     mirTint = mix(vec3(1.0, 0.95, 0.85), iridescence(dot(N, V), 1.6 + tint * 0.6) * 1.3, 0.35 * (1.0 - belly));
     // a bright bronze lateral stripe
     float stripe = exp(-pow((phi - 1.5 + 0.1 * t) * 8.0, 2.0)) * smoothstep(0.1, 0.25, t) * smoothstep(0.95, 0.7, t);
@@ -378,9 +383,9 @@ void main() {
     albedo = mix(albedo, vec3(0.03), mouth * 0.9);
     mirror *= 1.0 - mouth;
     float irisK;
-    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 1.0, irisK, eyeSpec);
+    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 1.0, vec3(0.8, 0.55, 0.2), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.45 * irisK, eye.a);
+    mirror = mix(mirror, 0.3 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(0.95, 0.78, 0.45), eye.a);
 #else
     // ---- lanternjack: slate-bronze mottled back, big bronze scales with dark rims, scutes,
@@ -390,10 +395,10 @@ void main() {
     float mott = fbm2(vec2(t * 9.0, phi * 3.0) + seed * 7.0);
     // faint dark saddles across the back, and blotchy mottling
     float saddle = smoothstep(0.55, 0.85, sin(t * 22.0 + seed * 5.0 + phi * 0.8)) * smoothstep(1.7, 0.6, phi) * smoothstep(0.15, 0.3, t) * smoothstep(0.85, 0.7, t);
-    albedo = mix(flank * 0.18, back * (0.7 + 0.6 * mott), dors);
+    albedo = mix(flank * 0.42, back * (0.7 + 0.6 * mott), dors);
     albedo = mix(albedo, back * 0.45, saddle * 0.6);
-    albedo = mix(albedo, vec3(0.86, 0.84, 0.78) * 0.3, belly);
-    mirror = mix(0.72, 0.06, dors) * (1.0 - head * 0.5) * (1.0 - saddle * 0.5);
+    albedo = mix(albedo, vec3(0.86, 0.84, 0.78) * 0.55, belly);
+    mirror = mix(0.5, 0.06, dors) * (1.0 - head * 0.5) * (1.0 - saddle * 0.5);
     mirTint = mix(vec3(1.05, 0.9, 0.7), vec3(1.0), belly);
     // scale margins: a little darker
     albedo *= 1.0 - scaleEdge * 0.2;
@@ -427,17 +432,35 @@ void main() {
     albedo = mix(albedo, vec3(0.02, 0.01, 0.01), mouth);
     mirror *= 1.0 - mouth;
     float irisK;
-    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, irisK, eyeSpec);
+    vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, vec3(0.85, 0.62, 0.22), irisK, eyeSpec);
     albedo = mix(albedo, eye.rgb, eye.a);
-    mirror = mix(mirror, 0.6 * irisK, eye.a);
+    mirror = mix(mirror, 0.35 * irisK, eye.a);
     mirTint = mix(mirTint, vec3(1.2, 0.95, 0.55), eye.a);
     // eyeshine: a tapetum returns light toward its source (lures, moon, the viewer's side)
     vec2 qe = vec2(L.z - EYE_Z, L.y - EYE_Y) / EYE_R;
     float pupilK = smoothstep(0.5, 0.4, length(qe)) * eye.a;
-    emis += pC * pupilK * pow(max(dot(N, V), 0.0), 6.0) * (0.15 + 1.2 * uNight + 0.8 * special) * 0.35;
+    emis += pC * pupilK * pow(max(dot(N, V), 0.0), 6.0) * (1.2 * uNight + 0.8 * special) * 0.35;
 #endif
     albedo = mix(albedo, albedo * 0.45, operLine * 0.8);
     mirror *= 1.0 - operLine * 0.7;
+    // the gill cover overlaps the body: its free edge steps down (a shaded lip), its plate bulges
+    float operBand = exp(-pow((L.z - opz) / 0.0035, 2.0)) * operTaper;
+    float operPlate = smoothstep(opz, opz + 0.03, L.z) * smoothstep(opz + 0.075, opz + 0.03, L.z) * operTaper;
+    N = normalize(N - T * operBand * 0.9 + T * operPlate * 0.12);
+#if SPECIES != 2
+    // the lateral line: a row of pored scales drawn as a slightly wavering dotted stroke
+    float llC = 1.28 - 0.18 * smoothstep(0.1, 0.4, t) + 0.025 * sin(t * 13.0 + seed * 4.0);
+    float llK = exp(-pow((phi - llC) * 28.0, 2.0)) * smoothstep(0.08, 0.16, t) * smoothstep(0.92, 0.8, t);
+    float llDot = smoothstep(0.55, 0.9, sin(t * SCALE_ALONG * 3.14159 + 0.5));
+    albedo = mix(albedo, albedo * 0.35, llK * (0.35 + 0.5 * llDot));
+    mirror *= 1.0 - llK * 0.45;
+#endif
+    // every scale's guanine platelets shift the hue a little differently (thin film), and the
+    // mirror breaks into a mosaic of slightly different silvers
+    vec3 film = iridescence(dot(N, V) * 0.75 + scaleId * 0.55, 1.15 + scaleId * 0.8);
+    mirTint *= mix(vec3(1.0), film * 1.25, 0.38 * (1.0 - dors * 0.6) * (1.0 - belly * 0.6));
+    mirTint *= 0.82 + 0.36 * fract(scaleId * 13.7);
+    mirror *= 1.0 - scaleEdge * 0.4;
     // scale margins catch a little dark pigment; each scale's platelets tilt a little differently
     albedo *= 1.0 - scaleEdge * 0.18;
     // platelets stay (nearly) vertical across the curved flank: a mirror facing sideways
@@ -468,7 +491,10 @@ void main() {
     vec3 fin = mix(pD, pA, 0.35);
     float nR = part < 1.5 ? 18.0 : 12.0;
 #endif
-    float rays = smoothstep(0.42, 0.22, abs(fract(ray * nR) - 0.5)) * smoothstep(0.02, 0.15, s);
+    // soft rays branch in two past mid-fin and are jointed (segmented) along their length
+    float br = s > 0.5 ? 2.0 : 1.0;
+    float rays = smoothstep(0.42, 0.18, abs(fract(ray * nR * br + 0.08 * sin(s * 7.0 + ray * 11.0)) - 0.5)) * smoothstep(0.02, 0.15, s);
+    rays *= 0.8 + 0.2 * smoothstep(0.3, 0.8, sin(s * 60.0 + ray * 3.0));
     // hyaline membrane with fine, slightly darker rays
     albedo = fin * (1.0 - rays * 0.3) * 0.7;
     // translucent membrane, thicker and darker at the margins
@@ -504,7 +530,7 @@ void main() {
 #elif SPECIES == 1
     float memA = part > 1.5 && part < 2.5 ? 0.78 : 0.66;
 #else
-    float memA = 0.58;
+    float memA = 0.7;
 #endif
     alpha = (1.0 - smoothstep(edge - 0.035, edge + 0.01, s)) * mix(memA, min(memA + 0.12, 1.0), max(rays, smoothstep(0.3, 0.0, s)));
     if (dot(N, V) < 0.0) N = -N;
@@ -586,8 +612,38 @@ void main() {
     vec3 R = reflect(-V, Nm);
     vec3 env = seaLightField(R, air);
     float fres = 0.75 + 0.25 * pow(1.0 - max(dot(N, V), 0.0), 2.0);
-    col = mix(col, col * 0.15 + env * mirTint * fres, mirror);
+    col = mix(col, col * 0.45 + env * mirTint * fres, mirror);
     col += env * mirTint * mirror * flash * 1.6;
+  }
+#ifdef NEAR
+  // each scale's platelets tilt their own way: a few catch the (refracted) sun and glint
+  if (part < 0.5 && mirror > 0.05) {
+    vec3 sunD = normalize(mix(-waterSunRefract(), uSunDir, air));
+    float sunUpG = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.8);
+    float g = pow(max(dot(reflect(-V, Nm), sunD), 0.0), 48.0);
+    col += uSunColor * mirTint * g * mirror * sunUpG * 1.6;
+  }
+#endif
+  // wet skin: a fresnel rim of the bright water above
+  float fr = pow(1.0 - abs(dot(N, V)), 4.0);
+  col += seaLightField(reflect(-V, N), air) * fr * (part < 0.5 ? 0.28 : 0.12);
+  // fins glow when the light comes through them
+  if (part > 0.5 && part < 5.5) {
+    float back = pow(max(dot(-V, uSunDir), 0.0), 3.0) + 0.25 * max(-dot(N, uSunDir), 0.0);
+    col += albedo * uSunColor * back * 0.55 * (1.0 - 0.5 * uNight);
+  }
+#ifdef NEAR
+  // caustics play over the back in the shallows
+  float depC = uSeaLevel - vWorldPos.y;
+  if (depC > 0.15 && depC < 25.0 && N.y > 0.0 && uWaterParams.x > 0.0 && part < 0.5) {
+    float sunUp = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.7);
+    col += vec3(0.5, 0.72, 0.66) * uSunColor * waterCaustics(vWorldPos, depC) * 0.16 * N.y * sunUp * exp(-depC * 0.12);
+  }
+#endif
+  // the cornea's catchlight: the bright water overhead and the sun
+  if (eyeSpec > 0.0) {
+    float cl = pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0) + vFwd * 0.3)), 0.0), 140.0);
+    col += vec3(0.95, 0.97, 1.0) * cl * eyeSpec * 1.6;
   }
   col = applyFog(col, vWorldPos);
   gl_FragColor = vec4(col, alpha);

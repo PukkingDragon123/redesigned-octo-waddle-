@@ -192,8 +192,11 @@ void main() {
     // (the pen wobble also hides the kinks of the per-vertex strata coordinate at triangle edges)
     float st = vExt.y + (nm.r - 0.5) * 1.6 + (nM.a - 0.5) * 3.0 + (nm.b - 0.5) * 0.9 + pen.r * 0.42 * mesoF;
     float bedT = 1.35;
-    float bandId = floor(st / bedT);
-    float bf = fract(st / bedT);
+    // beds of uneven thickness, gathered in packages (thick massive beds, runs of thin ones): a
+    // gently varying, always increasing bed coordinate, so the strata never print as even stripes
+    float bedU = st / bedT + 0.32 * sin(st * 0.29 + 1.3) + 0.18 * sin(st * 0.73 + 4.1);
+    float bandId = floor(bedU);
+    float bf = fract(bedU);
     float hard = hash11(bandId * 1.37 + 3.1);
     // mineral colour of each bed: buff, iron-red, grey-blue, greenish, cream
     float mh = hash11(bandId * 7.13 + 1.7);
@@ -212,7 +215,10 @@ void main() {
     // thin laminae inside the softer beds
     float lam = sin(st * 18.0 + nm.b * 3.0) * (1.0 - hard) * 0.5 + 0.5;
     float sedK = sed * (0.45 + 0.55 * steep);
-    rock *= mix(vec3(1.0), mineral * bandTone * (1.0 - lam * 0.08 * fineF), sedK);
+    // (far away a bed is a pixel or two: its colour steps calm down so the stack reads as one
+    // weathered rock with strata in it, not a striped cake; up close each bed keeps its colour)
+    float bedCalm = mix(1.0, 0.5, smoothstep(0.08, 0.5, px));
+    rock *= mix(vec3(1.0), mineral * bandTone * (1.0 - lam * 0.08 * fineF), sedK * bedCalm);
     heightB += (bedRelief + lam * 0.04 * fineF) * steep * sed * mesoF;
     crevice = max(crevice, notch * steep * sed * mesoF);
 
@@ -340,12 +346,16 @@ void main() {
     // ---- intertidal zone: black lichen band, barnacles, mussels, wet algae, coralline ----
     float yN = P.y + (nm.r - 0.5) * 1.4 + (streak - 0.5) * 0.8;
     float splash = 1.4 + uSeaState * 4.5;
+    splashZ = splash;
     wet = smoothstep(splash + 1.2, splash - 0.6, yN);
     float blackZone = smoothstep(splash + 3.6, splash + 1.4, yN) * (1.0 - wet);
     barnZone = smoothstep(1.7, 0.9, yN) * smoothstep(-0.4, 0.4, yN);
     algae = smoothstep(0.5, -0.1, yN) * smoothstep(-2.5, -0.6, yN);
     rock *= 1.0 - blackZone * 0.45 * (0.6 + 0.4 * streak);
-    rock = mix(rock, rock * vec3(0.5, 0.52, 0.54), wet * 0.85);
+    // wet rock: water fills the pores, so it darkens and its colour deepens (not a grey wash)
+    vec3 wetRock = rock * vec3(0.5, 0.52, 0.55);
+    wetRock = max(mix(vec3(luma(wetRock)), wetRock, 1.3), vec3(0.0));
+    rock = mix(rock, wetRock, wet * 0.85);
     if (barnZone > 0.01 && microF > 0.01) {
       // barnacles: little volcano shells with a dark opening, crowded in the cracks
       vec4 bc = stones(vec2(uF, P.y) * 11.0 * steep + P.xz * 11.0 * (1.0 - steep));
@@ -384,6 +394,7 @@ void main() {
   }
 
   vec3 albedo = rock;
+  float sandGlint = 0.0;
 
   // ======================= sand, shingle and pebbles =======================
   if (sandW > 0.001) {
@@ -432,6 +443,21 @@ void main() {
     sc += kind * vec3(0.5, 0.48, 0.45) * step(0.985, hash12(floor(P.xz * 9.0))) * detail * 0.4;
     albedo = mix(albedo, sc, sandW);
     heightB = mix(heightB, sh, sandW);
+    // sparkle: quartz and mica grains flash when their facet mirrors the sun (only where single
+    // grains still cover at least a pixel or so; each flash is a soft dot, never a hard speck)
+    float spkF = (1.0 - smoothstep(0.012, 0.05, px)) * uDetail;
+    if (spkF > 0.01) {
+      vec2 gq = P.xz * 9.0;
+      vec2 gi = floor(gq);
+      vec2 go = hash22(gi + 5.3);
+      vec3 gn = normalize(vec3(go.x - 0.5, 1.1, go.y - 0.5));
+      vec3 Vg = normalize(uCamPos - P);
+      float facet = pow(max(dot(reflect(-Vg, gn), uSunDir), 0.0), 90.0);
+      vec2 gd = fract(gq) - (0.25 + go * 0.5);
+      float dotR = max(0.07, px * 9.0 * 0.6);
+      float spot = smoothstep(dotR, dotR * 0.3, length(gd)) * step(0.55, hash12(gi + 11.7));
+      sandGlint = facet * spot * spkF * sandW * (1.0 - kind * 0.4) * (0.6 + 0.4 * (1.0 - wetS));
+    }
   }
 
   // ---------------- tide pools: still water in hollows of the rock platforms ----------------
@@ -457,6 +483,13 @@ void main() {
     g = mix(g, uGrassDry, smoothstep(0.6, 0.92, texture2D(uNoise, wp / 61.0 + 0.71).g) * 0.4);
     g = mix(g, uGrassDry * 0.9, smoothstep(0.55, 0.85, steep) * 0.5);
     g *= 0.86 + 0.26 * blades * (0.4 + 0.6 * detail);
+    // mid-scale life in the meadow (~8 m): sun-warmed yellowing swells, lush cool hollows, and the
+    // greener, darker grass in the folds of the ground
+    float mv = texture2D(uNoise, wp / 7.5 + 0.13).g;
+    g *= 0.9 + 0.2 * mv;
+    g = mix(g, g * vec3(1.07, 1.01, 0.82), smoothstep(0.55, 0.85, mv) * 0.55);
+    g = mix(g, g * vec3(0.84, 1.0, 1.04), smoothstep(0.45, 0.15, mv) * 0.45);
+    g *= mix(0.8, 1.0, smoothstep(0.35, 0.9, cav));
     // wind waves rolling over the meadow (whole multiples of the wrapping wave phase: no jump)
     vec2 wd = normalize(uWind.xz + vec2(1e-3));
     float wave = sin(dot(wp, wd) * 0.08 - uWavePhase + patchA * 5.0);
@@ -492,8 +525,15 @@ void main() {
   s.wrap = 0.22;
   s.trans = grassAmt * 0.22;
   float wetAll = max(wet * (1.0 - sandW), smoothstep(0.7, 0.1, P.y) * sandW);
-  s.spec = wetAll * 0.55 * smoothstep(-0.5, 0.3, P.y) + algae * 0.25 * (1.0 - sandW);
-  s.gloss = 0.62;
+  // fresh splash just above the wet band: glistening runnels down the rock between waves
+  float runnel = smoothstep(0.55, 0.75, streak) * smoothstep(splashZ + 2.6, splashZ + 0.4, P.y) * (1.0 - wet) * rockVis;
+  // dry rock and sand keep a faint rough sheen; wet rock, weed and the swash a glossy film that
+  // mirrors the sky (stylizedLight's wet specular)
+  float wetGloss = clamp(wetAll + algae * 0.6 + runnel * 0.7, 0.0, 1.0);
+  s.spec = (wetAll * 0.75 + runnel * 0.35) * smoothstep(-0.5, 0.3, P.y) + algae * 0.3 * (1.0 - sandW)
+         + 0.05 * (1.0 - wetGloss) * (1.0 - grassAmt);
+  s.gloss = mix(0.22, 0.82, wetGloss);
+  s.emissive += uSunColor * sandGlint * 1.6 * s.shadow * (1.0 - uNight);
   if (pool > 0.01) {
     // the pool mirrors the sky over a dark, weedy floor
     vec3 Vp = normalize(uCamPos - P);

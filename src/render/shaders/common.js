@@ -240,7 +240,11 @@ vec3 stylizedLight(Surface s) {
   // Shadow side keeps the colour but cools and calms it; never black.
   vec3 shadowCol = s.albedo * ambient * uShadowTint;
   shadowCol = mix(shadowCol, vec3(dot(shadowCol, vec3(0.2126, 0.7152, 0.0722))), uLightK.z * (1.0 - s.shadow * ramp));
-  vec3 litCol = s.albedo * (uSunColor * mix(0.85, 1.0, s.ao) + ambient * 0.55);
+  // the lit side still turns with the form: faces square to the sun take its full light, glancing
+  // ones a little less (a wrapped cosine, so planes read without the cel ramp going hard)
+  float lam = clamp((NdL + s.wrap) / (1.0 + s.wrap), 0.0, 1.0);
+  float sunI = mix(1.0, 0.62 + 0.38 * sqrt(lam), 0.55);
+  vec3 litCol = s.albedo * (uSunColor * sunI * mix(0.85, 1.0, s.ao) + ambient * 0.55);
   vec3 col = mix(shadowCol, litCol, lit);
   // Warm, saturated terminator band: reads as subsurface scattering in organic forms.
   float band = smoothstep(0.5 - s.wrap * 1.5, 0.5 - s.wrap * 0.1, h) * (1.0 - smoothstep(0.5 - s.wrap * 0.1, 0.5 + s.wrap * 1.1, h));
@@ -254,11 +258,34 @@ vec3 stylizedLight(Surface s) {
   float back = pow(max(dot(-s.V, uSunDir), 0.0), 2.0);
   vec3 rimCol = uSkyAmbient * 0.35 + uSunColor * (0.12 + 0.9 * back) * mix(0.35, 1.0, s.shadow);
   col += fres * s.rim * rimCol * (0.6 + 0.4 * s.ao);
-  // Soft anime specular.
-  vec3 H = normalize(uSunDir + s.V);
-  float sharp = mix(0.86, 0.985, s.gloss);
-  float sp = smoothstep(sharp, sharp + (1.0 - sharp) * 0.35, dot(s.N, H));
-  col += uSunColor * sp * s.spec * lit;
+  // Specular: a GGX sun lobe (soft round highlights that sharpen with gloss and flare at grazing
+  // angles, never a hard plastic blob) and, for wet and glossy things, the sky they mirror.
+  if (s.spec > 0.0) {
+    vec3 H = normalize(uSunDir + s.V);
+    float nh = max(dot(s.N, H), 0.0);
+    float nl = max(NdL, 0.0);
+    float nvs = max(NdV, 1e-3);
+    float rgh = mix(0.62, 0.1, clamp(s.gloss, 0.0, 1.0));
+    float a = rgh * rgh;
+    float a2 = a * a;
+    float dd = nh * nh * (a2 - 1.0) + 1.0;
+    float D = a2 / (3.14159265 * dd * dd);
+    float vh = max(dot(s.V, H), 0.0);
+    float Fs = 0.04 + 0.96 * pow(1.0 - vh, 5.0);
+    float kv = a * 0.5;
+    float Vis = 1.0 / (4.0 * (nl * (1.0 - kv) + kv) * (nvs * (1.0 - kv) + kv));
+    float sp = min(D * Fs * Vis * nl * 3.0, 6.0);
+    col += uSunColor * sp * s.spec * s.shadow * mix(0.5, 1.0, s.ao);
+    // the sky in a wet surface: horizon glow at grazing angles, the zenith looking down; the warm
+    // sun-side sky in the direction of the sun; a rough surface sees a dimmer, averaged sky
+    vec3 Rv = reflect(-s.V, s.N);
+    vec3 skyR = mix(uSkyHorizon, uSkyZenith, smoothstep(0.02, 0.65, Rv.y));
+    skyR = mix(skyR, uBounce * 0.6 + uSkyHorizon * 0.15, smoothstep(0.02, -0.3, Rv.y));
+    skyR += uSunScatter * pow(max(dot(Rv, uSunDir), 0.0), 6.0) * 0.6;
+    float Fv = 0.04 + 0.96 * pow(1.0 - nvs, 5.0);
+    float envK = s.spec * Fv * mix(0.3, 1.0, s.gloss) * s.ao * (1.0 - uNight * 0.6);
+    col = col * (1.0 - envK * 0.5) + skyR * envK * 0.85;
+  }
   // Translucency: thin tissue glows warm when the sun is behind it.
   float tb = pow(max(dot(-s.V, uSunDir), 0.0), 3.0);
   col += s.albedo * uSunColor * vec3(1.0, 0.75, 0.55) * tb * s.trans * (0.35 + 0.65 * s.shadow);

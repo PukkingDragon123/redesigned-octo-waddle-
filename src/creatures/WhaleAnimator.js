@@ -35,6 +35,9 @@ export const GESTURES = {
   happyWiggle: { dur: 1.8 },
   breachArch: { dur: 2.6 },
   rollOver: { dur: 4.2 },
+  // the mother's embrace: her body curls round the calf and both front flippers fold over it
+  // (opts.dur sets its length; anim.gest.deep 0..1 draws her in closer while it lasts)
+  hug: { dur: 7 },
 };
 
 const _e = new Euler();
@@ -200,7 +203,7 @@ export class WhaleAnimator {
   gesture(name, opts = {}) {
     const G = GESTURES[name];
     if (!G) return false;
-    this.gest = { name, t: 0, dur: G.dur * (opts.speed ? 1 / opts.speed : 1) * (this.calf ? 0.8 : 1.15), event: G.event, fired: false, side: opts.side ?? (this.r() < 0.5 ? 1 : -1) };
+    this.gest = { name, t: 0, dur: opts.dur ?? G.dur * (opts.speed ? 1 / opts.speed : 1) * (this.calf ? 0.8 : 1.15), event: G.event, fired: false, side: opts.side ?? (this.r() < 0.5 ? 1 : -1), deep: 0 };
     return true;
   }
 
@@ -732,6 +735,38 @@ export class WhaleAnimator {
         gp.jaw = 0.1 * e;
         gp.eyesWide = 0.6 * e;
         gp.crest = 0.35 * e;
+        break;
+      }
+      case 'hug': {
+        // she curls round toward the calf on `side`: the spine bends into a C, she rolls a little
+        // onto that side, and both front flippers sweep forward and fold in over it, cupped
+        const e = env(u, Math.min(0.3, 1.6 / G.dur), Math.min(0.3, 1.8 / G.dur));
+        const d = (G.deep || 0) * e;
+        const br = Math.sin(t * 1.3) * 0.5 + 0.5; // a slow breath
+        for (let i = 0; i < 6; i++) {
+          gp.spineYaw[i] = side * (0.2 + 0.12 * d) * SPINE_W[i] * e * (1 - 0.35 * i / 5);
+          gp.spinePitch[i] = 0.05 * SPINE_W[i] * e;
+        }
+        gp.rootRoll = side * (0.22 + 0.1 * d) * e;
+        gp.rootYaw = side * 0.08 * e;
+        gp.headYaw = side * (0.26 + 0.1 * d) * e + Math.sin(t * 0.9) * 0.03 * e;
+        gp.headPitch = (0.14 + 0.05 * d) * e;
+        gp.headRoll = side * 0.12 * e;
+        gp.chestPitch = 0.05 * e;
+        gp.wing[sn].flap = (-0.55 - 0.15 * d) * e;
+        gp.wing[sn].sweep = (-0.7 - 0.2 * d) * e;
+        gp.wing[sn].elbow = (0.55 + 0.2 * d) * e;
+        gp.wing[sn].twist = 0.35 * e;
+        gp.wing[sn].billow = 0.2 * e;
+        gp.wing[so].flap = (-0.35 - 0.1 * d) * e;
+        gp.wing[so].sweep = (-0.55 - 0.15 * d) * e;
+        gp.wing[so].elbow = (0.45 + 0.15 * d) * e;
+        gp.wing[so].twist = 0.25 * e;
+        gp.eyesClosed = (0.35 + 0.45 * d) * e;
+        gp.smile = (0.6 + 0.4 * d) * e;
+        gp.throat = (0.15 + 0.12 * d) * e * (0.6 + 0.4 * br);
+        gp.crest = -0.2 * e;
+        gp.flukeFlex = 0.1 * side * e;
         break;
       }
       case 'rollOver': {

@@ -562,6 +562,12 @@ export class QTE {
     return a && a.ready && a.ctx && a.bus && a.bus.sfx ? a : null;
   }
 
+  /** A heartbeat outside any cue (the scene's own pulse), with a soft rumble. */
+  heartbeat(gain = 0.6) {
+    this._heartbeat(gain);
+    this.rumble(0.12 * gain, 0.04, 80);
+  }
+
   /** A low heartbeat drum: a lub-dub, felt more than heard. */
   _heartbeat(gain = 1) {
     const a = this._audio();

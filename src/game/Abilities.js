@@ -75,6 +75,7 @@ export class Abilities {
 
   /** A new life (New Game): only swimming, steering, rolling and the bite. */
   reset() {
+    this._undrive();
     this.set.clear();
     this._applyForced();
   }
@@ -153,6 +154,8 @@ export class Abilities {
   // ---- per frame (Story.update) ------------------------------------------------------------------
   update() {
     const S = this.story;
+    // a scene cut short (the menu): the calf's steering goes back to the player
+    if (this._auto && (S.state === 'menu' || S.state === 'intro')) this._undrive();
     // debug: ?debug&chapter=N&scene=... plays a scene as soon as the chapter is in play
     if (this.pendingScene && S.state === 'play' && S.chapterIndex >= 0 && !S.cine?.active && this.game.time > 2) {
       const name = this.pendingScene;
@@ -295,7 +298,7 @@ export class Abilities {
     yield* C.play(C.rel({ subject: mom, side: [-14, -11], up: [2, 3], back: [-10, -6], ahead: 4, lookUp: 1, fov: [36, 32] }), phrase2.reduce((a, n) => a + n[1], 0) * beat + 0.3);
     // the calf answers, note by note: hold each one as long as she did
     C.setFocus(calf);
-    const two = C.rel({ subject: calf, side: [7, 10], up: [0.8, 2.2], back: [-1, 3], ahead: [0, -3], lookSide: [-3, -5], fov: [36, 42] });
+    const two = C.rel({ subject: calf, side: 8.5, up: 1.4, back: 1, ahead: -1.5, lookSide: -4, fov: 38 });
     let good = 0;
     const v = S.voiceOf(calf);
     for (let i = 0; i < phrase2.length; i++) {
@@ -390,7 +393,7 @@ export class Abilities {
     });
     // 3. the calf: breathe in (hold), blow (press). The first one only sputters.
     C.setFocus(calf);
-    const close = C.rel({ subject: calf, side: [3.2, 2.6], up: [1.4, 1.8], back: [3.4, 2.4], ahead: 0.4, lookUp: 0.4, fov: [34, 30] });
+    const close = C.rel({ subject: calf, side: 2.9, up: 1.6, back: 2.9, ahead: 0.4, lookUp: 0.4, fov: 32 });
     let good = false;
     for (let tries = 0; tries < 2 && !good; tries++) {
       const hin = Q.hold({ at: () => (calf.model.blowholePos ? calf.model.blowholePos(this._at) : this._calfHead()), time: 1.0, grace: 3.5 });

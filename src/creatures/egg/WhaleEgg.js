@@ -88,6 +88,8 @@ export class WhaleEgg {
     this._idle = opts.idleKicks ?? true;
     this._nextKick = 4;
     this._hatchT = -1;
+    this._stretch = 0;       // the membrane bulging where the calf's head pushes (stretch())
+    this._stretchTarget = 0;
 
     this.group = new Group();
     this.group.name = 'whale-egg';
@@ -208,6 +210,13 @@ export class WhaleEgg {
     return this;
   }
 
+  /** The calf pushing its head through (0..1): the membrane stretches toward the crown and the
+   *  embryo presses up into it; letting go (a lower k) springs it back. */
+  stretch(k) {
+    this._stretchTarget = Math.min(1, Math.max(0, k));
+    return this;
+  }
+
   /** Burst: shards, fluid, bubbles, a soft flash; the calf uncurls and swims out.
    *  Emits 'hatch' now and 'emerged' when the calf is clear (~3.5 s); the promise resolves then. */
   hatch() {
@@ -303,9 +312,14 @@ export class WhaleEgg {
     this._e.set(Math.sin(t * 0.63) * 0.05 + jolt, this._yaw, Math.sin(t * 0.41 + 1) * 0.04 + jolt * 0.6, 'YXZ');
     g.quaternion.setFromEuler(this._e);
     g.updateMatrixWorld(true);
-    // the membrane breathes with the heart
+    // the membrane breathes with the heart, and bulges toward the crown when the calf pushes
+    this._stretch += (this._stretchTarget - this._stretch) * Math.min(1, dt * (this._stretchTarget > this._stretch ? 3 : 5));
     const sc = 1 + 0.009 * beat * (this.hatched ? 0 : 1);
-    this._sm.makeScale(sc, sc, sc);
+    const st = this.hatched ? 0 : this._stretch;
+    const wob = st * Math.sin(t * 9.0) * 0.012;
+    this._sm.makeScale(sc * (1 - 0.05 * st), sc * (1 + 0.16 * st + wob), sc * (1 - 0.05 * st));
+    this._sm.elements[13] = this.half.y * 0.12 * st; // the bulge rises toward the crown
+    this.embryo.offset.y = this.half.y * 0.32 * st;
     this.shell.matrix.multiplyMatrices(g.matrixWorld, this._sm);
     this.shell.matrixWorld.copy(this.shell.matrix);
     this.shell.visible = g.visible && this._fade > 0.001;

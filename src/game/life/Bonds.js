@@ -157,6 +157,7 @@ export class Bonds {
     const S = this.story, g = this.game, herd = this.herd;
     if (!herd) return;
     const calf = herd.calf, mom = herd.mother;
+    if ((this.carrying || this.inside) && (S.state === 'menu' || S.state === 'intro') && !S.script.running('bondsScene')) this.abort();
     // her heart (faster when afraid): drives the cavity's pulse and the thumps inside
     const want = this.carrying ? lerp(0.9, 2.3, mom.drive.fear) : 1;
     this.rate = damp(this.rate, want, 1.5, dt);
@@ -247,19 +248,21 @@ export class Bonds {
     const T = [];
     try {
       const sky = center.clone().add(_v.set(-60, 70, -40));
-      const f = eco?.addReptileFlock?.(sky, 'skimmer', 4, { anchor: sky.clone(), leash: 30, perch: false, roost: false });
-      if (f) T.push({ kind: 'skimmer', school: f, anchor: f.anchor || null });
+      const a1 = sky.clone();
+      const f = eco?.addReptileFlock?.(sky, 'skimmer', 4, { anchor: a1, leash: 30, perch: false, roost: false });
+      if (f) T.push({ kind: 'skimmer', school: f, anchor: a1 });
       const deep = center.clone();
       deep.y = seaHeight(g, deep.x, deep.z) - 14;
-      const j = eco?.addFishSchool?.(deep, 'lanternjack', 3, { anchor: deep.clone(), leash: 14 });
-      if (j) T.push({ kind: 'lanternjack', school: j, anchor: j.anchor || null });
+      const a2 = deep.clone();
+      const j = eco?.addFishSchool?.(deep, 'lanternjack', 3, { anchor: a2, leash: 14 });
+      if (j) T.push({ kind: 'lanternjack', school: j, anchor: a2 });
     } catch (e) { /* the ecosystem changed */ }
     return T;
   }
 
   _moveThreats(T, calf, k) {
     for (const t of T) {
-      const a = t.school?.anchor;
+      const a = t.anchor;
       if (!a || !a.lerp) continue;
       _v.copy(calf.pos);
       if (t.kind === 'lanternjack') _v.y = Math.min(_v.y - 5, seaHeight(this.game, _v.x, _v.z) - 4);
@@ -272,7 +275,7 @@ export class Bonds {
     const S = this.story;
     for (const t of T) {
       try {
-        if (t.kind === 'skimmer') { t.school.anchor = null; t.school.home?.set?.(from.x + 600, 160, from.z - 500); }
+        if (t.kind === 'skimmer') { t.anchor.set(from.x + 600, 160, from.z - 500); t.school.home?.set?.(from.x + 600, 160, from.z - 500); }
         else S.eco?.fish?.removeSchool?.(t.school);
       } catch (e) { /* ignore */ }
     }
@@ -312,9 +315,15 @@ export class Bonds {
     S.audio.setMood?.('chase', { fade: 3 });
     S.audio.setIntensity?.(0.45);
     // the sky: wings wheeling down out of the dawn, a long lens past the calf
-    yield* C.play(C.rel({ subject: calf, side: [-4, -3], up: [-0.4, 0.2], back: [7, 6], ahead: 0, lookUp: [22, 26], lookSide: [-14, -10], fov: [34, 28], worldUp: true }), 2.6, {
-      onFrame: (k) => this._moveThreats(T, calf, 0.01),
-    });
+    // (low behind the calf, the lens tilting up past it toward the wings: the calf small in the lower frame)
+    const skyA = T.find((x) => x.kind === 'skimmer')?.anchor || calf.pos.clone().add(new Vector3(-60, 70, -40));
+    yield* C.play((k, tt, s) => {
+      s.pos.copy(calf.pos).addScaledVector(calf.fwd, -lerp(8.5, 6.5, k)).addScaledVector(calf.right, -2.6);
+      s.pos.y -= 1.1;
+      s.look.copy(calf.pos).lerp(skyA, lerp(0.16, 0.3, k));
+      s.fov = lerp(44, 36, k);
+      s.roll = -0.03 * k;
+    }, 2.8, { onFrame: () => this._moveThreats(T, calf, 0.012) });
     this._panic(mom, 0.5);
     S.voiceCall(mom, 'warn');
     calf.anim.flinch?.(0.6);
@@ -403,14 +412,19 @@ export class Bonds {
     const S = this.story, g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf, C = S.cine;
     const Q = g.qte;
     const M = this._build();
-    this._place(mom);
-    M.grp.visible = true;
-    this.inside = true;
-    this.open = 0.32;
-    this.light = 1;
-    mom.group.visible = false;
-    calf.group.visible = true;
-    calf.drive.sleep = 0.4;
+    // the jaws close over the lens: a quick dissolve through the dark red of her mouth (no hard cut)
+    yield* S.dissolve(() => {
+      this._place(mom);
+      M.grp.visible = true;
+      this.inside = true;
+      this.open = 0.32;
+      this.light = 1;
+      mom.group.visible = false;
+      calf.group.visible = true;
+      calf.drive.sleep = 0.4;
+      g.cameraRig.cineW = 1;
+      g.cameraRig.cutNow?.();
+    }, [0.14, 0.035, 0.03], 3.2, -1.6);
     const fr = this._f;
     // the lens at the back of her mouth, the calf curled before it, the lips' light beyond
     const shot = (k, t, s) => {
@@ -420,8 +434,6 @@ export class Bonds {
       s.fov = lerp(62, 56, k);
       s.roll = 0.04 * Math.sin(t * 0.7) * mom.drive.fear;
     };
-    g.cameraRig.cineW = 1;
-    g.cameraRig.cutNow?.();
     let t = 0, thudT = 0.6, calmK = 0, calmAt = null;
     const h = opts.qte && Q ? Q.hold({ at: { x: 0.5, y: 0.62 }, time: 2.6, grace: 5 }) : null;
     let tries = 0;
@@ -465,12 +477,25 @@ export class Bonds {
       mom.drive.fear = Math.max(0.35, mom.drive.fear - dt * 0.03);
     }
     if (hh && !hh.done) hh.cancel?.();
-    // back outside
-    M.grp.visible = false;
+    // back outside, through the daylight at her lips
+    yield* S.dissolve(() => {
+      M.grp.visible = false;
+      this.inside = false;
+      mom.group.visible = true;
+      calf.group.visible = false;
+      g.cameraRig?.cutNow?.();
+    }, [0.95, 0.86, 0.72], 2.6, -1.1);
+  }
+
+  /** A scene cut short (the menu, a chapter jump): put everything back. */
+  abort() {
+    const herd = this.herd;
+    if (!herd) return;
+    if (this.mouth) this.mouth.grp.visible = false;
+    if (this.carrying || this.inside) { herd.calf.group.visible = true; this.story.life?.kin.delete(herd.calf); }
+    this.carrying = false;
     this.inside = false;
-    mom.group.visible = true;
-    calf.group.visible = false;
-    g.cameraRig?.cutNow?.();
+    herd.mother.group.visible = true;
   }
 
   /** Safe: she slows, opens her mouth and lets the calf out, then checks it over. */

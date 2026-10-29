@@ -460,13 +460,33 @@ export class AudioSystem {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
       const B = this.bus;
-      const mv = volCurve(this.vol.music) * MUSIC_TRIM;
+      const mv = volCurve(this.vol.music) * MUSIC_TRIM * (1 - 0.45 * (this._thin || 0));
       const sv = volCurve(this.vol.sound) * WORLD_TRIM;
       glide(B.musicVol.gain, mv, now, 0.05);
       glide(B.musicVolW.gain, mv, now, 0.05);
       glide(B.world.gain, sv, now, 0.05);
       glide(B.worldVolW.gain, sv, now, 0.05);
       glide(B.echoVol.gain, sv, now, 0.05);
+    } catch (e) {
+      this._warn(e);
+    }
+  }
+
+  /**
+   * Thin the score, 0..1 (src/game/Needs.js: a hungry or lonely calf): quieter and with less body,
+   * gliding over a second or so. Composes with the volume settings.
+   */
+  setThin(x) {
+    try {
+      const t = clamp(finite(+x, 0));
+      this._thin = t;
+      if (!this.ctx || !this.bus) return;
+      const now = this.ctx.currentTime;
+      const B = this.bus;
+      const mv = volCurve(this.vol.music) * MUSIC_TRIM * (1 - 0.45 * t);
+      glide(B.musicVol.gain, mv, now, 0.6);
+      glide(B.musicVolW.gain, mv * (1 + 0.25 * t), now, 0.6);
+      glide(B.musicShelf.gain, -3 - 9 * t, now, 0.6);
     } catch (e) {
       this._warn(e);
     }

@@ -31,6 +31,8 @@ export class Hunt {
     this.cool = 0;
     /** 0..1 the hunting mood: lunges raise it, it fades; prey fears it, some fight back. */
     this.hunting = 0;
+    /** 0..1 how far the calf has strayed from its mother (src/game/Needs.js): predators grow bold. */
+    this.stray = 0;
     this.fearT = 0;
     this.helpT = -1;
     this.hits = 0;
@@ -106,9 +108,9 @@ export class Hunt {
     H.pos.copy(calf.pos);
     H.up.copy(calf.up);
     H.L = calf.L;
-    H.hunting = this.hunting;
+    H.hunting = Math.max(this.hunting, this.stray * 0.9);
     H.under = calf.pos.y < seaHeight(g, calf.pos.x, calf.pos.z) - 1;
-    if (eco) eco.hunter = playing && this.hunting > 0.05 ? H : null;
+    if (eco) eco.hunter = playing && H.hunting > 0.05 ? H : null;
     if (eco && playing && this.hunting > 0.1) {
       this.fearT -= dt;
       if (this.fearT <= 0) {
@@ -137,6 +139,7 @@ export class Hunt {
       this.lastKind = B.kind;
       if (B.kind in this.caught) this.caught[B.kind] += Math.max(1, B.fish + B.jacks + B.birds + B.reef);
       calf.energy = Math.min(1, calf.energy + Math.min(0.3, 0.04 + B.food * 0.03));
+      st.needs?.feed(Math.min(0.4, 0.07 + B.food * 0.05));
       calf.drive.happy = Math.max(calf.drive.happy, 0.9);
       // the swallow follows a beat later (Activities' eating: gulp, chew, contented coo)
       if (act) {

@@ -442,6 +442,15 @@ export class Herd {
       m.drive.lookAt = calf.pos;
       return;
     }
+    // the calf's needs (src/game/Needs.js): she leads a hungry calf to food, feeds a starving one
+    const need = this.motherNeed?.(m, dt);
+    if (need) {
+      this.steer(m, need.target, need.speed ?? 8, dt, this._opts(need.arrive ?? 8, need.minSpeed ?? 0, calf));
+      m.drive.lookAt = need.lookAt ?? calf.pos;
+      care.mode = 'lead';
+      this.behaviors.careState.type = null;
+      return;
+    }
     // her care for the calf: nuzzles, escorting it over the sea, following its dives, buoying it up
     if (this.behaviors.care(m, dt)) return;
     if (this.mode === 'rest' || this.mode === 'sleep') {

@@ -20,6 +20,7 @@ import { G } from '../render/Globals.js';
 import { SkyBugs, BUG_SPECIES } from '../creatures/bugs/SkyBugs.js';
 import { seaHeight } from './Swim.js';
 import { Hunt } from './Hunt.js';
+import { Lessons } from './Lessons.js';
 
 // ambient swarms per chapter: [moth, gnat, skitter]
 const DENSITY = {
@@ -67,6 +68,8 @@ export class Activities {
     this.moves = story?.player?.moves || null;
     this.moves?.on((e) => this.onMove(e));
     this.hunt = new Hunt(game, story, this);
+    // the mother's lessons: copy me, tag, discoveries, the bubble-net hunting lesson (Lessons.js)
+    this.lessons = new Lessons(game, story, this);
   }
 
   rand() { return Math.random(); }
@@ -85,6 +88,7 @@ export class Activities {
     this.spawnT = 0;
     this.moves?.reset?.();
     this.hunt.reset();
+    this.lessons.reset();
   }
 
   // ---- per frame ----------------------------------------------------------------------------
@@ -112,6 +116,7 @@ export class Activities {
       calf.anim.focus?.(this.bugs.focus, this.bugs.focusW, reach);
     }
     this.hunt.update(dt, playing);
+    this.lessons.update(dt);
     this._eating(dt, calf);
     // joy decays; it lights the calf up
     this.joy = Math.max(0, this.joy - dt * 0.05 * (1 + this.joy));
@@ -158,6 +163,7 @@ export class Activities {
     this.combo = now - this.lastCatch < 2.2 ? this.combo + 1 : 0;
     this.lastCatch = now;
     calf.energy = Math.min(1, calf.energy + def.energy);
+    st.needs?.feed(def.energy * 2.2);
     calf.drive.happy = Math.max(calf.drive.happy, 0.85);
     this.joy += kind === 'gnat' ? 0.025 : 0.07;
     // the snap: the jaw shuts on it (snaps that come fast merge, the jaw never jitters)

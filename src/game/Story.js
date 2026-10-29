@@ -16,6 +16,7 @@ import { Script, until } from './Script.js';
 import { SongGame } from './SongGame.js';
 import { Cinematics } from './Cinematics.js';
 import { LifeCycle } from './life/LifeCycle.js';
+import { Needs } from './Needs.js';
 import { hatching, restoreHatching } from './life/Hatching.js';
 import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
@@ -119,6 +120,8 @@ export class Story {
     g.cameraRig.collide = (from, to) => this.cameraHit(from, to);
     g.cameraRig.avoid = (pos, out) => this.cameraAvoid(pos, out);
     await this.loadOptional();
+    // hunger and the mother's nearness (src/game/Needs.js)
+    this.needs = new Needs(g, this);
     this.player.on('hum', () => this.onCalfHum());
     this.player.on('humEnd', () => this.onCalfHumEnd());
     this.player.on('boom', (e) => this.onCalfBoom(e));
@@ -345,6 +348,7 @@ export class Story {
     herd.care.answerAt = -1;
     for (const w of this.gathering || []) { w.drive.sing = 0; w.drive.hum = 0; this.humTimers.delete(w); }
     herd.calf.energy = 1;
+    this.needs?.reset();
     herd.calf.drive.tired = 0;
     this.player.cooldown = 0;
     this.weather.rain = 0;
@@ -1510,6 +1514,7 @@ export class Story {
       const near = 1 - smoothstep(120, 320, calf.pos.distanceTo(herd.mother.pos));
       if (fr && near > 0) calf.wind.addScaledVector(fr.fwd, herd.speed * 0.5 * near);
     }
+    this.needs?.update(dt);
     if (!kin) {
       calf.step(dt);
       this.calfWater = waterStep(calf, dt, g, { player: true, onSplash: this._onSplash });
@@ -1557,6 +1562,7 @@ export class Story {
         if (eaten > 0) {
           this.eaten += eaten;
           calf.energy = Math.min(1, calf.energy + eaten * 0.012);
+          this.needs?.feed(eaten * 0.03);
           calf.drive.happy = Math.max(calf.drive.happy, 0.8);
           if (g.time - (this.lastGulp || 0) > 0.35) {
             this.lastGulp = g.time;
@@ -1580,6 +1586,7 @@ export class Story {
     this.voiceOf(calf).setChargeLevel?.(ch);
     this.booms.charge = ch > 0.02 ? { pos: calf.pos.clone().addScaledVector(calf.fwd, calf.L * 0.55), amount: ch } : null;
     calf.animate(dt, g.engine.camera.position);
+    this.needs?.pose();
     g.focus.copy(calf.pos);
     // (slicing through cloud no longer leaves vapour puffs: the wind lines' wingtip trails and air
     // streams show the flight, src/fx/WindLines.js)
@@ -1595,6 +1602,10 @@ export class Story {
       if (th && !opts.lookBias) { opts.lookBias = th.pos; opts.lookBiasW = 0.18; opts.lookBiasMax = 6; opts.busy = true; }
       opts.surfaceY = seaHeight(g, g.cameraRig.gPos.x, g.cameraRig.gPos.z);
       if (this.calfWater && this.calfWater.depth > 0) { opts.distance = 7; opts.busy = true; }
+      this.needs?.camera(opts);
+      // the mother's lessons lean the view gently toward her (or what she is showing)
+      const lh = this.activities?.lessons?.camHint;
+      if (lh && !opts.lookBias) { opts.lookBias = lh.pos; opts.lookBiasW = lh.w; opts.lookBiasMax = lh.max; }
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
     }
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});
@@ -1653,7 +1664,7 @@ export class Story {
     const cam = g.engine.camera.position;
     const camH = cam.y - seaHeight(g, cam.x, cam.z);
     a.setAmbience?.({
-      wind: clamp(0.25 + g.wind.strength / 18, 0, 1),
+      wind: clamp(0.25 + g.wind.strength / 18 + (this.needs?.windBoost ?? 0), 0, 1),
       rain: this.weather.rain,
       storm: this.weather.level,
       speed: calf.vel.length(),

@@ -76,7 +76,8 @@ export class PlayerController {
     // energy: surging and booming tire the calf; gliding and eating restore it
     const canSurge = surge && w.energy > 0.15 && swim > 0.1;
     this.surgeHeld = canSurge ? this.surgeHeld + dt : 0;
-    w.energy = clamp(w.energy - (canSurge ? 0.045 : 0) * dt + (swim < 0.1 ? 0.018 : 0.006) * dt, 0, 1);
+    // (w.regen: hunger slows the recovery, the mother's nearness speeds it; src/game/Needs.js)
+    w.energy = clamp(w.energy - (canSurge ? 0.045 : 0) * dt + (swim < 0.1 ? 0.018 : 0.006) * (w.regen ?? 1) * dt, 0, 1);
     w.ctl.thrust = clamp(swim + (climb > 0.2 ? 0.25 : 0), 0, 1);
     w.ctl.surge = canSurge;
     w.ctl.brake = brake;

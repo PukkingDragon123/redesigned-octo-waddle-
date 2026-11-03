@@ -32,6 +32,104 @@ const _v2 = new Vector3();
 const _v3 = new Vector3();
 const UP = new Vector3(0, 1, 0);
 
+const _cc = new Vector3();
+const _cq = new Vector3();
+const _cd = new Vector3();
+const _cp = new Vector3();
+const _ce = new Vector3();
+const _cf = new Vector3();
+const _cg = new Vector3();
+
+/** Is p inside a whale's body (a capsule along it, a little padded)? Returns that whale or null. */
+function _inWhale(S, p, skip) {
+  const lists = [S.herd?.whales || [], S.life?.extras || []];
+  for (const list of lists) {
+    for (const w of list) {
+      if (!w || !w.group?.visible || w === skip) continue;
+      const L = w.L * (w.group.scale?.x || 1), r = w.radius * (w.group.scale?.x || 1) * 1.25 + 0.7;
+      _cc.copy(p).sub(w.pos);
+      const a = clamp(_cc.dot(w.fwd), -L * 0.47, L * 0.44);
+      _cq.copy(w.pos).addScaledVector(w.fwd, a);
+      if (p.distanceToSquared(_cq) < r * r) return w;
+    }
+  }
+  return null;
+}
+
+/**
+ * A cinematic camera must never sit inside a whale, rock or the sea floor: if it does, slide it out
+ * along its view ray toward what it looks at (keeping the framing), or, failing that, straight out of
+ * the body, then out of the ground. skip: a whale the lens may be inside (a hidden one is skipped anyway).
+ */
+export function clearCam(S, s, skip = null) {
+  const p = s.pos, world = S.world;
+  const solid = (q) => _inWhale(S, q, skip) || (world?.distance && world.distance(q, 8) < 1.4);
+  if (solid(p)) {
+    _cd.copy(s.look).sub(p);
+    const len = _cd.length();
+    let found = false;
+    if (len > 1e-3) {
+      _cd.divideScalar(len);
+      for (let d = 0.6; d < len * 0.85; d += 0.6) {
+        _cp.copy(p).addScaledVector(_cd, d);
+        if (!solid(_cp)) { p.copy(_cp); found = true; break; }
+      }
+    }
+    if (!found) {
+      const w = _inWhale(S, p, skip);
+      if (w) {
+        const r = w.radius * (w.group.scale?.x || 1) * 1.25 + 0.8;
+        _cc.copy(p).sub(w.pos);
+        const a = clamp(_cc.dot(w.fwd), -w.L * 0.47, w.L * 0.44);
+        _cq.copy(w.pos).addScaledVector(w.fwd, a);
+        _cc.copy(p).sub(_cq);
+        if (_cc.lengthSq() < 1e-6) _cc.copy(w.up);
+        p.copy(_cq).addScaledVector(_cc.normalize(), r);
+      }
+    }
+  }
+  // rock and the sea floor: pushed out
+  if (world?.collide) for (let i = 0; i < 3; i++) { const push = world.collide(p, 1.4, _cg); if (push.lengthSq() < 1e-6) break; p.add(push); }
+}
+
+/** The world position of a whale's eye on one side (+1 its right, -1 its left). */
+export function eyeOf(w, side, out = new Vector3()) {
+  const E = w.model?.eyes;
+  let best = null, bd = -Infinity;
+  if (E) {
+    for (const k of ['R', 'L']) {
+      const e = E[k];
+      if (!e?.mesh) continue;
+      e.mesh.getWorldPosition(_ce);
+      const d = _ce.sub(w.pos).dot(w.right) * side;
+      if (d > bd) { bd = d; best = e; }
+    }
+  }
+  if (best) return best.mesh.getWorldPosition(out);
+  return out.copy(w.pos).addScaledVector(w.fwd, w.L * 0.33).addScaledVector(w.up, w.L * 0.04).addScaledVector(w.right, side * w.L * 0.08);
+}
+
+/**
+ * A face: framed on the eye and the corner of the mouth, from a three-quarter angle on one side.
+ * dist in body lengths, around: radians from the pure side view toward the front, up: lift (x dist).
+ */
+export function faceShot(w, { side = 1, dist = [1.0, 0.85], around = 0.6, up = 0.12, fov = 34, roll = 0 } = {}) {
+  const R = (v, k) => (Array.isArray(v) ? lerp(v[0], v[1], k) : v);
+  const face = new Vector3();
+  return (k, t, s) => {
+    const L = w.L * (w.group.scale?.x || 1);
+    eyeOf(w, side, face);
+    // between the eye and the corner of the mouth, a touch forward
+    face.addScaledVector(w.fwd, L * 0.035).addScaledVector(w.up, -L * 0.03);
+    const a = R(around, k);
+    _cf.copy(w.right).multiplyScalar(side * Math.cos(a)).addScaledVector(w.fwd, Math.sin(a)).addScaledVector(w.up, R(up, k)).normalize();
+    s.pos.copy(face).addScaledVector(_cf, L * R(dist, k));
+    s.look.copy(face);
+    s.fov = R(fov, k);
+    s.roll = R(roll, k);
+  };
+}
+
 function parse(str) {
   const out = new Set();
   for (const k of String(str || '').split(/[,\s]+/)) {
@@ -157,6 +255,7 @@ export class Abilities {
     // a scene cut short (the menu): the calf's steering goes back to the player
     if (this._auto && (S.state === 'menu' || S.state === 'intro')) this._undrive();
     // debug: ?debug&chapter=N&scene=... plays a scene as soon as the chapter is in play
+    if (this.pendingScene && this.running) this.pendingScene = null; // the chapter is already playing one
     if (this.pendingScene && S.state === 'play' && S.chapterIndex >= 0 && !S.cine?.active && this.game.time > 2) {
       const name = this.pendingScene;
       this.pendingScene = null;
@@ -177,8 +276,10 @@ export class Abilities {
     if (keys.every((k) => this.set.has(k))) return;
     // only in free play (never on top of another cinematic); give up waiting after a while
     let t = 0;
-    while ((S.state !== 'play' || S.cine?.active) && t < 20) t += yield 0;
+    while ((S.state !== 'play' || S.cine?.active || this.running) && t < 20) t += yield 0;
+    if (keys.every((k) => this.set.has(k))) return;
     if (S.state !== 'play' || S.cine?.active || S.act !== 1) { this.unlock(keys); return; }
+    this.running = name;
     const gen = { voice: this.voiceScene, spout: this.spoutScene, slap: this.slapScene, acro: this.acroScene, boom: this.boomScene }[SCENE_OF[keys[0]] || name];
     const herd = this.herd;
     const saved = { speed: herd.targetSpeed, mode: herd.mode };
@@ -190,8 +291,15 @@ export class Abilities {
       if (this._auto) { if (S.player.autopilot === this._auto) S.player.autopilot = this._prevAuto; this._auto = null; }
       herd.motherScript = null;
       if (herd.mode === saved.mode) herd.targetSpeed = saved.speed;
+      this.running = null;
       this.unlock(keys);
     }
+  }
+
+  /** C.play with the camera kept clear of bodies, rock and the sea floor. */
+  _play(fn, dur, opts = {}) {
+    const S = this.story;
+    return S.cine.play((k, t, s) => { fn(k, t, s); clearCam(S, s); }, dur, opts);
   }
 
   /** Steer the calf by hand for a scene (restored at its end). fn(dt) -> {swim, yaw, pitch, surge}. */
@@ -248,7 +356,7 @@ export class Abilities {
     const beat = song.key().beat;
     const head = () => this._calfHead();
     // 1. the pair over the sea, the camera on the calf's far side, her head turned toward it
-    yield* C.play(C.rel({ subject: calf, side: [7, 5.5], up: [3.2, 2.6], back: [6, 4.5], ahead: [-1, 2], lookSide: [-6, -4], fov: [42, 36] }), 3.2);
+    yield* this._play(C.rel({ subject: calf, side: [7, 5.5], up: [3.2, 2.6], back: [6, 4.5], ahead: [-1, 2], lookSide: [-6, -4], fov: [42, 36] }), 3.2);
     // 2. she breathes in and sings to it: two notes (close on her eye, her crest flaring)
     C.setFocus(mom);
     const phrase1 = [[0, 1.2], [2, 1.4]];
@@ -263,16 +371,16 @@ export class Abilities {
       }
       mom.drive.sing = 0.4;
     };
-    const eyeShot = C.eye({ whale: mom, side: 1, dist: [0.85, 0.7], fov: [40, 36] });
+    const eyeShot = faceShot(mom, { side: 1, dist: [1.05, 0.9], around: [0.62, 0.75], up: 0.1, fov: [34, 31] });
     S.script.run(sing(phrase1), 'abilitySing');
-    yield* C.play(eyeShot, phrase1.reduce((a, n) => a + n[1], 0) * beat + 0.4);
+    yield* this._play(eyeShot, phrase1.reduce((a, n) => a + n[1], 0) * beat + 0.4);
     // 3. its turn: the camera finds the calf's face; it tries... (hold the cue)
     C.setFocus(calf);
     calf.drive.lookAt = mom.pos;
-    const face = C.rel({ subject: calf, side: [3.4, 2.6], up: [0.5, 0.3], back: [-4.2, -3.4], ahead: 0.6, lookUp: 0.2, fov: [32, 28] });
+    const face = faceShot(calf, { side: 1, dist: [1.55, 1.3], around: [0.85, 0.95], up: 0.12, fov: [32, 29] });
     let h = Q.hold({ at: head, time: 1.1, grace: 4 });
     let prev = 0, croaked = false;
-    yield* C.play(face, 9, {
+    yield* this._play(face, 9, {
       until: () => h.done,
       onFrame: () => {
         // the throat swells while the cue is held
@@ -289,13 +397,13 @@ export class Abilities {
     calf.drive.charge = 0;
     calf.drive.sing = 0;
     // a croak: the calf startles at its own voice, ducks its head; she coos, amused, and tries again
-    yield* C.play(face, 1.8, { onFrame: (k, t) => { if (t > 0.6 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.drive.happy = 1; } } });
+    yield* this._play(face, 1.8, { onFrame: (k, t) => { if (t > 0.6 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.drive.happy = 1; } } });
     this._cooed = false;
     // 4. her phrase again, three notes now; this time each of her notes is held with her
     const phrase2 = [[0, 1.2], [2, 1.2], [4, 2]];
     C.setFocus(mom);
     S.script.run(sing(phrase2), 'abilitySing');
-    yield* C.play(C.rel({ subject: mom, side: [-14, -11], up: [2, 3], back: [-10, -6], ahead: 4, lookUp: 1, fov: [36, 32] }), phrase2.reduce((a, n) => a + n[1], 0) * beat + 0.3);
+    yield* this._play(faceShot(mom, { side: 1, dist: [1.3, 1.1], around: [0.45, 0.75], up: 0.14, fov: [36, 33] }), phrase2.reduce((a, n) => a + n[1], 0) * beat + 0.3);
     // the calf answers, note by note: hold each one as long as she did
     C.setFocus(calf);
     const two = C.rel({ subject: calf, side: 8.5, up: 1.4, back: 1, ahead: -1.5, lookSide: -4, fov: 38 });
@@ -307,7 +415,7 @@ export class Abilities {
       h = Q.hold({ at: head, time: Math.max(0.6, dur * 0.75), grace: 2.6 });
       let on = false, t0 = 0;
       const midi = song.midi(deg, 1);
-      yield* C.play(two, 6, {
+      yield* this._play(two, 6, {
         ease: (x) => x,
         until: () => h.done,
         onFrame: (k, t) => {
@@ -345,7 +453,7 @@ export class Abilities {
     });
     C.slowmo(0.75);
     C.setFocus(calf);
-    yield* C.play(C.blend(two, C.orbit({ center: calf, radius: [14, 34], height: [3, 16], angle: [calf.yaw - 0.9, calf.yaw - 0.5], fov: [42, 46], look: mom })), 4.2);
+    yield* this._play(C.blend(two, C.orbit({ center: calf, radius: [14, 34], height: [3, 16], angle: [calf.yaw - 0.9, calf.yaw - 0.5], fov: [42, 46], look: mom })), 4.2);
     C.slowmo(1);
     G.uSongAmp.value = 0;
     for (const w of herd.adults) w.drive.sing = 0;
@@ -375,11 +483,11 @@ export class Abilities {
     herd.motherScript = this._momBeside(4, { y: (m) => seaHeight(g, m.pos.x, m.pos.z) + m.radius * 0.15 });
     C.begin({ focus: mom, rate: 0.5, lead: mom });
     // 1. down to the water: a long low glide beside them
-    yield* C.play(C.low({ subject: mom, side: [44, 34], back: [-30, -10], height: [2.5, 1.2], fov: [40, 34], lookUp: [2, 4] }), 3.6);
+    yield* this._play(C.low({ subject: mom, side: [44, 34], back: [-30, -10], height: [2.5, 1.2], fov: [40, 34], lookUp: [2, 4] }), 3.6);
     // 2. her spout: a tall column against the sun, the camera low at the waterline
     const bh = () => (mom.model.blowholePos ? mom.model.blowholePos(_v) : _v.copy(mom.pos).addScaledVector(mom.up, mom.radius));
     let blown = false;
-    yield* C.play(C.low({ subject: mom, side: [26, 22], back: [8, 14], height: [0.8, 0.6], fov: [38, 34], lookUp: [3, 7] }), 3.2, {
+    yield* this._play(C.low({ subject: mom, side: [26, 22], back: [8, 14], height: [0.8, 0.6], fov: [38, 34], lookUp: [3, 7] }), 3.2, {
       onFrame: (k, t) => {
         if (!blown && t > 0.6) {
           blown = true;
@@ -397,10 +505,10 @@ export class Abilities {
     let good = false;
     for (let tries = 0; tries < 2 && !good; tries++) {
       const hin = Q.hold({ at: () => (calf.model.blowholePos ? calf.model.blowholePos(this._at) : this._calfHead()), time: 1.0, grace: 3.5 });
-      yield* C.play(close, 7, { until: () => hin.done, onFrame: () => { calf.drive.charge = hin.progress * 0.15; } });
+      yield* this._play(close, 7, { until: () => hin.done, onFrame: () => { calf.drive.charge = hin.progress * 0.15; } });
       calf.drive.charge = 0;
       const hp = Q.press({ at: () => (calf.model.blowholePos ? calf.model.blowholePos(this._at) : this._calfHead()), lead: 0.9, window: 0.4 });
-      yield* C.play(close, 3, { until: () => hp.done });
+      yield* this._play(close, 3, { until: () => hp.done });
       const p = calf.model.blowholePos ? calf.model.blowholePos(new Vector3()) : this._calfHead(new Vector3());
       if (tries === 0 || !(hp.ok || hin.ok)) {
         // a sputter: a wet sneeze and a dribble of spray; she rumbles, amused
@@ -408,7 +516,7 @@ export class Abilities {
         S.audio?.sfx?.('spout', { position: p, gain: 0.25, pitch: 1.8 });
         calf.anim.flinch?.(0.5);
         calf.anim.sHeadPitch?.impulse?.(1.5);
-        yield* C.play(close, 1.2, { onFrame: (k, t) => { if (t > 0.5 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.drive.happy = 1; } } });
+        yield* this._play(close, 1.2, { onFrame: (k, t) => { if (t > 0.5 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.drive.happy = 1; } } });
         this._cooed = false;
         if (tries === 1) good = true; // a second miss: it still gets there, a little smaller
         else continue;
@@ -424,7 +532,7 @@ export class Abilities {
       S.voiceCall(calf, 'chirp');
       calf.drive.happy = 1;
       mom.drive.happy = 1;
-      yield* C.play(C.low({ subject: calf, side: [7, 9], back: [-5, -7], height: [0.5, 0.7], fov: [36, 40], lookUp: [1.5, 4] }), 2.6);
+      yield* this._play(C.low({ subject: calf, side: [7, 9], back: [-5, -7], height: [0.5, 0.7], fov: [36, 40], lookUp: [1.5, 4] }), 2.6);
       C.slowmo(1);
       S.voiceCall(mom, 'answer');
     }
@@ -441,12 +549,12 @@ export class Abilities {
     C.begin({ focus: mom, rate: 0.5, lead: mom });
     // 1. she lifts her flukes high behind her and brings them down: a boom through the forest
     const flukes = (w, out) => (w.model.flukePos ? w.model.flukePos(null, out) : out.copy(w.pos).addScaledVector(w.fwd, -w.L * 0.46));
-    yield* C.play(C.rel({ subject: mom, side: [-26, -22], up: [2.5, 1.5], back: [24, 18], ahead: -6, lookUp: 1, fov: [40, 36], worldUp: true }), 1.2);
+    yield* this._play(C.rel({ subject: mom, side: [-26, -22], up: [2.5, 1.5], back: [24, 18], ahead: -6, lookUp: 1, fov: [40, 36], worldUp: true }), 1.2);
     mom.anim.gesture?.('tailSlap', { speed: 1.2 });
     const G0 = mom.anim.gest;
     const hitT = G0 ? G0.dur * (G0.event ?? 0.68) : 1.9;
     let hit = false;
-    yield* C.play(C.rel({ subject: mom, side: [-22, -18], up: [1.2, 0.8], back: [20, 26], ahead: -10, lookUp: 0, fov: [36, 32], worldUp: true }), hitT + 1.6, {
+    yield* this._play(C.rel({ subject: mom, side: [-22, -18], up: [1.2, 0.8], back: [20, 26], ahead: -10, lookUp: 0, fov: [36, 32], worldUp: true }), hitT + 1.6, {
       onFrame: (k, t) => {
         if (!hit && t >= hitT) {
           hit = true;
@@ -473,7 +581,7 @@ export class Abilities {
       const lead = Gc ? Gc.dur * (Gc.event ?? 0.68) : 1.2;
       const h = Q.press({ at: () => flukes(calf, this._at), lead, window: 0.4 });
       const cam = C.rel({ subject: calf, side: [5.5, 4.5], up: [0.5, 0.3], back: [6, 7.5], ahead: -2.5, lookUp: 0.3, fov: [34, 30], worldUp: true });
-      yield* C.play(cam, lead + 1.2, { until: () => h.done });
+      yield* this._play(cam, lead + 1.2, { until: () => h.done });
       const sea = seaHeight(g, calf.pos.x, calf.pos.z);
       if (h.ok) {
         good = true;
@@ -481,7 +589,7 @@ export class Abilities {
         S.player?.moves?._slapHit?.(sea);
         S.audio.stinger?.('discover');
         calf.drive.happy = 1;
-        yield* C.play(C.low({ subject: calf, side: [6, 8], back: [8, 5], height: [0.4, 0.6], fov: [32, 38], lookUp: 0.5 }), 2.2);
+        yield* this._play(C.low({ subject: calf, side: [6, 8], back: [8, 5], height: [0.4, 0.6], fov: [32, 38], lookUp: 0.5 }), 2.2);
         C.slowmo(1);
       } else {
         // a feeble flick: a plip of spray; she nods, try again
@@ -489,7 +597,7 @@ export class Abilities {
         p.y = sea;
         g.ocean?.splash?.(p, 0.35, calf.L * 0.3, UP);
         S.audio?.sfx?.('tailSlap', { position: p, gain: 0.25, pitch: 1.7 });
-        yield* C.play(cam, 1.4, { onFrame: (k, t) => { if (t > 0.4 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.anim.sHeadPitch?.impulse?.(1.2); } } });
+        yield* this._play(cam, 1.4, { onFrame: (k, t) => { if (t > 0.4 && !this._cooed) { this._cooed = true; S.voiceCall(mom, 'coo'); mom.anim.sHeadPitch?.impulse?.(1.2); } } });
         this._cooed = false;
         if (tries === 1) {
           good = true;
@@ -513,7 +621,7 @@ export class Abilities {
     herd.motherScript = this._momBeside(8, { y: under });
     S.voiceCall(mom, 'play');
     C.begin({ focus: mom, rate: 0.6, lead: mom });
-    yield* C.play(C.track({ subject: mom, side: [-34, -26], up: [5, 2], ahead: [8, 16], fov: [44, 40] }), 2.6);
+    yield* this._play(C.track({ subject: mom, side: [-34, -26], up: [5, 2], ahead: [8, 16], fov: [44, 40] }), 2.6);
     C.end({ rate: 0.8 });
     // 1. follow her down (steer)
     const down = new Vector3();
@@ -553,6 +661,7 @@ export class Abilities {
       const dt = yield 0;
       t += dt;
       shot(clamp(t / 3, 0, 1), t, C.shot);
+      clearCam(S, C.shot);
       C.handheld(C.shot, 1.3);
       // never too slow to break out: a softer leap with no mashing
       if (calf.vel.y < 6 + Math.min(power, 8) * 0.9) calf.vel.y += dt * 9;
@@ -570,6 +679,7 @@ export class Abilities {
       const dt = yield 0;
       t += g.dtReal ?? dt;
       lowShot(clamp(t / 3.4, 0, 1), t, C.shot);
+      clearCam(S, C.shot);
       C.handheld(C.shot, 1);
       // at the top of the arc: twist (press)
       if (!hp && crossed && calf.pos.y > sea0() + 1) hp = Q.press({ at: () => this._calfHead(), lead: 0.8, window: 0.45 });
@@ -605,7 +715,7 @@ export class Abilities {
     // 1. alone: it calls into the rain; nothing answers but the thunder
     const lonely = C.rel({ subject: calf, side: [-9, -6], up: [2, 1], back: [9, 6], ahead: 2, lookUp: 0.5, fov: [44, 36], worldUp: true });
     let called = 0;
-    yield* C.play(lonely, 3.4, {
+    yield* this._play(lonely, 3.4, {
       onFrame: (k, t) => {
         if (called === 0 && t > 0.4) { called = 1; S.voiceCall(calf, 'chirp'); }
         if (called === 1 && t > 2.2) { called = 2; S.voiceCall(calf, 'coo'); S.weather?.strike?.(calf.pos.clone().add(_v2.set(-160, 180, -220))); }
@@ -617,7 +727,7 @@ export class Abilities {
     let power = 0.35;
     for (let tries = 0; tries < 2; tries++) {
       const h = Q.hold({ at: front, time: 2.0, grace: 4 });
-      yield* C.play(push, 8, {
+      yield* this._play(push, 8, {
         until: () => h.done,
         onFrame: () => {
           const ch = h.progress;
@@ -654,7 +764,7 @@ export class Abilities {
     calf.vel.addScaledVector(calf.fwd, -6 * power);
     g.cameraRig?.addShake?.(0.5 + power * 0.3);
     C.slowmo(0.3);
-    yield* C.play(C.blend(push, C.orbit({ center: calf, radius: [16, 70], height: [2, 26], angle: [calf.yaw + 2.4, calf.yaw + 2.0], fov: [40, 52], look: calf })), 3.2);
+    yield* this._play(C.blend(push, C.orbit({ center: calf, radius: [16, 70], height: [2, 26], angle: [calf.yaw + 2.4, calf.yaw + 2.0], fov: [40, 52], look: calf })), 3.2);
     C.slowmo(1);
     // 4. far off, through the rain, she hears it: her answering roar, and she turns
     herd.motherScript = null;
@@ -663,7 +773,7 @@ export class Abilities {
     mom.drive.fear = 0.6;
     S.booms.spawn(mom.pos.clone().addScaledVector(mom.fwd, mom.L * 0.5), { power: 1, radius: 80, source: mom });
     C.setFocus(mom);
-    yield* C.play(C.rel({ subject: calf, side: [2.5, 3], up: [1, 1.4], back: [5, 6], ahead: 0, lookSide: 0, fov: [30, 26], frame: () => ({ fwd: _v3.copy(mom.pos).sub(calf.pos).normalize() }) }), 2.4, { onFrame: () => { calf.drive.lookAt = mom.pos; } });
+    yield* this._play(C.rel({ subject: calf, side: [2.5, 3], up: [1, 1.4], back: [5, 6], ahead: 0, lookSide: 0, fov: [30, 26], frame: () => ({ fwd: _v3.copy(mom.pos).sub(calf.pos).normalize() }) }), 2.4, { onFrame: () => { calf.drive.lookAt = mom.pos; } });
     this._undrive();
     C.end({ rate: 0.5 });
   }

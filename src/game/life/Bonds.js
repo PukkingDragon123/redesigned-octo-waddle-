@@ -19,6 +19,7 @@ import {
 } from 'three';
 import { clamp, damp, lerp, smoothstep } from '../../core/math.js';
 import { seaHeight } from '../Swim.js';
+import { clearCam, faceShot } from '../Abilities.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -107,6 +108,12 @@ export class Bonds {
   }
 
   get herd() { return this.story.herd; }
+
+  /** C.play with the camera kept clear of bodies, rock and the sea floor. */
+  _play(fn, dur, opts = {}) {
+    const S = this.story;
+    return S.cine.play((k, t, s) => { fn(k, t, s); clearCam(S, s); }, dur, opts);
+  }
 
   // ---- the cavity -----------------------------------------------------------------------------
   _build() {
@@ -317,7 +324,7 @@ export class Bonds {
     // the sky: wings wheeling down out of the dawn, a long lens past the calf
     // (low behind the calf, the lens tilting up past it toward the wings: the calf small in the lower frame)
     const skyA = T.find((x) => x.kind === 'skimmer')?.anchor || calf.pos.clone().add(new Vector3(-60, 70, -40));
-    yield* C.play((k, tt, s) => {
+    yield* this._play((k, tt, s) => {
       s.pos.copy(calf.pos).addScaledVector(calf.fwd, -lerp(8.5, 6.5, k)).addScaledVector(calf.right, -2.6);
       s.pos.y -= 1.1;
       s.look.copy(calf.pos).lerp(skyA, lerp(0.16, 0.3, k));
@@ -329,7 +336,7 @@ export class Bonds {
     calf.anim.flinch?.(0.6);
     calf.drive.fear = 0.6;
     // the deep: lures rising under the calf, seen from below
-    yield* C.play(C.macro({ subject: calf, dist: [9, 7], angle: [calf.yaw + 1.2, calf.yaw + 1.5], height: [-6, -5], fov: [42, 38], under: true }), 2.4, {
+    yield* this._play(C.macro({ subject: calf, dist: [9, 7], angle: [calf.yaw + 1.2, calf.yaw + 1.5], height: [-6, -5], fov: [42, 38], under: true }), 2.4, {
       onFrame: () => this._moveThreats(T, calf, 0.02),
     });
     C.end({ rate: 0.9 });
@@ -394,6 +401,7 @@ export class Bonds {
       calf.yaw = lerp(calf.yaw, mom.yaw, u * 0.2);
       calf._syncTransform?.();
       scoop(clamp(tt / 1.8, 0, 1), tt, C.shot);
+      clearCam(S, C.shot);
       if (tt > 1.2 && !this.carrying) { this.carrying = true; mom.anim.gulp?.(0.6); S.audio?.sfx?.('gulp', { position: mom.pos, gain: 0.7, pitch: 0.6 }); }
     }
     this.carrying = true;
@@ -405,7 +413,7 @@ export class Bonds {
     S.eco && (S.eco.threat = null);
     this._releaseThreats(T, calf.pos);
     herd.motherScript = (m) => ({ target: _v2.copy(m.pos).addScaledVector(m.fwd, 30).setY(seaHeight(g, m.pos.x, m.pos.z) + m.radius * 0.7), speed: lerp(4, 14, m.drive.fear), arrive: 10, lookAt: null });
-    yield* C.play(C.track({ subject: mom, side: [side * 30, side * 24], up: [12, 9], ahead: [14, 22], fov: [46, 50] }), 3.0, { onFrame: () => { mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.004); } });
+    yield* this._play(C.track({ subject: mom, side: [side * 30, side * 24], up: [12, 9], ahead: [14, 22], fov: [46, 50] }), 3.0, { onFrame: () => { mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.004); } });
     yield* this._release(side);
     calf.drive.fear = 0;
     S.audio.setMood?.('dawn', { fade: 6 });
@@ -520,6 +528,7 @@ export class Bonds {
       const dt = yield 0;
       t += dt;
       out(clamp(t / 3.4, 0, 1), t, C.shot);
+      clearCam(S, C.shot);
       C.handheld(C.shot, 0.8);
       mom.drive.mouth = smoothstep(0.2, 1.0, t) * (1 - smoothstep(2.4, 3.2, t)) * 0.9;
       if (t > 0.9 && !freed) {
@@ -552,12 +561,12 @@ export class Bonds {
     mom.anim.breatheRate = 1;
     herd.motherScript = (m) => ({ target: _v2.copy(calf.pos).addScaledVector(calf.right, -side * (m.radius + calf.radius + 2)).addScaledVector(m.fwd, -m.L * 0.3), speed: 3, arrive: 8, lookAt: calf.pos, face: calf.pos });
     C.setFocus(calf);
-    yield* C.play(C.eye({ whale: mom, side: side, dist: [0.55, 0.42], fov: [32, 28] }), 2.2, { onFrame: (k, tt) => { mom.drive.lookAt = calf.pos; if (tt > 0.6 && !this._nz) { this._nz = true; mom.anim.gesture?.('nuzzle', { side: side }); } } });
+    yield* this._play(faceShot(mom, { side, dist: [1.05, 0.9], around: [0.55, 0.7], up: 0.12, fov: [34, 31] }), 2.2, { onFrame: (k, tt) => { mom.drive.lookAt = calf.pos; if (tt > 0.6 && !this._nz) { this._nz = true; mom.anim.gesture?.('nuzzle', { side: side }); } } });
     this._nz = false;
     S.voiceCall(mom, 'coo');
     mom.drive.happy = 1;
     calf.drive.happy = 1;
-    yield* C.play(C.orbit({ center: calf, radius: [12, 16], height: [2.5, 4], angle: [calf.yaw + side * 2.2, calf.yaw + side * 1.6], fov: [40, 42], look: calf }), 2.6, { onFrame: (k, tt) => { if (tt > 1.4 && !this._wg) { this._wg = true; calf.anim.gesture?.('happyWiggle'); S.voiceCall(calf, 'play'); } } });
+    yield* this._play(C.orbit({ center: calf, radius: [12, 16], height: [2.5, 4], angle: [calf.yaw + side * 2.2, calf.yaw + side * 1.6], fov: [40, 42], look: calf }), 2.6, { onFrame: (k, tt) => { if (tt > 1.4 && !this._wg) { this._wg = true; calf.anim.gesture?.('happyWiggle'); S.voiceCall(calf, 'play'); } } });
     this._wg = false;
     herd.motherScript = null;
     mom.drive.fear = 0;
@@ -592,6 +601,7 @@ export class Bonds {
       calf.pos.copy(start).lerp(f.c, smoothstep(0.1, 1, t));
       calf._syncTransform?.();
       shot(clamp(t / 1.4, 0, 1), t, C.shot);
+      clearCam(S, C.shot);
     }
     this.carrying = true;
     mom.drive.mouth = 0;
@@ -599,7 +609,7 @@ export class Bonds {
     // back to the herd, the calf safe inside
     herd.motherScript = (m) => ({ target: _v2.copy(herd.anchor || m.pos).setY(Math.max(herd.anchor?.y ?? m.pos.y, seaHeight(g, m.pos.x, m.pos.z) + 10)), speed: 18, arrive: 20, lookAt: null });
     yield* this._inside(null, side, { qte: false, fight: false });
-    yield* C.play(C.track({ subject: mom, side: side * 36, up: 4, ahead: 12, fov: 44 }), 2.4);
+    yield* this._play(C.track({ subject: mom, side: side * 36, up: 4, ahead: 12, fov: 44 }), 2.4);
     yield* this._release(side);
     S.activities?.hunt && (S.activities.hunt.hunting = 0);
     herd.care.mode = 'lead';

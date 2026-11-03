@@ -4,13 +4,15 @@
 // only holds a rough rest pose. Rigid parts (torso, head, beak, crest, claws) are real geometry
 // in their own joint frame.
 //
-// aB:  x part, y u, z v, w side (-1 left, +1 right, 0 midline)
+// aB:  x part, y u, z v, w side (-1 left, +1 right, 0 midline; 2 bone: teeth, horns, quills,
+//      which ride their part's frame: y along the spike, z 0 tooth / 1 horn or quill)
+//      eyes: y radius, z eye index (0 main, 1 the smaller rear eye)
 // aB2: part data: wing surface (sign +1 top / -1 bottom, feather index, -, -);
 //      tube ring (cos, sin, radius scale, -); rigid parts (-, -, -, -)
 //
 // Parts: 0 torso, 1 neck, 2 head, 3 upper beak / snout, 4 lower jaw, 5 crest, 6 tail, 7 tail vane,
 //        8 fore wing, 9 hind wing (coilwing), 10 leg, 11 eye, 12 wrist claws
-import { Builder, loft, ellipsoid, membrane, smooth, TAU } from './kit.js';
+import { Builder, loft, ellipsoid, membrane, tube, smooth, TAU } from './kit.js';
 
 export const REPTILE_ATTRS = { aB: 4, aB2: 4 };
 
@@ -67,6 +69,18 @@ function procTube(B, part, nU, nSides, radius, side = 0, uMax = 1) {
   }
 }
 
+/** A curved, tapering spike of bone or keratin (tooth, horn, quill) riding part `part`. */
+function spike(B, part, root, mid, tip, r0, nSides, nSeg, kind) {
+  const path = [], radii = [];
+  for (let i = 0; i <= nSeg; i++) {
+    const u = i / nSeg;
+    const w0 = (1 - u) * (1 - u), w1 = 2 * u * (1 - u), w2 = u * u;
+    path.push([root[0] * w0 + mid[0] * w1 + tip[0] * w2, root[1] * w0 + mid[1] * w1 + tip[1] * w2, root[2] * w0 + mid[2] * w1 + tip[2] * w2]);
+    radii.push(r0 * (1 - u * 0.95));
+  }
+  tube(B, path, radii, nSides, (i, j, u) => ({ aB: [part, u, kind, 2] }), { capEnd: true });
+}
+
 /** A wing surface grid: u span 0..1 (root to tip), v chord 0..1, top and bottom sheets. */
 function wingGrid(B, part, nU, nV, side, uWarp = (u) => u) {
   for (const sgn of [1, -1]) {
@@ -99,7 +113,8 @@ export function buildSkimmer(near = true) {
   // neck and tail (shader-posed tubes)
   procTube(B, 1, near ? 10 : 3, near ? 10 : 5, (u) => 0.026 - u * 0.008);
   procTube(B, 6, near ? 20 : 5, near ? 8 : 4, (u) => 0.016 * (1 - u * 0.75));
-  // head: skull + long beak, the lower jaw longer than the upper (skimming), crest coil
+  // head: skull + a long, hooked, toothed beak (a fish-trap of interlocking needles), horns,
+  // the spiral crest fringed with spines, and four eyes
   const nSk = near ? 12 : 4, nAk = near ? 14 : 6;
   loft(B, nSk, (i) => {
     const u = i / (nSk - 1);
@@ -107,18 +122,22 @@ export function buildSkimmer(near = true) {
     const w = Math.sin(Math.min(1, 0.25 + u * 0.95) * Math.PI) * 0.026 + 0.004;
     return { z, hw: w, ht: w * 1.15, hb: w * 0.95, cy: 0, ex: 0.9, ey: 0.9 };
   }, nAk, (i, j, th) => ({ aB: [2, i / (nSk - 1), th / TAU, 0] }));
-  const beak = (part, z0, len, h0, droop, under) => {
+  const hook = (u) => Math.pow(Math.max(0, (u - 0.72) / 0.28), 2);
+  const BEAK = {
+    // upper: the tip curls down into a raptor's hook over the lower jaw
+    up: { z0: 0.1, len: 0.29, h0: 0.015, w: (u) => 0.018 * (1 - u * 0.9) + 0.0012, h: (u) => 0.015 * (1 - u * 0.8) + 0.0015, cy: (u) => 0.004 - 0.016 * u * u - 0.03 * hook(u), z: (u) => 0.1 + u * 0.29 - 0.018 * hook(u) },
+    lo: { z0: 0.1, len: 0.27, h0: 0.013, w: (u) => 0.017 * (1 - u * 0.9) + 0.001, h: (u) => 0.013 * (1 - u * 0.85) + 0.001, cy: (u) => -0.012 - 0.02 * u * u, z: (u) => 0.1 + u * 0.27 },
+  };
+  const beak = (part, Bk, under) => {
     const n = near ? 16 : 4, a = near ? 10 : 4;
     loft(B, n, (i) => {
       const u = i / (n - 1);
-      const z = z0 + u * len;
-      const w = 0.018 * (1 - u * 0.92) + 0.001;
-      const h = h0 * (1 - u * 0.85) + 0.001;
-      return { z, hw: w, ht: under ? h * 0.4 : h, hb: under ? h : h * 0.35, cy: (under ? -0.012 : 0.004) - droop * u * u, ex: 0.85, ey: 0.85 };
+      const h = Bk.h(u);
+      return { z: Bk.z(u), hw: Bk.w(u), ht: under ? h * 0.4 : h, hb: under ? h : h * 0.35, cy: Bk.cy(u), ex: 0.85, ey: 0.85 };
     }, a, (i, j, th) => ({ aB: [part, i / (n - 1), th / TAU, 0] }), { tailApex: null });
   };
-  beak(3, 0.1, 0.27, 0.014, 0.02, false);
-  beak(4, 0.1, 0.33, 0.013, 0.026, true);
+  beak(3, BEAK.up, false);
+  beak(4, BEAK.lo, true);
   // the spiral crest: an ammonite coil of bone and skin rising from the back of the skull
   {
     const n = near ? 40 : 10;
@@ -135,9 +154,37 @@ export function buildSkimmer(near = true) {
     }
     membrane(B, roots, tips, near ? 2 : 1, (k, s, sd) => ({ aB: [5, k / (n - 1), s, sd] }), { normalHint: [1, 0, 0] });
   }
+  // horns: a pair swept back from behind the eyes over the neck (Monster Hunter style)
+  for (const side of [1, -1]) {
+    const r = [side * 0.016, 0.022, 0.028];
+    spike(B, 2, r, [side * 0.03, 0.05, -0.02], [side * 0.034, 0.045, -0.085], 0.0075, near ? 5 : 3, near ? 4 : 1, 1);
+    if (near) {
+      // a cheek spur and a brow spike
+      spike(B, 2, [side * 0.02, -0.006, 0.05], [side * 0.032, -0.012, 0.03], [side * 0.036, -0.022, 0.004], 0.0045, 4, 2, 1);
+      spike(B, 2, [side * 0.012, 0.026, 0.07], [side * 0.02, 0.04, 0.06], [side * 0.022, 0.046, 0.04], 0.0035, 4, 2, 1);
+    }
+  }
   if (near) {
-    // eyes
-    for (const side of [1, -1]) ellipsoid(B, [side * 0.024, 0.012, 0.075], [0.008, 0.009, 0.01], 7, 10, () => ({ aB: [11, 0, 0, side] }));
+    // four eyes: the main pair and a smaller rear pair above and behind (like the whales)
+    for (const side of [1, -1]) {
+      ellipsoid(B, [side * 0.024, 0.012, 0.075], [0.008, 0.009, 0.01], 7, 10, () => ({ aB: [11, 0.009, 0, side] }));
+      ellipsoid(B, [side * 0.02, 0.02, 0.045], [0.0048, 0.0052, 0.0058], 5, 8, () => ({ aB: [11, 0.0053, 1, side] }));
+    }
+    // tooth rows: long, forward-raked needles that interlock outside the closed jaws
+    for (const side of [1, -1]) {
+      for (const [part, Bk, dir] of [[3, BEAK.up, -1], [4, BEAK.lo, 1]]) {
+        const nT = 9;
+        for (let k = 0; k < nT; k++) {
+          const u = 0.12 + (k + (part === 4 ? 0.5 : 0)) / nT * 0.72;
+          const h = Bk.h(u);
+          const y = Bk.cy(u) + (dir < 0 ? -h * 0.3 : h * 0.36);
+          const x = side * Bk.w(u) * 0.85;
+          const z = Bk.z(u);
+          const len = (0.011 + 0.012 * Math.sin(Math.min(1, u * 1.6) * Math.PI * 0.85)) * (0.85 + 0.3 * ((k * 7) % 3) / 2);
+          spike(B, part, [x, y, z], [x + side * len * 0.35, y + dir * len * 0.55, z + len * 0.35], [x + side * len * 0.5, y + dir * len * 0.8, z + len * 0.75], 0.0022, 3, 1, 0);
+        }
+      }
+    }
     // claws at the wrists (three hooked fingers, in the wrist frame)
     for (const side of [1, -1]) {
       for (let k = 0; k < 3; k++) {
@@ -145,6 +192,14 @@ export function buildSkimmer(near = true) {
         const tips = [[0, -k * 0.004, 0.04 - k * 0.005], [0, -0.006 - k * 0.004, 0.035 - k * 0.005]];
         membrane(B, roots, tips, 1, (kk, s, sd) => ({ aB: [12, s, k, side] }), { normalHint: [1, 0, 0] });
       }
+    }
+    // quills: a ridge of raised spines down the back, longest over the shoulders
+    for (let k = 0; k < 7; k++) {
+      const f = k / 6;
+      const z = 0.085 - f * 0.2;
+      const y = 0.036 * Math.sin(Math.min(1, 0.3 + (1 - f) * 0.8) * Math.PI) + 0.006;
+      const len = 0.03 + 0.045 * Math.sin((1 - f) * Math.PI * 0.8) ;
+      spike(B, 0, [0, y, z], [0, y + len * 0.7, z - len * 0.3], [0, y + len * 0.9, z - len * 0.85], 0.006, 4, 2, 1);
     }
   }
   // tail vane (diamond)
@@ -154,8 +209,9 @@ export function buildSkimmer(near = true) {
     membrane(B, [[0, 0, 0], [0, 0.026, -0.035], [0, 0, -0.075]], [[0, 0, 0], [0, -0.026, -0.035], [0, 0, -0.075]], 2, (k, s, sd) => ({ aB: [7, k / 2, s, sd] }), { normalHint: [1, 0, 0] });
     void roots; void tips;
   }
-  // wings
+  // wings: the great fore wings, and a smaller hind pair of membrane stretched from leg to tail
   for (const side of [1, -1]) wingGrid(B, 8, near ? 34 : 7, near ? 11 : 2, side, (u) => u);
+  for (const side of [1, -1]) wingGrid(B, 9, near ? 16 : 3, near ? 6 : 1, side, (u) => u);
   // legs (thigh-shin-foot), posed by the shader
   for (const side of [1, -1]) procTube(B, 10, near ? 8 : 3, near ? 6 : 3, (u) => 0.012 - u * 0.007, side);
   return B.build(true);
@@ -194,7 +250,18 @@ export function buildCoilwing(near = true) {
     membrane(B, roots, tips, near ? 3 : 1, (k, s, sd) => ({ aB: [5, k / (n - 1), s, sd] }), { normalHint: [1, 0, 0] });
   }
   if (near) {
-    for (const side of [1, -1]) ellipsoid(B, [side * 0.027, 0.012, 0.045], [0.009, 0.0095, 0.0105], 7, 10, () => ({ aB: [11, 0, 0, side] }));
+    for (const side of [1, -1]) {
+      ellipsoid(B, [side * 0.027, 0.012, 0.045], [0.009, 0.0095, 0.0105], 7, 10, () => ({ aB: [11, 0.0095, 0, side] }));
+      // backswept horns behind the eyes, and a row of needle teeth jutting from the gape
+      spike(B, 2, [side * 0.02, 0.02, 0.02], [side * 0.034, 0.04, -0.01], [side * 0.04, 0.042, -0.055], 0.0065, 4, 3, 1);
+      for (let k = 0; k < 6; k++) {
+        const z = 0.135 - k * 0.014;
+        const y = -0.006 - (z - 0.06) * 0.1 - 0.002;
+        const w = 0.032 * smooth(HT, HW, (z + 0.02) / 0.17) * 0.85 + 0.002;
+        const len = 0.008 + 0.005 * Math.sin(k * 1.9);
+        spike(B, 2, [side * w, y, z], [side * (w + 0.002), y - len * 0.6, z + len * 0.2], [side * (w + 0.003), y - len, z + len * 0.35], 0.0018, 3, 1, 0);
+      }
+    }
   }
   // tail frond: a fan of feathers at the tip (two-sided strip along the tail end, posed by shader)
   {

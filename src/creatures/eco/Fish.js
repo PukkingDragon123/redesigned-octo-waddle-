@@ -122,6 +122,7 @@ export class FishSystem {
     this._res = new Map();
     this.debugSpecial = null;
     this.debugFlare = null;
+    this.debugGape = null; // lanternjack jaws 0..1
     this.lastCount = 0;
   }
 
@@ -986,6 +987,9 @@ export class FishSystem {
       S[o + 9] += (spec.amp * (0.7 + 0.5 * Math.min(sp / spec.cruise, 2.5)) - S[o + 9]) * (1 - Math.exp(-dt * 3));
       S[o + 13] += ((jk.state === 'strike' ? 0.2 : jk.state === 'stalk' ? 0.7 : 0.4) - S[o + 13]) * (1 - Math.exp(-dt * 2));
       S[o + 14] = jk.glow;
+      // the jaws (iMisc.w): shut while cruising, a slow flex while stalking, gaping to strike
+      const gT = jk.state === 'charge' ? 1 : jk.state === 'strike' ? 0.9 : jk.state === 'stalk' ? 0.22 + 0.18 * Math.sin(time * 1.3 + jk.i) : 0.04 + 0.04 * Math.sin(time * 0.6 + jk.i * 2);
+      S[o + 15] += (gT - S[o + 15]) * (1 - Math.exp(-dt * (gT > S[o + 15] ? 5 : 2)));
       S[o] = px; S[o + 1] = py; S[o + 2] = pz; S[o + 3] = time;
       S[o + 4] = vx; S[o + 5] = vy; S[o + 6] = vz; S[o + 19] = surf;
       if (S[o + 7] < 1) S[o + 7] = Math.min(1, S[o + 7] + dt * 0.5);
@@ -1058,12 +1062,13 @@ export class FishSystem {
       active++;
       simmed += sc.count;
     }
-    // dev overrides (inspection): force the sail / fin flare of every fish
-    if (this.debugSpecial != null || this.debugFlare != null) {
+    // dev overrides (inspection): force the sail / fin flare / lure / jaws of every fish
+    if (this.debugSpecial != null || this.debugFlare != null || this.debugGape != null) {
       for (const sc of this.schools) {
         const S = sc.pool.S;
         for (let i = sc.start; i < sc.start + sc.count; i++) {
-          if (this.debugSpecial != null && sc.species === 'spiralback') S[i * STRIDE + 14] = this.debugSpecial;
+          if (this.debugSpecial != null) S[i * STRIDE + 14] = this.debugSpecial;
+          if (this.debugGape != null && sc.species === 'lanternjack') S[i * STRIDE + 15] = this.debugGape;
           if (this.debugFlare != null) S[i * STRIDE + 13] = this.debugFlare;
         }
       }
@@ -1235,16 +1240,16 @@ export class FishSystem {
     }
   }
 
-  /** A few silver scales flutter where a fish was taken. */
+  /** A few loose scales drift down where a fish was taken: dull, unlit flecks (never sparkles). */
   _eatFx(x, y, z) {
     const mist = this.game.mist;
     if (!mist) return;
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 2; k++) {
       mist.emit({
         pos: _v3.set(x + (Math.random() - 0.5) * 0.2, y + (Math.random() - 0.5) * 0.2, z + (Math.random() - 0.5) * 0.2),
-        vel: _v2.set((Math.random() - 0.5) * 0.6, (Math.random() - 0.3) * 0.5, (Math.random() - 0.5) * 0.6),
-        life: 1.6 + Math.random(), size: 0.035, sizeEnd: 0.025, alpha: 0.9, drag: 2.5, gravity: 0.15,
-        color: [2.2, 2.3, 2.4], kind: 5, fadeIn: 0.02,
+        vel: _v2.set((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.4),
+        life: 1.8 + Math.random(), size: 0.028, sizeEnd: 0.022, alpha: 0.45, drag: 2.5, gravity: 0.1,
+        color: [0.8, 0.85, 0.9], kind: 5, fadeIn: 0.25,
       });
     }
   }

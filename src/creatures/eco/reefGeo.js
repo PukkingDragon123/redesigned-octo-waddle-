@@ -247,33 +247,137 @@ export function buildFan() {
 
 // ---------------------------------------------------------------------------------------------
 /**
- * Jelly: a translucent bell (part 20, aP.y 0 apex .. 1 rim), inner glowing organs (21), frilled
- * oral arms (22) and long trailing tentacles (23, aP.y along, aP.z index). Rim at y = 0, 1 m wide.
+ * Jelly (KIND 6): three alien species share this one mesh and the vertex shader shapes it per
+ * species (reefMat.js jBell): a tall ribbed lantern, a low crown of five drooping lobes, and a
+ * spired bell with a second bell nested inside it. Rim radius 0.5 at y = 0, apex up.
+ * Parts: 20 bell (aP.y v 0 apex .. 1 rim, aP.z u round 0..1, aP.w layer 0 outer / 1 inner),
+ * 21 gastric organ and gonads, 22 oral curtains (aP.y along, aP.z arm angle, aP.w across -1..1;
+ * the normal is the sheet normal), 23 tentacles (aP.y along, aP.z root angle, aP.w 1 hunting),
+ * 24 rim lens-eyes (aP.zw eye plane, aQ.x angle), 25 velum frill (aP.y across, aP.z u),
+ * 27 organ cage ribs (aP.y along, aP.z rib), 28 barbs and hooks on the hunting tentacles
+ * (aP.y = t on the tentacle, aP.z root angle, aP.w length; aQ.xyz offset from the axis there).
+ * Tentacles, barbs and eyes are built at rest positions; the shader re-attaches them.
  */
+export const JELLY_TENT = { n: 18, hunt: [0, 4, 9, 13] };
 export function buildJelly() {
   const m = new Mk();
-  // the bell: an outer exumbrella and, a little inside it, the subumbrella (layered, translucent)
-  ellipsoid(m, [0, 0, 0], [0.5, 0.42, 0.5], 32, 12, (p, n, u, v) => [[20, 1 - (v - 0.5) * 2, u, 0], [0, 0, 0, 0]], 0.5, 1);
-  ellipsoid(m, [0, -0.02, 0], [0.44, 0.34, 0.44], 24, 8, (p, n, u, v) => [[20, (1 - (v - 0.5) * 2) * 0.92, u, 0], [0, 0, 0, 0]], 0.5, 1);
-  ellipsoid(m, [0, 0.12, 0], [0.18, 0.14, 0.18], 14, 7, (p, n, u, v) => [[21, 0.5, u, v], [0, 0, 0, 0]]);
-  // frilled oral arms: ruffled, twisting curtains
+  // the bell: outer exumbrella and the inner (nested) bell, a polar grid in (v, u)
+  for (let layer = 0; layer < 2; layer++) {
+    const NU = layer ? 26 : 40, NV = layer ? 7 : 13;
+    const base = m.count;
+    for (let j = 0; j <= NV; j++) {
+      const v = 0.015 + 0.985 * (j / NV) ** 0.9;
+      for (let i = 0; i <= NU; i++) {
+        const u = i / NU, az = u * TAU, ph = v * Math.PI * 0.5;
+        m.v([Math.cos(az) * 0.5 * Math.sin(ph), 0.42 * Math.cos(ph), Math.sin(az) * 0.5 * Math.sin(ph)], [Math.cos(az) * Math.sin(ph), Math.cos(ph), Math.sin(az) * Math.sin(ph)], [20, v, u, layer]);
+      }
+    }
+    for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
+      const a = base + j * (NU + 1) + i, b = a + NU + 1;
+      m.quad(a, a + 1, b + 1, b);
+    }
+    // close the apex
+    const c = m.v([0, 0.42, 0], [0, 1, 0], [20, 0, 0, layer]);
+    for (let i = 0; i < NU; i++) m.tri(c, base + i + 1, base + i);
+  }
+  // the gastric organ: a lumpy sac hanging in the bell, four gonad horseshoes round it
+  ellipsoid(m, [0, 0.12, 0], [0.11, 0.15, 0.11], 12, 7, () => [[21, 0, 0, 0], [0, 0.12, 0, 0]]);
   for (let k = 0; k < 4; k++) {
     const a = (k / 4) * TAU + 0.4;
     const pts = [], rad = [];
-    for (let i = 0; i < 12; i++) {
-      const t = i / 11, tw = a + t * 2.2;
-      pts.push([Math.cos(a) * 0.08 + Math.cos(tw) * 0.03 * t, -t * 1.1, Math.sin(a) * 0.08 + Math.sin(tw) * 0.03 * t]);
-      rad.push(0.065 * (1 - t * 0.6) * (1 + 0.25 * Math.sin(t * 19)));
+    for (let i = 0; i < 7; i++) {
+      const t = i / 6, b = a + (t - 0.5) * 1.2;
+      pts.push([Math.cos(b) * (0.17 + 0.03 * Math.sin(t * Math.PI)), 0.2 + 0.05 * Math.sin(t * Math.PI), Math.sin(b) * (0.17 + 0.03 * Math.sin(t * Math.PI))]);
+      rad.push(0.022 * Math.sin(0.2 + t * 2.74) + 0.006);
     }
-    tube(m, pts, rad, 6, (i, t) => [[22, t, a, 0], [0, 0, 0, 0]], true, 0.35);
+    tube(m, pts, rad, 4, (i, t) => [[21, t, a, 1], [0, 0.12, 0, 0]], true);
   }
-  // marginal tentacles: long and fine, two lengths alternating round the rim
-  for (let k = 0; k < 16; k++) {
-    const a = (k / 16) * TAU;
-    const L = k % 2 ? 2.0 : 2.8;
+  // the organ cage: cartilage hoops twisting from the apex round the organ
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * TAU;
     const pts = [], rad = [];
-    for (let i = 0; i < 14; i++) { const t = i / 13; pts.push([Math.cos(a) * 0.46, -t * L, Math.sin(a) * 0.46]); rad.push(0.011 * (1 - t * 0.7)); }
-    tube(m, pts, rad, 3, (i, t) => [[23, t, a, k * 10 / 16], [0, 0, 0, 0]], true);
+    for (let i = 0; i < 9; i++) {
+      const t = i / 8, b = a + t * 0.9;
+      const r = 0.035 + 0.25 * Math.sin(t * Math.PI * 0.92);
+      pts.push([Math.cos(b) * r, 0.36 - t * 0.46, Math.sin(b) * r]);
+      rad.push(0.0075 * (1 - 0.5 * t) + 0.002);
+    }
+    tube(m, pts, rad, 3, (i, t) => [[27, t, k, 0], [0, 0, 0, 0]], true);
+  }
+  // oral curtains: broad frilled sheets hanging from the mouth (the shader ruffles their edges)
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * TAU + 0.4;
+    const NA = 18, NC = 3, base = m.count;
+    const rd = [Math.cos(a), 0, Math.sin(a)], tg = [-Math.sin(a), 0, Math.cos(a)];
+    for (let i = 0; i <= NA; i++) {
+      const t = i / NA, tw = t * 1.6;
+      const w = 0.1 * Math.sin(Math.min(t * 1.6 + 0.15, 1) * Math.PI * 0.5 + 0.2) * (1 - 0.55 * t) + 0.012;
+      // the sheet slowly twists as it hangs
+      const ax = [rd[0] * Math.cos(tw) + tg[0] * Math.sin(tw), 0, rd[2] * Math.cos(tw) + tg[2] * Math.sin(tw)];
+      const nn = [-ax[2], 0, ax[0]];
+      for (let j = 0; j <= NC; j++) {
+        const s = (j / NC) * 2 - 1;
+        m.v([rd[0] * 0.05 + ax[0] * w * s, -0.02 - t * 1.0, rd[2] * 0.05 + ax[2] * w * s], nn, [22, t, a, s]);
+      }
+    }
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NC; j++) {
+      const q = base + i * (NC + 1) + j, r = q + NC + 1;
+      m.quad(q, q + 1, r + 1, r);
+    }
+  }
+  // tentacles: fine ones of many lengths and four thick hunting tentacles with barbs and a hook
+  const NT = JELLY_TENT.n;
+  for (let k = 0; k < NT; k++) {
+    const a = ((k + 0.3 * Math.sin(k * 3.7)) / NT) * TAU;
+    const hunt = JELLY_TENT.hunt.includes(k);
+    const L = hunt ? 3.3 + 0.5 * ((k * 7) % 3) : 0.9 + 1.6 * (((k * 37) % 11) / 10);
+    const NS = hunt ? 20 : 10, r0 = hunt ? 0.02 : 0.009;
+    const pts = [], rad = [];
+    for (let i = 0; i < NS; i++) { const t = i / (NS - 1); pts.push([Math.cos(a) * 0.46, -t * L, Math.sin(a) * 0.46]); rad.push(r0 * (1 - t * 0.65) * (1 + (hunt ? 0.25 * Math.sin(t * 40) : 0))); }
+    tube(m, pts, rad, 3, (i, t) => [[23, t, a, hunt ? 1 : 0], [L, 0, 0, 0]], true);
+    if (!hunt) continue;
+    // barbs: recurved spines in a spiral up the hunting tentacle, pointing back toward the bell
+    const spike = (t, rel, len, w) => {
+      const b0 = m.count;
+      const d = norm(rel);
+      tube(m, [[0, 0, 0], [d[0] * len, d[1] * len + len * 0.45, d[2] * len]], [w, 0.0006], 3, (i, tt) => [[28, t, a, L], [0, 0, 0, tt]], true);
+      for (let v = b0; v < m.count; v++) {
+        m.q[v * 4] = m.p[v * 3]; m.q[v * 4 + 1] = m.p[v * 3 + 1]; m.q[v * 4 + 2] = m.p[v * 3 + 2];
+        m.p[v * 3] = Math.cos(a) * 0.46; m.p[v * 3 + 1] = -t * L; m.p[v * 3 + 2] = Math.sin(a) * 0.46;
+      }
+    };
+    for (let b = 0; b < 7; b++) {
+      const t = 0.45 + b * 0.07, th = b * 2.1 + k;
+      spike(t, [Math.cos(th), -0.15, Math.sin(th)], 0.07 - b * 0.003, 0.009);
+    }
+    // the hook at the tip: a curled claw
+    {
+      const b0 = m.count, hp = [], hr = [];
+      for (let i = 0; i < 6; i++) { const u = i / 5, ang = u * 2.6; hp.push([Math.cos(a) * Math.sin(ang) * 0.07, -Math.sin(ang * 0.5) * 0.02 - (1 - Math.cos(ang)) * 0.06 + 0.06 * u * u, Math.sin(a) * Math.sin(ang) * 0.07]); hr.push(0.011 * (1 - u) + 0.0008); }
+      tube(m, hp, hr, 3, (i, tt) => [[28, 1, a, L], [0, 0, 0, tt]], true);
+      for (let v = b0; v < m.count; v++) {
+        m.q[v * 4] = m.p[v * 3]; m.q[v * 4 + 1] = m.p[v * 3 + 1]; m.q[v * 4 + 2] = m.p[v * 3 + 2];
+        m.p[v * 3] = Math.cos(a) * 0.46; m.p[v * 3 + 1] = -L; m.p[v * 3 + 2] = Math.sin(a) * 0.46;
+      }
+    }
+  }
+  // lens-eyes round the margin, between the ribs
+  for (let k = 0; k < 12; k++) {
+    const a = ((k + 0.5) / 12) * TAU;
+    const c = [Math.cos(a) * 0.47, 0.035, Math.sin(a) * 0.47];
+    eyeDome(m, c, [Math.cos(a), -0.3, Math.sin(a)], 0.03, 2, 8, (qx, qy) => [[24, 0, qx, qy], [a, 0, 0, 0]]);
+  }
+  // the velum: a frilled skirt round the margin, folded in under the bell
+  {
+    const NU = 40, NK = 2, base = m.count;
+    for (let i = 0; i <= NU; i++) for (let j = 0; j <= NK; j++) {
+      const u = i / NU, az = u * TAU;
+      m.v([Math.cos(az) * 0.5, 0, Math.sin(az) * 0.5], [Math.cos(az), 0, Math.sin(az)], [25, j / NK, u, 0]);
+    }
+    for (let i = 0; i < NU; i++) for (let j = 0; j < NK; j++) {
+      const a = base + i * (NK + 1) + j, b = a + NK + 1;
+      m.quad(a, a + 1, b + 1, b);
+    }
   }
   return m.build();
 }
@@ -284,9 +388,15 @@ export function buildJelly() {
  * airfoil loop (thick rounded leading edge thinning to a fine trailing edge; the body a thick
  * central disc). aP.y = chord v (0 leading edge .. 1 trailing edge), aP.z = span u (signed),
  * aP.w = topness (sin of the loop angle: -1 belly .. +1 back); aQ.x = half thickness there.
- * Cephalic lobes (31: aP.y along, aP.z across 0..1, aP.w side; posed and curled in the shader),
- * whip tail (32, aP.y along), eyes (33, aP.w side, aQ centre), dorsal fin (34), pelvic fins (35).
- * lod 1 is the far mesh (coarse loft, no eyes or fins).
+ * Cephalic lobes (31: aP.y along, aP.z across 0..1, aP.w side; posed and curled in the shader, split
+ * into two hooked tines at the tip), twin barbed whip tails (32, aP.y along, aP.w side), eyes (33:
+ * aQ.xyz centre, aQ.w 0 the main eye, 1 and 2 the eyes on stalks), dorsal fin and the ridge of
+ * bony scutes (34, aP.w 0 fin / 2 scute), pelvic fins (35), tail barbs (36: aP.y = t on the tail,
+ * aP.w side, aQ.xyz offset from the tail axis there, aQ.w along the barb), fangs (37: aP.y along,
+ * aP.w +1 upper lip, -1 lower lip, 0 the ring round the under-maw; aQ.xyz root, aQ.w ring angle),
+ * eye stalks (38, aP.y along, aP.z stalk id, aP.w side), horns (39: aP.y along, aP.z 0 the main
+ * horn / 1 its tine, aP.w side; aQ.xyz root).
+ * lod 1 is the far mesh (coarse loft, lobes, tails and horns only).
  */
 const mSmooth = (x) => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
 /** Planform: leading and trailing edge z at |x| = u (mirrored in reefMat.js). */
@@ -359,18 +469,75 @@ export function buildRay(lod = 0) {
       if (side > 0) m.quad(a, b, b + 1, a + 1); else m.quad(a, a + 1, b + 1, b);
     }
   }
-  // the whip tail
-  {
+  // twin whip tails, diverging from the tail root
+  const tailAt = (t, side) => [side * (0.022 + 0.1 * Math.pow(t, 1.3)), 0.006 + 0.012 * t, -0.4 - t * 1.15];
+  for (let side = -1; side <= 1; side += 2) {
     const pts = [], rad = [];
-    const N = far ? 6 : 14;
-    for (let i = 0; i < N; i++) { const t = i / (N - 1); pts.push([0, 0.004 + 0.01 * t, -0.42 - t * 0.95]); rad.push(0.03 * Math.pow(1 - t, 1.4) + 0.0025); }
-    tube(m, pts, rad, far ? 3 : 6, (i, t) => [[32, t, 0, 0], [0, 0, 0, 0]], true);
+    const N = far ? 6 : 16;
+    for (let i = 0; i < N; i++) { const t = i / (N - 1); pts.push(tailAt(t, side)); rad.push(0.022 * Math.pow(1 - t, 1.3) + 0.002); }
+    tube(m, pts, rad, far ? 3 : 5, (i, t) => [[32, t, 0, side], [0, 0, 0, 0]], true);
+  }
+  // swept-back horns from the crown, each with a forward tine
+  const bez = (P, t) => { const u = 1 - t; return [0, 1, 2].map((k) => u * u * u * P[0][k] + 3 * u * u * t * P[1][k] + 3 * u * t * t * P[2][k] + t * t * t * P[3][k]); };
+  for (let side = -1; side <= 1; side += 2) {
+    const b = [side * 0.075, 0.05, 0.395];
+    const P = [b, [b[0] + side * 0.03, b[1] + 0.07, b[2] + 0.07], [b[0] + side * 0.1, b[1] + 0.15, b[2] + 0.0], [b[0] + side * 0.17, b[1] + 0.13, b[2] - 0.15]];
+    const NH = far ? 4 : 10;
+    const pts = [], rad = [];
+    for (let i = 0; i < NH; i++) { const t = i / (NH - 1); pts.push(bez(P, t)); rad.push(0.019 * Math.pow(1 - t, 0.9) + 0.0015); }
+    tube(m, pts, rad, far ? 3 : 6, (i, t) => [[39, t, 0, side], [b[0], b[1], b[2], 0]], true);
+    if (far) continue;
+    const f0 = bez(P, 0.45);
+    const tp = [f0, [f0[0] + side * 0.012, f0[1] + 0.04, f0[2] + 0.035], [f0[0] + side * 0.02, f0[1] + 0.06, f0[2] + 0.075]];
+    tube(m, tp, [0.008, 0.005, 0.001], 4, (i, t) => [[39, 0.45 + 0.55 * t, 1, side], [b[0], b[1], b[2], 0]], true);
   }
   if (far) return m.build();
-  // eyes on the sides of the head, just above where the pectoral leading edge begins
+  // tail barbs: a saw of recurved spines along each tail's root, and a harpoon tip
+  const tailBarb = (side, t, dir, len, w) => {
+    const b0 = m.count, d = norm(dir);
+    tube(m, [[0, 0, 0], [d[0] * len, d[1] * len, d[2] * len]], [w, 0.0007], 3, (i, tt) => [[36, t, 0, side], [0, 0, 0, tt]], true);
+    const ax = tailAt(t, side);
+    for (let v = b0; v < m.count; v++) {
+      m.q[v * 4] = m.p[v * 3]; m.q[v * 4 + 1] = m.p[v * 3 + 1]; m.q[v * 4 + 2] = m.p[v * 3 + 2];
+      m.p[v * 3] = ax[0]; m.p[v * 3 + 1] = ax[1]; m.p[v * 3 + 2] = ax[2];
+    }
+  };
   for (let side = -1; side <= 1; side += 2) {
-    const c = [side * 0.19, 0.012, 0.36];
-    ellipsoid(m, c, [0.024, 0.02, 0.026], 10, 6, (p, n) => [[33, 0, 0, side], [c[0], c[1], c[2], 0]]);
+    for (let k = 0; k < 6; k++) {
+      const t = 0.05 + k * 0.055, up = k % 2;
+      tailBarb(side, t, [side * (up ? 0.35 : 0.9), up ? 1 : 0.25, -1.2], 0.045 - k * 0.004, 0.006);
+    }
+    for (const sd of [-1, 1]) tailBarb(side, 0.985, [sd * 0.8, 0.1, 0.9], 0.03, 0.004);
+  }
+  // fangs: long overbite fangs from the upper lip, a lower row that drops with the jaw, and a ring
+  // folded over the under-maw on the belly (it splays open when feeding)
+  const fang = (root, dir, len, w, a, ring) => {
+    const d = norm(dir);
+    const mid = [root[0] + d[0] * len * 0.55, root[1] + d[1] * len * 0.55, root[2] + d[2] * len * 0.55 + len * 0.08];
+    tube(m, [root, mid, [root[0] + d[0] * len, root[1] + d[1] * len, root[2] + d[2] * len - len * 0.12]], [w, w * 0.55, 0.0006], 4, (i, t) => [[37, t, 0, ring], [root[0], root[1], root[2], a]], true);
+  };
+  for (let k = 0; k < 6; k++) {
+    const x = (k - 2.5) * 0.034, big = k === 1 || k === 4;
+    fang([x, -0.004, 0.462 - Math.abs(x) * 0.25], [x * 0.6, -1, 0.25], big ? 0.062 : 0.032, big ? 0.0075 : 0.005, 0, 1);
+    fang([x + 0.017, -0.03, 0.452 - Math.abs(x) * 0.25], [x * 0.4, 1, 0.3], 0.026, 0.0045, 0, -1);
+  }
+  const MZ = 0.3, MY = -0.04;
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * TAU + 0.3;
+    const r = 0.042;
+    const root = [Math.cos(a) * r, MY - 0.002, MZ + Math.sin(a) * r * 1.2];
+    fang(root, [-Math.cos(a) * 0.7, -0.75, -Math.sin(a) * 0.7], 0.034 + 0.008 * (k % 2), 0.005, a, 0);
+  }
+  // eyes: the main pair, and two smaller eyes on stalks behind each
+  for (let side = -1; side <= 1; side += 2) {
+    const c = [side * 0.19, 0.014, 0.36];
+    ellipsoid(m, c, [0.028, 0.024, 0.03], 12, 7, () => [[33, 0, 0, side], [c[0], c[1], c[2], 0]]);
+    const stalks = [[[side * 0.145, 0.04, 0.325], [side * 0.03, 0.05, -0.01], 0.016], [[side * 0.11, 0.055, 0.27], [side * 0.02, 0.042, -0.012], 0.013]];
+    stalks.forEach(([r0, d, er], id) => {
+      const tip = [r0[0] + d[0], r0[1] + d[1], r0[2] + d[2]];
+      tube(m, [r0, [r0[0] + d[0] * 0.5, r0[1] + d[1] * 0.55, r0[2] + d[2] * 0.5], tip], [0.009, 0.006, 0.005], 5, (i, t) => [[38, t, id + 1, side], [r0[0], r0[1], r0[2], 0]], false);
+      ellipsoid(m, tip, [er, er * 0.9, er], 9, 5, () => [[33, 1, id + 1, side], [tip[0], tip[1], tip[2], id + 1]]);
+    });
   }
   // a small swept dorsal fin at the tail root, and the pelvic fins either side of it
   {
@@ -386,6 +553,14 @@ export function buildRay(lod = 0) {
       tube(m, [[side * 0.045, -0.012, -0.36], [side * 0.075, -0.016, -0.42], [side * 0.07, -0.016, -0.47]], [0.02, 0.016, 0.003], 5, (i, t) => [[35, t, 0, side], [0, 0, 0, 0]], true, 0.35);
     }
   }
+  // a ridge of bony scutes down the spine from the crown, and a shorter row on each shoulder
+  const topAt = (x, z) => { const u = Math.abs(x); const v = (mantaLE(u) - z) / (mantaLE(u) - mantaTE(u)); return mantaHalf(u, v)[0] - 0.035 * u * u; };
+  const scute = (x, z, h, w) => {
+    const y = topAt(x, z) - 0.004;
+    tube(m, [[x, y, z], [x, y + h * 0.55, z - h * 0.35], [x, y + h, z - h * 0.95]], [w, w * 0.5, 0.0008], 4, (i, t) => [[34, t, 0, 2], [0, 0, 0, 0]], true, 0.6);
+  };
+  for (let k = 0; k < 9; k++) { const z = 0.3 - k * 0.075; scute(0.004 * Math.sin(k * 2.3), z, 0.03 + 0.012 * Math.sin(k * 0.45 + 0.3), 0.016); }
+  for (let side = -1; side <= 1; side += 2) for (let k = 0; k < 5; k++) scute(side * (0.075 + k * 0.004), 0.24 - k * 0.08, 0.017, 0.01);
   return m.build();
 }
 

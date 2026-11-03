@@ -116,6 +116,24 @@ Chain foreChain(float side, float ph, float amp, float fold, float sweep, float 
 // The coilwing's hind wing: the leg (hip - knee - ankle - toe) held out back and to the side
 // in flight with long feathers on the shank; tucked down to stand when perched.
 Chain hindChain(float side, float ph, float amp, float fold, float sweep) {
+#if SPECIES == 0
+  // the skimmer's hind wings: a membrane on the elongated fifth toe of each leg, spread out and
+  // back like a second, smaller pair of wings; they beat against the fore wings (like a
+  // dragonfly's), and fold back along the tail at rest
+  vec3 yawS = vec3(0.7, 1.0, 1.2), elS = vec3(-0.06, -0.02, 0.02);
+  vec3 yawD = vec3(1.25, 1.35, 1.45), elD = vec3(0.0, 0.0, 0.0);
+  vec3 yawF = vec3(1.35, 1.5, 1.55), elF = vec3(-0.45, -0.2, 0.0);
+  vec3 yaw = mix(mix(yawS, yawD, sweep), yawF, fold);
+  vec3 el = mix(mix(elS, elD, sweep), elF, fold);
+  float k = amp * 0.7 * (1.0 - fold);
+  el += vec3(k * sin(ph - 2.4), k * 0.6 * sin(ph - 2.9), k * 0.5 * sin(ph - 3.3));
+  Chain c;
+  c.S = vec3(side * 0.035, -0.02, -0.1);
+  c.E = c.S + boneDir(yaw.x, el.x, side) * 0.12;
+  c.W = c.E + boneDir(yaw.y, el.y, side) * 0.17;
+  c.F = c.W + boneDir(yaw.z, el.z, side) * 0.2;
+  c.A = vec3(side * 0.01, -0.005, -0.34);
+#else
   // in flight the legs sprawl out to the sides and back (a second, smaller pair of wings
   // behind the first); perched, they fold down to stand
   vec3 yawS = vec3(0.62, 0.95, 1.15), elS = vec3(-0.12, -0.04, 0.0);
@@ -131,6 +149,7 @@ Chain hindChain(float side, float ph, float amp, float fold, float sweep) {
   c.W = c.E + boneDir(yaw.y, el.y, side) * 0.19;
   c.F = c.W + boneDir(yaw.z, el.z, side) * 0.11;
   c.A = vec3(side * 0.02, 0.0, -0.3);
+#endif
   c.nrm = normalize(cross(c.A - c.W, c.F - c.S)) * side;
   return c;
 }
@@ -313,11 +332,8 @@ void main() {
     float hind = part > 8.5 ? 1.0 : 0.0;
     float sgn = aB2.x;
     Chain c;
-#if SPECIES == 1
     if (hind > 0.5) c = hindChain(side, ph, amp, fold, sweep);
-    else
-#endif
-    c = foreChain(side, ph, amp, fold, sweep, iSeed.w);
+    else c = foreChain(side, ph, amp, fold, sweep, iSeed.w);
     p = wingSurface(c, u, v, sgn, side, fold, hind);
     vec3 pu = wingSurface(c, min(u + 0.01, 1.0), v, sgn, side, fold, hind) - wingSurface(c, max(u - 0.01, 0.0), v, sgn, side, fold, hind);
     vec3 pv = wingSurface(c, u, min(v + 0.02, 1.0), sgn, side, fold, hind) - wingSurface(c, u, max(v - 0.02, 0.0), sgn, side, fold, hind);
@@ -403,7 +419,21 @@ void main() {
   vec3 L = vLocal;
 #if SPECIES == 0
   // ======================= skimmer =======================
-  if (part < 0.5 || (part > 0.5 && part < 1.5)) {
+  if (side > 1.5) {
+    // bone: needle teeth (wet ivory, glassy tips) and horns / quills (dark keratin with wavering
+    // growth rings, worn pale at the tips)
+    if (v < 0.5) {
+      albedo = mix(vec3(0.45, 0.3, 0.26), vec3(0.88, 0.85, 0.74), smoothstep(0.0, 0.35, u));
+      trans = 0.5 * u; spec = 0.7; gloss = 0.85; rim = 0.4;
+    } else {
+      float wob = vnoise(vec2(u * 18.0, seed * 7.0 + L.x * 40.0));
+      float rings = smoothstep(0.3, 0.9, sin(u * 40.0 + wob * 2.0));
+      albedo = mix(pA * 0.35 + vec3(0.02), vec3(0.72, 0.64, 0.52), smoothstep(0.35, 1.0, u));
+      albedo = mix(albedo, pD * 0.55, smoothstep(0.55, 0.0, u) * 0.35);
+      albedo *= 1.0 - rings * 0.2 * (1.0 - u * 0.5);
+      spec = 0.3; gloss = 0.6; rim = 0.6; trans = 0.15;
+    }
+  } else if (part < 0.5 || (part > 0.5 && part < 1.5)) {
     // pycnofibre fur: slate back, cream belly, a darker saddle; fine fuzz
     float under = smoothstep(-0.2, -0.7, dot(N, normalize(vec3(0.0, 1.0, 0.0))));
     albedo = mix(pA, pB, under);
@@ -433,6 +463,12 @@ void main() {
     albedo = mix(albedo, vec3(0.95, 0.9, 0.82), smoothstep(0.8, 1.0, v) * 0.6);
     albedo = mix(albedo, pA * 0.6, smoothstep(0.25, 0.0, v));
     trans = 1.0; rim = 0.9; spec = 0.3;
+    // its rim breaks into a fringe of spines (each a little different, raked along the coil)
+    float fr = fract(u * 34.0 + 0.15 * sin(u * 23.0 + seed * 3.0));
+    float spineL = 0.62 + 0.38 * (0.75 + 0.25 * hash11(floor(u * 34.0) + seed * 9.0));
+    alpha = 1.0 - smoothstep(spineL * (1.0 - 0.75 * pow(abs(fr - 0.35) * 1.6, 0.8)) - 0.02, spineL * (1.0 - 0.75 * pow(abs(fr - 0.35) * 1.6, 0.8)) + 0.02, v);
+    alpha = max(alpha, 1.0 - smoothstep(0.5, 0.56, v));
+    albedo = mix(albedo, vec3(0.92, 0.86, 0.76) * 0.8, smoothstep(0.55, 0.9, v) * 0.5);
     // flushes with blood when displaying
     emis += pD * 0.08 * vPose.z;
   } else if (part < 6.5) {
@@ -468,16 +504,31 @@ void main() {
     albedo = mix(pA * 0.7, vec3(0.12, 0.1, 0.09), smoothstep(0.6, 1.0, u));
     trans = 0.2;
   } else if (part < 11.5) {
-    // small dark eye with a gold ring and a wet highlight
-    float r = length(L.yz - vec2(0.012, 0.075)) / 0.009;
-    albedo = mix(vec3(0.01), vec3(0.75, 0.55, 0.15), smoothstep(0.55, 0.75, r) * 0.6);
+    // four small eyes: dark, with a slit pupil in a blood-gold iris and a wet highlight
+    vec2 ec = v < 0.5 ? vec2(0.012, 0.075) : vec2(0.02, 0.045);
+    vec2 eq = (L.yz - ec) / u;
+    float r = length(eq);
+    float slit = smoothstep(0.2, 0.12, abs(eq.y) * 0.9 + abs(eq.x) * 0.15 - 0.02) * step(r, 0.75);
+    vec3 iris = mix(vec3(0.85, 0.55, 0.12), vec3(0.55, 0.12, 0.05), smoothstep(0.2, 0.7, r));
+    albedo = mix(iris, vec3(0.01), slit);
+    albedo = mix(albedo, vec3(0.015), smoothstep(0.7, 0.85, r));
     spec = 2.0; gloss = 0.97; rim = 0.2;
   } else {
     albedo = vec3(0.1, 0.09, 0.08);
   }
 #else
   // ======================= coilwing =======================
-  if (part < 1.5) {
+  if (side > 1.5) {
+    // bone: needle teeth and horns
+    if (v < 0.5) {
+      albedo = mix(vec3(0.45, 0.3, 0.26), vec3(0.88, 0.85, 0.74), smoothstep(0.0, 0.35, u));
+      spec = 0.6; gloss = 0.8; trans = 0.4 * u;
+    } else {
+      float rings = smoothstep(0.3, 0.9, sin(u * 34.0 + vnoise(vec2(u * 15.0, seed * 5.0)) * 2.0));
+      albedo = mix(pA * 0.4, vec3(0.7, 0.62, 0.5), smoothstep(0.3, 1.0, u)) * (1.0 - rings * 0.2);
+      spec = 0.3; gloss = 0.6; rim = 0.6;
+    }
+  } else if (part < 1.5) {
     // feathered body: dark iridescent plumage, a buff throat and belly
     float under = smoothstep(-0.15, -0.65, N.y);
     albedo = mix(pA, pB, under * 0.85);
@@ -565,10 +616,11 @@ void main() {
     albedo = mix(vec3(0.16, 0.13, 0.1), vec3(0.05), smoothstep(0.7, 1.0, u));
     spec = 0.3;
   } else {
-    // eye: large, gold iris with a round pupil
+    // eye: large, gold iris with a slit pupil
     vec2 q = (L.yz - vec2(0.012, 0.045)) / 0.0095;
     float r = length(q);
-    albedo = mix(vec3(0.012), mix(vec3(0.85, 0.6, 0.12), vec3(0.35, 0.2, 0.05), r), smoothstep(0.42, 0.5, r));
+    float slit = smoothstep(0.22, 0.14, abs(q.y) + abs(q.x) * 0.12) * step(r, 0.8);
+    albedo = mix(mix(vec3(0.85, 0.6, 0.12), vec3(0.4, 0.12, 0.04), r), vec3(0.012), max(slit, smoothstep(0.8, 0.9, r)));
     spec = 2.2; gloss = 0.97; rim = 0.2;
   }
 #endif

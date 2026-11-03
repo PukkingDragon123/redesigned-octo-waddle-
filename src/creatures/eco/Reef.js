@@ -560,7 +560,8 @@ export class ReefLife {
       if (J.P[k + 1] < bot) { J.P[k + 1] = bot; J.V[k + 1] = Math.max(J.V[k + 1], 0.1); }
       J.pitch[i] = Math.sin(t * 0.3 + J.seed[i] * 20) * 0.25;
       J.roll[i] = Math.cos(t * 0.27 + J.seed[i] * 13) * 0.2;
-      I.set(n++, J.P[k], J.P[k + 1], J.P[k + 2], J.yaw[i], J.s[i], J.seed[i], J.ph[i], J.a[i], J.pitch[i], J.roll[i], 0, 0);
+      // iC.z: the rise speed (the tentacles stream straight behind a rising jelly, billow as it sinks)
+      I.set(n++, J.P[k], J.P[k + 1], J.P[k + 2], J.yaw[i], J.s[i], J.seed[i], J.ph[i], J.a[i], J.pitch[i], J.roll[i], J.V[k + 1], 0);
       void prev;
     }
     I.commit(n);
@@ -813,17 +814,8 @@ export class ReefLife {
     }
   }
 
-  _gulpFx(x, y, z, glow) {
-    const g = this.game;
-    if (g.glow && glow) {
-      for (let i = 0; i < 8; i++) {
-        const a = Math.random() * TAU;
-        g.glow.emit({
-          pos: _v.set(x, y, z), vel: _v2.set(Math.cos(a) * 1.2, (Math.random() - 0.3) * 1.2, Math.sin(a) * 1.2),
-          life: 0.8 + Math.random() * 0.6, size: 0.12, sizeEnd: 0.02, color: [0.3, 0.9, 1.0], alpha: 0.8, drag: 1.2, gravity: 0, kind: 1,
-        });
-      }
-    }
+  _gulpFx(x, y, z) {
+    // only a few bubbles shaken loose (no glow sparks: they read as sparkle)
     this._puff(x, y, z, 'bubbles', 1.2);
   }
 
@@ -852,7 +844,7 @@ export class ReefLife {
       const dx = Pl.P[k] - mouth.x, dy = Pl.P[k + 1] - mouth.y, dz = Pl.P[k + 2] - mouth.z;
       const R = r + rk * Pl.s[i] * (1 + Pl.a[i] * grow);
       if (dx * dx + dy * dy + dz * dz > R * R) continue;
-      this._gulpFx(Pl.P[k], Pl.P[k + 1], Pl.P[k + 2], true);
+      this._gulpFx(Pl.P[k], Pl.P[k + 1], Pl.P[k + 2]);
       Pl.alive[i] = 0; // respawns out of sight next frame
       this._food += REEF_FOOD[kind];
       this._n++;

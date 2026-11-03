@@ -7,7 +7,7 @@
 // anemones close, tube corals retract and fans bend away, all on the GPU.
 // Lit by stylizedLight and fogged by applyFog (water column, caustics, the underwater view);
 // bioluminescence is added again after the fog so it carries through the dark water at night.
-import { ShaderMaterial, DoubleSide, FrontSide, AdditiveBlending, Vector4, Color } from 'three';
+import { ShaderMaterial, DoubleSide, FrontSide, CustomBlending, OneFactor, OneMinusSrcAlphaFactor, AddEquation, Vector4, Color } from 'three';
 import { G } from '../../render/Globals.js';
 import { UNIFORMS, NOISE, LIGHTING } from '../../render/shaders/common.js';
 import { ECO_GLSL } from './glsl.js';
@@ -29,6 +29,7 @@ varying vec3 vWorldPos;
 varying vec3 vN;
 varying vec4 vP;
 varying vec4 vI;
+varying vec4 vQ;
 varying vec3 vLoc;
 
 float actorNear(vec3 P, out vec3 away) {
@@ -58,6 +59,73 @@ vec3 puff(vec3 p, float inf) {
   q.y -= inf * 0.025 * w;
   return q;
 }
+
+#if KIND == 6
+// ---- jelly helpers: the species shape (0 a tall ribbed lantern, 1 a low crown of five drooping
+// lobes, 2 a spired bell with a second bell nested inside), the contraction that ripples round the
+// margin from a pacemaker, and the drift of the tentacles
+float jSp, jPul, jSeed, jVy;
+float jC(float az) {
+  float az0 = jSeed * 6.2831853 + uTime * 0.17;
+  float lag = 0.85 * (1.0 - cos(az - az0));
+  return pow(max(sin(jPul - lag), 0.0), 1.5);
+}
+float jH() { return jSp < 0.5 ? 0.66 : (jSp < 1.5 ? 0.3 : 0.48); }
+vec3 jBell(float v, float u, float layer) {
+  float az = u * 6.2831853;
+  float ph = v * 1.5707963;
+  float H = jH();
+  float nRib = jSp < 0.5 ? 12.0 : (jSp < 1.5 ? 10.0 : 8.0);
+  // the ribs wander a little (hand-made, never ruled)
+  float aw = az + 0.05 * sin(az * 3.0 + jSeed * 11.0) + 0.04 * sin(v * 5.0 + az * 2.0);
+  float rib = pow(abs(cos(aw * nRib * 0.5)), 6.0);
+  float r = 0.5 * pow(sin(ph), jSp < 0.5 ? 0.7 : 0.9);
+  float y = H * cos(ph);
+  // the lantern pinches in a waist above a flared margin
+  if (jSp < 0.5) r *= 1.0 - 0.13 * smoothstep(0.5, 0.82, v) + 0.15 * smoothstep(0.82, 1.0, v);
+  r += rib * 0.05 * sin(ph * 2.0) * (1.0 - layer);
+  y += rib * 0.018 * (1.0 - v) * (1.0 - layer);
+  if (jSp > 0.5 && jSp < 1.5) {
+    float lob = pow(abs(cos(az * 2.5)), 0.6);
+    float m = smoothstep(0.35, 1.0, v);
+    r *= 1.0 - 0.26 * (1.0 - lob) * m;
+    y -= 0.2 * lob * m * m;
+    r += 0.06 * lob * m;
+  } else if (jSp > 1.5) {
+    y += 0.34 * pow(1.0 - v, 4.0);
+    r *= 1.0 - 0.35 * pow(1.0 - v, 2.5);
+  }
+  if (layer > 0.5) {
+    if (jSp > 1.5) { r *= 0.58; y = y * 0.9 - 0.26; }
+    else { r *= 0.84; y = y * 0.78 - 0.04; }
+  }
+  float c = jC(az);
+  r *= 1.0 - 0.22 * c * (0.3 + v);
+  y *= 1.0 + 0.14 * c;
+  return vec3(cos(az) * r, y, sin(az) * r);
+}
+// tentacle sway at t along a tentacle hanging from margin angle a
+vec3 jTentOff(float t, float a, float hunt) {
+  float lag = jPul - t * 2.6;
+  float sw = 1.0 - clamp(jVy * 1.2, 0.0, 0.6);
+  vec3 o = vec3(sin(uTime * 0.9 + t * 4.0 + a * 2.0 + jSeed * 3.0) * 0.28 * t + sin(lag) * 0.06 * t, 0.0,
+                cos(uTime * 0.8 + t * 3.5 + a * 1.7 + jSeed * 2.0) * 0.28 * t) * sw;
+  // sinking between beats, they billow out
+  o.xz += vec2(cos(a), sin(a)) * t * (0.12 + max(-jVy, 0.0) * 0.6);
+  // fine tentacles crinkle; the hunting ones wind into corkscrews toward their hooks
+  o.xz += vec2(sin(t * 47.0 + a * 7.0), cos(t * 41.0 + a * 5.0)) * 0.015 * t * (1.0 - hunt);
+  float ck = hunt * smoothstep(0.55, 1.0, t);
+  float w = t * 34.0 + a * 3.0 + uTime * 0.5;
+  o.xz += vec2(cos(w), sin(w)) * 0.1 * ck;
+  return o;
+}
+float jLen() { return jSp < 0.5 ? 1.25 : (jSp < 1.5 ? 0.6 : 0.95); }
+float jRootA(float a) {
+  // the crown's tentacles gather under its lobes
+  float L = 6.2831853 / 5.0;
+  return jSp > 0.5 && jSp < 1.5 ? mix(a, floor(a / L + 0.5) * L, 0.55) : a;
+}
+#endif
 
 void main() {
   vec3 pos = position;
@@ -160,30 +228,76 @@ void main() {
   info.z = near;
   info.w = v;
 #elif KIND == 6
-  // ---- jellies: the bell contracts and relaxes, arms and tentacles trail -----------------------
-  float pul = iB.z;
-  float c = pow(max(sin(pul), 0.0), 1.5);
+  // ---- jellies: the bell contracts in a ripple round the margin; curtains, tentacles and their
+  // hooks trail and coil in the water ---------------------------------------------------------------
+  jSeed = seed;
+  jPul = iB.z;
+  jVy = iC.z;
+  jSp = floor(fract(seed * 7.31) * 3.0);
   vec3 p = pos;
+  float H = jH();
+  float cHere = jC(atan(pos.z, pos.x));
   if (part < 20.5) {
-    float rimK = aP.y;
-    p.xz *= 1.0 - 0.2 * c * (0.3 + rimK);
-    p.y *= 1.0 + 0.12 * c;
-    p.y += sin(aP.z * 6.2831 * 8.0 + uTime * 3.0) * 0.025 * rimK * rimK;
+    float v = aP.y, u = aP.z, layer = aP.w;
+    p = jBell(v, u, layer);
+    vec3 pu = jBell(v, u + 0.008, layer);
+    vec3 pv = jBell(min(v + 0.02, 1.0), u, layer) - jBell(max(v - 0.02, 0.0), u, layer);
+    vec3 nn = cross(pu - p, pv);
+    nrm = length(nn) > 1e-7 ? normalize(nn) : vec3(0.0, 1.0, 0.0);
+    cHere = jC(u * 6.2831853);
   } else if (part < 21.5) {
-    p *= 1.0 + 0.08 * sin(uTime * 2.0 + seed * 9.0);
-  } else {
+    // the organ churns slowly
+    float a = atan(pos.z, pos.x);
+    if (aP.w < 0.5) p += nrm * 0.014 * sin(pos.y * 38.0 + a * 3.0 + uTime * 0.7 + seed * 5.0);
+    p.xz *= 1.0 - 0.12 * cHere;
+    p.y = p.y * mix(1.0, H / 0.42, 0.7) - (jSp > 1.5 ? 0.06 : 0.0);
+  } else if (part < 22.5) {
+    // oral curtains: frilled edges, hanging and trailing
+    float t = aP.y, a = aP.z, s = aP.w;
+    float d = sin(t * 30.0 + s * 2.5 + uTime * 1.2 + a * 3.0) * 0.045 * pow(abs(s), 1.5) * (0.3 + t)
+            + sin(t * 71.0 + s * 4.0 + seed * 9.0) * 0.012 * abs(s);
+    p += nrm * d;
+    p.y *= jSp < 0.5 ? 1.5 : (jSp < 1.5 ? 0.6 : 1.05);
+    p.xz *= 1.0 - 0.25 * cHere * (1.0 - t * 0.5);
+    p += jTentOff(t * 0.8, a, 0.0) * 0.8;
+  } else if (part < 23.5 || part > 27.5) {
+    // tentacles (and their barbs and hooks, which ride on them)
+    float a = aP.z;
     float t = aP.y;
-    p.xz *= 1.0 - 0.25 * c * (1.0 - t * 0.5);
-    float lag = pul - t * 2.0;
-    p.x += sin(uTime * 0.9 + t * 4.0 + aP.z * 2.0 + seed * 3.0) * 0.28 * t + sin(lag) * 0.06 * t;
-    p.z += cos(uTime * 0.8 + t * 3.5 + aP.z * 1.7 + seed * 2.0) * 0.28 * t;
-    p.y *= 1.0 - 0.15 * c * t;
+    float hunt = part > 27.5 ? 1.0 : aP.w;
+    float a2 = jRootA(a);
+    vec3 restRoot = vec3(cos(a) * 0.46, 0.0, sin(a) * 0.46);
+    vec3 local = pos - restRoot;
+    vec3 root = jBell(1.0, a2 / 6.2831853, 0.0) * vec3(0.93, 1.0, 0.93);
+    float c = jC(a2);
+    local.y *= jLen() * (1.0 - 0.15 * c * t) * (1.0 - 0.2 * hunt * smoothstep(0.55, 1.0, t));
+    p = root + local + jTentOff(t, a2, hunt);
+    if (part > 27.5) p += aQ.xyz * (1.0 + 0.3 * step(1.5, jSp));
+  } else if (part < 24.5) {
+    // lens-eyes ride on the margin
+    float a = aQ.x;
+    vec3 restC = vec3(cos(a) * 0.47, 0.035, sin(a) * 0.47);
+    p = pos - restC + jBell(0.94, a / 6.2831853, 0.0) * 0.965;
+  } else if (part < 25.5) {
+    // the velum: a frilled skirt folded in under the margin
+    float k = aP.y, u = aP.z;
+    vec3 rim = jBell(1.0, u, 0.0);
+    vec2 dir = normalize(rim.xz + 1e-5);
+    p = rim + vec3(-dir.x * 0.11 * k, -0.06 * k, -dir.y * 0.11 * k);
+    p.y += sin(u * 6.2831853 * 21.0 + uTime * 1.8 + seed * 9.0) * 0.016 * k;
+    nrm = normalize(vec3(dir.x * 0.3, -1.0, dir.y * 0.3));
+    cHere = jC(u * 6.2831853);
+  } else {
+    // the organ cage
+    p.xz *= 1.0 - 0.16 * cHere;
+    p.y = p.y * mix(1.0, H / 0.42, 0.8);
   }
   mat3 O = R * rotX(-iC.x) * rotZ(iC.y);
   W = base + O * (p * iB.x);
   nrm = O * nrm;
+  info.y = jSp;
   info.z = iB.w;
-  info.w = c;
+  info.w = cHere;
 #elif KIND == 7
   // ---- mantas: slow wing beats as a wave running from the leading edge out to the tips (the tips
   // lag and curl), the inner wing beating less in a turn; cephalic lobes rolled into horns while
@@ -225,7 +339,7 @@ void main() {
     vec3 d = vec3(side * mix(0.35, 0.15, feed), -1.0, 0.0);
     d = normalize(d - f * dot(d, f));
     vec3 nn = normalize(cross(f, d)) * side;
-    float L = mix(0.16, 0.2, feed);
+    float L = mix(0.2, 0.27, feed) * (1.0 + 0.25 * giant);
     float wdt = 0.07 * (0.9 - 0.4 * t * t) + 0.012;
     float s = c * wdt;
     float ang = curl * c * (4.0 + 2.2 * c) * (1.0 - 0.2 * t);
@@ -236,12 +350,40 @@ void main() {
     vec3 tg = d * cos(ang) + nn * sin(ang);
     nrm = normalize(cross(f, tg)) * side;
     thin = 0.8;
-  } else if (part < 32.5) {
-    // the tail trails: a lazy sway, bent out of the turn, the beat arriving late
-    float t = aP.y;
-    p.x += sin(uTime * 1.4 + t * 4.0 + seed * 3.0) * 0.06 * t * t - turn * 0.22 * t * t;
-    p.y += sin(flap - 1.8 - t * 2.6) * 0.07 * t * amp;
-  } else if (part > 34.5) {
+  } else if (part < 32.5 || (part > 35.5 && part < 36.5)) {
+    // the twin tails trail: a lazy sway, bent out of the turn, the beat arriving late; their barbs
+    // ride on them
+    float t = aP.y, side = aP.w;
+    p.x += sin(uTime * 1.4 + t * 4.0 + seed * 3.0 + side * 0.9) * 0.06 * t * t - turn * 0.22 * t * t;
+    p.y += sin(flap - 1.8 - t * 2.6 + side * 0.5) * 0.07 * t * amp;
+    if (part > 32.5) p += aQ.xyz * (1.0 + 0.3 * giant);
+  } else if (part > 36.5 && part < 37.5) {
+    // fangs: the lower row drops with the jaw; the ring round the under-maw splays open to feed
+    float ring = aP.w;
+    if (ring < -0.5) p.y -= feed * 0.05;
+    else if (ring < 0.5) {
+      float a = aQ.w;
+      vec3 rel = p - aQ.xyz;
+      rel = rotAxis(rel, vec3(-sin(a), 0.0, cos(a)), feed * 1.3 + 0.12 * sin(uTime * 1.1 + a * 2.0 + seed * 5.0));
+      nrm = rotAxis(nrm, vec3(-sin(a), 0.0, cos(a)), feed * 1.3);
+      p = aQ.xyz + rel;
+    }
+  } else if ((part > 32.5 && part < 33.5) || (part > 37.5 && part < 38.5)) {
+    // the eyes on stalks peer about on their own
+    float id = part < 33.5 ? aQ.w : aP.z;
+    float k = part < 33.5 ? 1.0 : aP.y;
+    if (id > 0.5) {
+      float sd = sign(aP.w + 1e-4);
+      p += vec3(sin(uTime * 0.9 + id * 2.1 + seed * 7.0 + sd) * 0.012, sin(uTime * 0.6 + id + sd * 2.0) * 0.004, cos(uTime * 0.7 + id * 3.0 + sd) * 0.01) * k;
+    }
+  } else if (part > 38.5) {
+    // horns: the giant's are huge; they flare out when it feeds
+    float side = aP.w;
+    vec3 rel = (p - aQ.xyz) * (1.0 + 0.45 * giant);
+    mat3 Rh = rotZ(-side * (feed * 0.45 + 0.03 * sin(uTime * 0.5 + seed * 4.0)));
+    p = aQ.xyz + Rh * rel;
+    nrm = Rh * nrm;
+  } else if (part > 34.5 && part < 35.5) {
     p.y += sin(flap - 1.2) * 0.012 * aP.y * amp;
   }
   p.y += heave;
@@ -348,6 +490,7 @@ void main() {
   vN = nrm;
   vP = aP;
   vI = info;
+  vQ = aQ;
   gl_Position = projectionMatrix * viewMatrix * vec4(W, 1.0);
 }
 `;
@@ -362,6 +505,7 @@ varying vec3 vWorldPos;
 varying vec3 vN;
 varying vec4 vP;
 varying vec4 vI;
+varying vec4 vQ;
 varying vec3 vLoc;
 
 vec3 hue(float h) { return 0.5 + 0.5 * cos(6.2831 * (h + vec3(0.0, 0.33, 0.67))); }
@@ -478,9 +622,10 @@ void main() {
   trans = 0.8; rim = 0.8;
   emis = c * 0.12 * edge;
 #elif KIND == 7
-  // manta: countershaded (a deep slate-indigo back with pale shoulder patches drawn by hand, a
-  // white belly with this one's own dark spots and five pairs of gill slits), a soft sheen,
-  // light through the thin wing margins, and bioluminescent beads along the wing edges at night
+  // manta of Vur Sok: a charcoal-violet hide stretched over bone struts that fan from the shoulder
+  // to a scalloped trailing edge, veined membranes that glow red when backlit, old claw scars and
+  // leathery tubercles; a pale belly with a fanged under-maw and gill slits that flare as it
+  // breathes; keratin horns, scutes and fangs; small alien eyes with a W-shaped slit
   float fg = vI.y;
   float giant = step(1.5, fg);
   float feed = clamp(fg - giant * 2.0, 0.0, 1.0);
@@ -491,81 +636,161 @@ void main() {
   // hand-drawn wobble shared by every line on the body
   vec2 wob = vec2(vnoise(L2 * 23.0 + seed * 17.0), vnoise(L2.yx * 19.0 + 5.3 + seed * 11.0)) - 0.5;
   float zl = mantaLE(min(ax, 1.0)), zt = mantaTE(min(ax, 1.0));
-  vec3 back = mix(vec3(0.03, 0.038, 0.07), vec3(0.045, 0.04, 0.085), hs);
-  back = mix(back, vec3(0.018, 0.02, 0.03), giant * 0.7);
-  back *= 0.85 + 0.3 * vnoise(L2 * 7.0 + seed * 3.0);
-  // shoulder patches: a crescent set in from the leading edge, wide at the head, tapering out
+  float chord = max(zl - zt, 0.005);
+  float vv = clamp((zl - L2.y) / chord, 0.0, 1.0);
+  float wingK = smoothstep(0.17, 0.26, ax);
+  vec3 back = mix(vec3(0.034, 0.028, 0.045), vec3(0.05, 0.032, 0.05), hs);
+  back = mix(back, vec3(0.028, 0.03, 0.034), giant * 0.75);
+  back *= 0.8 + 0.4 * vnoise(L2 * 7.0 + seed * 3.0);
+  // bone struts fanning from the shoulder (like the fingers of a bat's wing), wandering a little
+  vec2 d0 = vec2(ax, L2.y) - vec2(0.13, 0.22);
+  float r0 = length(d0);
+  float ang = atan(d0.y, d0.x) + 0.05 * sin(r0 * 14.0 + seed * 5.0) + 0.05 * wob.x;
+  float sk = (-0.05 - ang) / 1.4 * 7.0;
+  float sDist = abs(fract(sk + 0.5) - 0.5) * (1.4 / 7.0) * r0;
+  float sW = (0.007 - 0.004 * r0) * (0.8 + 0.4 * vnoise(vec2(r0 * 20.0, sk)));
+  float strut = (1.0 - smoothstep(sW * 0.4, sW, sDist)) * wingK * step(-0.3, sk) * step(sk, 7.3) * smoothstep(0.03, 0.1, r0);
+  // the trailing edge: scalloped between the strut tips (a ragged, torn-looking hem on the giant)
+  if (part < 30.5) {
+    float sc = pow(sin(3.14159 * clamp(fract(sk), 0.0, 1.0)), 0.75) * step(0.0, sk) * step(sk, 7.0);
+    float cut = min(0.4, (0.03 + 0.012 * giant * vnoise(vec2(sk * 3.0, seed * 7.0))) * sc / chord) * smoothstep(0.24, 0.36, ax);
+    if (vv > 1.0 - cut + 0.02 * wob.y) discard;
+  }
+  // fine veins branching across the membrane between the struts
+  float vn = vnoise(L2 * 13.0 + wob * 1.6 + seed * 3.0);
+  float vein = (1.0 - smoothstep(0.0, 0.035, abs(vn - 0.5))) * wingK * (1.0 - strut) * smoothstep(0.1, 0.4, vv);
+  vec3 bone = mix(vec3(0.42, 0.38, 0.33), vec3(0.6, 0.57, 0.5), giant);
+  vec3 dorsal = mix(back, bone * (0.8 + 0.2 * vnoise(L2 * 40.0)), strut * 0.55);
+  dorsal = mix(dorsal, back * 0.55, vein * 0.5);
+  // jagged pale shoulder flashes (each animal its own), inked along their edge
   float dz = zl - L2.y + wob.x * 0.03;
-  float pw = mix(0.1, 0.16, giant) * (1.0 - smoothstep(0.14, mix(0.5, 0.62, giant), ax + wob.y * 0.05));
-  float pin = mix(0.06, 0.09, giant) + 0.012 * sin(ax * 13.0 + seed * 5.0);
+  float pw = mix(0.1, 0.15, giant) * (1.0 - smoothstep(0.14, mix(0.48, 0.6, giant), ax + wob.y * 0.06));
+  float pin = mix(0.06, 0.09, giant) + 0.016 * sin(ax * 23.0 + seed * 5.0) + 0.008 * sin(ax * 61.0);
   float pd = max(pin - dz, dz - pin - pw);
   float patchK = (1.0 - smoothstep(-0.006, 0.008, pd)) * smoothstep(0.08, 0.13, ax + wob.x * 0.02);
-  vec3 pale = mix(vec3(0.42, 0.45, 0.5), vec3(0.78, 0.8, 0.82), giant);
-  vec3 dorsal = mix(back, pale * (0.85 + 0.15 * vnoise(L2 * 30.0)), patchK * mix(0.75, 0.95, giant));
-  // a soft ink line along the patch edge, swelling and thinning
+  vec3 pale = mix(vec3(0.36, 0.37, 0.4), vec3(0.62, 0.62, 0.6), giant);
+  dorsal = mix(dorsal, pale * (0.8 + 0.2 * vnoise(L2 * 30.0)), patchK * 0.8);
   float inkW = 0.004 + 0.004 * vnoise(L2 * 17.0 + 2.0);
   dorsal *= 1.0 - 0.45 * (1.0 - smoothstep(0.0, inkW, abs(pd))) * step(0.11, ax);
-  // belly: white, the margins dusky with a ragged edge
-  vec3 belly = vec3(0.8, 0.82, 0.84);
-  float vv = clamp((zl - L2.y) / max(zl - zt, 0.01), 0.0, 1.0);
+  // old claw scars: sets of three parallel strokes, wobbling, tapered at both ends
+  float scar = 0.0;
+  for (int k = 0; k < 2; k++) {
+    float fk = float(k);
+    if (fk > giant + 0.5 + step(0.6, hs)) break;
+    vec2 c0 = vec2((0.25 + 0.4 * fract(seed * 13.7 + fk * 0.37)) * (fract(seed * 5.3 + fk) < 0.5 ? -1.0 : 1.0), 0.05 - 0.25 * fract(seed * 7.1 + fk * 0.61));
+    float a0 = 6.2831 * fract(seed * 3.3 + fk * 0.21);
+    vec2 dir = vec2(cos(a0), sin(a0)), nor = vec2(-dir.y, dir.x);
+    vec2 q = L2 - c0;
+    float along = dot(q, dir), across = dot(q, nor) + 0.008 * sin(along * 40.0 + fk * 3.0) + 0.006 * wob.y;
+    float len = 0.11 + 0.08 * giant;
+    float taper = 1.0 - smoothstep(len * 0.5, len, abs(along));
+    for (int j = 0; j < 3; j++) {
+      float off = (float(j) - 1.0) * 0.028 + 0.004 * sin(along * 25.0 + float(j));
+      float w = 0.0035 * taper * (0.6 + 0.4 * sin(along * 30.0 + float(j) * 2.0));
+      scar = max(scar, (1.0 - smoothstep(w * 0.4, w, abs(across - off))) * taper);
+    }
+  }
+  dorsal = mix(dorsal, vec3(0.5, 0.42, 0.42), scar * 0.75);
+  // the giant's crust: pale encrusting growths about the head and the wing roots
+  float crust = smoothstep(0.62, 0.8, vnoise(L2 * 16.0 + seed * 9.0)) * smoothstep(0.5, 0.15, length(L2 - vec2(0.0, 0.2))) * giant;
+  dorsal = mix(dorsal, vec3(0.5, 0.48, 0.42) * (0.7 + 0.3 * vnoise(L2 * 90.0)), crust * 0.8);
+  // belly: pale, the margins dusky with a ragged edge, veins showing through the thin wings
+  vec3 belly = vec3(0.74, 0.73, 0.72);
   float marg = max(smoothstep(0.72, 0.95, ax + wob.x * 0.08), smoothstep(0.8, 0.97, vv + wob.y * 0.1) * smoothstep(0.2, 0.4, ax));
   belly = mix(belly, back * 2.2 + 0.04, marg * 0.85);
+  belly = mix(belly, vec3(0.42, 0.2, 0.24), vein * 0.35);
+  belly = mix(belly, bone * 0.8, strut * 0.3);
 #ifndef RAY_FAR
   // this individual's belly spots (blotchy, scattered between the gills and the vent)
   vec2 sq = L2 * 9.0 + wob * 0.45 + seed * 37.0;
-  vec2 sc = floor(sq);
+  vec2 sc2 = floor(sq);
   float spot = 0.0;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec2 cc = sc + vec2(float(i), float(j));
+    vec2 cc = sc2 + vec2(float(i), float(j));
     vec2 h = vec2(hash12(cc), hash12(cc + 7.7));
     float has = step(0.7, hash12(cc + 3.1));
     float rr = 0.14 + 0.22 * h.y;
     spot = max(spot, has * (1.0 - smoothstep(rr * 0.75, rr, length(sq - cc - h))));
   }
   spot *= (1.0 - smoothstep(0.32, 0.45, ax)) * smoothstep(-0.42, -0.25, L2.y) * (1.0 - smoothstep(0.2, 0.32, L2.y));
-  belly = mix(belly, vec3(0.08, 0.08, 0.1), spot * 0.85);
-  // five pairs of gill slits: short curved strokes, tapered at both ends
-  float gk = clamp(floor((0.29 - L2.y) / 0.034 + 0.5), 0.0, 4.0);
+  belly = mix(belly, vec3(0.08, 0.07, 0.09), spot * 0.85);
+  // five pairs of gill slits that flare open and shut as it breathes, raw red inside
+  float breath = 0.5 + 0.5 * sin(uTime * 0.8 + seed * 5.0);
+  float gk = clamp(floor((0.24 - L2.y) / 0.034 + 0.5), 0.0, 4.0);
   float gx = clamp((ax - 0.075) / 0.085, 0.0, 1.0);
-  float gz = 0.29 - gk * 0.034 - 0.02 * gx + 0.018 * (gx - 0.5) * (gx - 0.5) + wob.x * 0.006;
-  float gw = 0.0045 * pow(sin(3.14159 * gx), 0.7) * (1.0 - 0.15 * gk) * (0.7 + 0.6 * vnoise(vec2(ax * 40.0, gk)));
-  float gill = (1.0 - smoothstep(gw * 0.5, gw, abs(L2.y - gz))) * step(0.075, ax) * step(ax, 0.16);
-  belly = mix(belly, vec3(0.12, 0.1, 0.12), gill);
+  float gz = 0.24 - gk * 0.034 - 0.02 * gx + 0.018 * (gx - 0.5) * (gx - 0.5) + wob.x * 0.006;
+  float gw = 0.0045 * pow(sin(3.14159 * gx), 0.7) * (1.0 - 0.15 * gk) * (0.7 + 0.6 * vnoise(vec2(ax * 40.0, gk))) * (0.7 + 1.6 * breath + feed);
+  float gd = abs(L2.y - gz);
+  float gill = (1.0 - smoothstep(gw * 0.5, gw, gd)) * step(0.075, ax) * step(ax, 0.16);
+  belly = mix(belly, mix(vec3(0.42, 0.05, 0.06), vec3(0.06, 0.02, 0.03), smoothstep(gw * 0.6, 0.0, gd)), gill);
+  // the under-maw: a puckered, fleshy ring of lips round a dark throat (it gapes to feed)
+  float md = length((L2 - vec2(0.0, 0.3)) * vec2(1.0, 0.83)) + 0.004 * sin(atan(L2.y - 0.3, L2.x) * 10.0);
+  float mr = 0.03 + 0.022 * feed;
+  belly = mix(belly, vec3(0.5, 0.2, 0.22), (1.0 - smoothstep(0.004, 0.012, abs(md - mr - 0.012))) * 0.8);
+  belly = mix(belly, vec3(0.05, 0.01, 0.02), 1.0 - smoothstep(mr - 0.006, mr, md));
 #endif
   // the dark back wraps over the rims (leading edge, tips and the tail root) onto the belly a little
   float topW = smoothstep(-0.6, -0.15, topK + wob.y * 0.3);
   albedo = mix(belly, dorsal, topW);
-  // the mouth: a dark slot across the front of the head, a gaping funnel when feeding
+  // leathery tubercles and the raised struts
+  N = normalize(N + (vec3(vnoise(L2 * 140.0), 0.0, vnoise(L2.yx * 140.0 + 3.0)) - 0.5) * 0.18 + vec3(0.0, strut * 0.15, 0.0));
+  // the terminal mouth: a dark slot across the front of the head, a gaping funnel when feeding
   if (part < 30.5) {
     float mouth = (1.0 - smoothstep(0.095, 0.12, ax + wob.x * 0.01)) * (1.0 - smoothstep(0.1 + feed * 0.55, 0.16 + feed * 0.6, abs(topK + 0.08)));
     mouth *= 1.0 - smoothstep(0.0, 0.035 + feed * 0.04, vP.y);
-    albedo = mix(albedo, vec3(0.025, 0.02, 0.03), mouth);
+    albedo = mix(albedo, vec3(0.025, 0.01, 0.015), mouth);
   }
-  if (part > 30.5 && part < 31.5) albedo = mix(dorsal, belly * 0.7, 0.35);
-  if (part > 31.5 && part < 32.5) albedo = back * 1.1;
-  if (part > 32.5 && part < 33.5) {
-    // eyes: dark and glossy, a faint golden ring
-    vec3 en = normalize(vLoc - vec3(sign(vLoc.x) * 0.19, 0.012, 0.36));
-    float side = abs(en.x);
-    albedo = mix(vec3(0.05, 0.04, 0.035), vec3(0.01), smoothstep(0.6, 0.8, side));
-    albedo += vec3(0.25, 0.18, 0.06) * smoothstep(0.45, 0.55, side) * (1.0 - smoothstep(0.6, 0.7, side));
-    spec = 1.0; gloss = 0.95;
-  } else { spec = 0.32; gloss = 0.62; }
-  if (part > 33.5) albedo = back;
+  spec = 0.32; gloss = 0.62;
+  if (part > 30.5 && part < 31.5) {
+    // cephalic lobes: split into two hooked tines, the inner face raw pink
+    float t = vP.y, c = vP.z;
+    if (t > 0.45 && abs(c - 0.5) < 0.16 * (t - 0.45) / 0.55) discard;
+    if (c > 0.9 - 0.12 * pow(fract(t * 6.0 + 0.3), 2.0) * smoothstep(0.2, 0.4, t)) discard;
+    albedo = mix(dorsal, vec3(0.42, 0.22, 0.24), smoothstep(0.3, 1.0, c) * 0.6);
+  } else if (part > 31.5 && part < 32.5) {
+    // the tails: dark, ringed pale toward the root
+    float t = vP.y;
+    albedo = back * 1.1;
+    albedo = mix(albedo, bone * 0.7, smoothstep(0.6, 0.9, sin(t * 70.0 + wob.x * 2.0)) * smoothstep(0.45, 0.1, t) * 0.6);
+  } else if (part > 32.5 && part < 33.5) {
+    // eyes: wet black with a molten amber iris and a W-shaped slit
+    vec3 ec = vQ.xyz;
+    float side = sign(ec.x);
+    vec3 axE = vQ.w > 0.5 ? normalize(vec3(side * 0.5, 0.8, 0.35)) : normalize(vec3(side, 0.25, 0.25));
+    vec3 e = normalize(vLoc - ec);
+    float cosA = dot(e, axE);
+    vec3 rv = normalize(cross(vec3(0.0, 1.0, 0.0) + vec3(0.0, 0.0, 0.3), axE));
+    vec3 uv3 = cross(axE, rv);
+    vec2 q = vec2(dot(e, rv), dot(e, uv3));
+    float iris = smoothstep(0.5, 0.62, cosA);
+    float slit = (1.0 - smoothstep(0.035, 0.06, abs(q.y + 0.07 * cos(q.x * 16.0) - 0.02))) * smoothstep(0.7, 0.8, cosA);
+    vec3 irisC = mix(vec3(0.85, 0.42, 0.06), vec3(0.95, 0.75, 0.2), smoothstep(0.62, 0.95, cosA)) * (0.65 + 0.35 * sin(atan(q.y, q.x) * 21.0 + cosA * 30.0));
+    albedo = mix(vec3(0.01), irisC, iris);
+    albedo = mix(albedo, vec3(0.0), slit);
+    spec = 1.3; gloss = 0.95;
+  } else if (part > 33.5 && part < 34.5) {
+    // the dorsal fin, and the scutes: ridged keratin, dark at the root, worn pale at the point
+    albedo = vP.w > 1.5 ? mix(back * 1.4, bone * 0.9, smoothstep(0.2, 1.0, vP.y)) * (0.85 + 0.15 * sin(vP.y * 40.0 + vLoc.z * 90.0)) : back;
+    spec = 0.4; gloss = 0.6;
+  } else if (part > 34.5 && part < 35.5) {
+    albedo = back;
+  } else if (part > 35.5 && part < 37.5) {
+    // barbs and fangs: yellowed ivory, translucent toward the point
+    float t = part < 36.5 ? vQ.w : vP.y;
+    albedo = mix(vec3(0.3, 0.18, 0.16), vec3(0.85, 0.8, 0.66), smoothstep(0.0, 0.5, t));
+    spec = 0.7; gloss = 0.85; trans = 0.5;
+  } else if (part > 37.5 && part < 38.5) {
+    albedo = mix(back * 1.3, belly * 0.6, 0.2);
+  } else if (part > 38.5) {
+    // horns: ridged keratin with growth rings and chips, a dark base fading to pale worn tips
+    float t = vP.y;
+    float ringH = 0.82 + 0.18 * smoothstep(0.3, 0.9, sin(t * 85.0 + vnoise(vLoc.xy * 80.0) * 3.0));
+    albedo = mix(vec3(0.05, 0.045, 0.045), mix(bone, vec3(0.78, 0.74, 0.64), giant), smoothstep(0.15, 1.0, t)) * ringH;
+    albedo *= 0.85 + 0.3 * vnoise(vLoc.xy * 200.0);
+    spec = 0.5; gloss = 0.7;
+  }
   rim = 0.55; wrap = 0.24;
-  trans = 0.15 + 1.1 * thin;
-  // bioluminescent beads in rows along the leading and trailing edges of the outer wings
-  float rowL = abs(dz - 0.028 - wob.y * 0.004);
-  float cL = (fract(ax / 0.042 + wob.x * 0.2) - 0.5) * 0.042;
-  float beadL = (1.0 - smoothstep(0.004, 0.009, length(vec2(cL, rowL)))) * smoothstep(0.28, 0.4, ax) * (1.0 - smoothstep(0.92, 0.98, ax));
-  float dzt = L2.y - zt;
-  float cT = (fract(ax / 0.05 + 0.5 + wob.y * 0.2) - 0.5) * 0.05;
-  float beadT = (1.0 - smoothstep(0.003, 0.008, length(vec2(cT, abs(dzt - 0.022))))) * smoothstep(0.35, 0.5, ax) * (1.0 - smoothstep(0.9, 0.97, ax));
-  float bead = max(beadL, beadT) * smoothstep(-0.2, 0.3, topK);
-  float nightK = smoothstep(0.3, 0.8, uNight);
-  vec3 bc = mix(vec3(0.25, 0.85, 1.0), vec3(0.55, 0.45, 1.0), hs);
-  emis = bc * bead * nightK * (0.55 + 0.45 * sin(uTime * 1.1 - ax * 9.0 + seed * 20.0)) * 1.4;
-  emis += bc * 0.05 * nightK * smoothstep(0.85, 1.0, ax) * topW;
+  trans = max(trans, 0.15 + 1.1 * thin * (1.0 - strut));
 #elif KIND == 8
   // ---- lantern puffer: a map-puffer maze of hand-drawn dark lines over olive-gold skin, a pale
   // belly with wavy pinstripes, photophores that wake at night or when it puffs up, glossy eyes
@@ -724,37 +949,103 @@ void main() {
 #endif
 
 #if KIND == 6
-  // jellies: additive glass, lit at the rim and from their glowing organs
+  // jellies: glass that glows from within, premultiplied so their pigment, eyes and hooks can
+  // darken what is behind them. Three species, three palettes (apex core, body, margin).
   float fres = pow(1.0 - abs(dot(N, V)), 2.0);
-  vec3 c = mix(uGlow, hue(0.55 + hs * 0.4), 0.5);
+  float sp = vI.y;
   float pulse = vI.w;
   float flare = vI.z;
+  vec3 cA, cB, cR;
+  if (sp < 0.5) { cA = vec3(1.0, 0.28, 0.42); cB = vec3(0.32, 0.5, 0.95); cR = vec3(0.4, 1.0, 0.88); }
+  else if (sp < 1.5) { cA = vec3(1.0, 0.52, 0.14); cB = vec3(0.8, 0.3, 0.55); cR = vec3(0.32, 0.82, 1.0); }
+  else { cA = vec3(0.62, 0.32, 1.0); cB = vec3(0.22, 0.72, 0.66); cR = vec3(0.8, 1.0, 0.5); }
+  cB = mix(cB, uGlow, 0.15);
+  float sunK = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);
+  float lit = 0.3 + 0.7 * max(dot(N, uSunDir), 0.0) * sunK;
   vec3 col;
+  float alpha;
   if (part < 20.5) {
-    float rimK = vP.y;
-    // radial canals drawn by hand (they wander and fade), four horseshoe gonads round the apex,
-    // and a wobbling ring canal just inside the scalloped margin
-    float az = vP.z * 6.2831;
-    float wa = az + 0.06 * sin(rimK * 9.0 + az * 3.0 + hs * 6.0);
-    float ribs = smoothstep(0.6, 1.0, abs(sin(wa * 8.0))) * smoothstep(0.1, 0.45, rimK);
-    float lobes = smoothstep(0.55, 0.95, cos(az * 4.0 + 0.4 + 0.2 * sin(rimK * 12.0))) * smoothstep(0.12, 0.28, rimK) * smoothstep(0.58, 0.36, rimK);
-    float ringC = smoothstep(0.035, 0.0, abs(rimK - 0.86 - 0.015 * sin(az * 11.0 + hs * 5.0)));
-    col = c * (0.08 + fres * 0.7 + ribs * 0.12 * rimK + smoothstep(0.85, 1.0, rimK) * 0.6 + lobes * 0.22 + ringC * 0.3);
-    col += uSunColor * 0.06 * max(dot(N, uSunDir), 0.0);
+    float v = vP.y, u = vP.z, layer = vP.w;
+    float az = u * 6.2831853;
+    vec3 grad = mix(cA, cB, smoothstep(0.0, 0.55, v));
+    grad = mix(grad, cR, smoothstep(0.62, 1.0, v));
+    // radial canals that wander and branch toward the margin, and a wobbling ring canal
+    float nR = sp < 0.5 ? 12.0 : (sp < 1.5 ? 10.0 : 8.0);
+    float wa = az + 0.07 * sin(v * 9.0 + az * 3.0 + hs * 6.0) + 0.05 * (vnoise(vec2(az * 5.0, v * 7.0) + hs * 9.0) - 0.5);
+    float canal = pow(abs(cos(wa * nR * 0.5)), 26.0) * smoothstep(0.05, 0.3, v) * (0.6 + 0.4 * vnoise(vec2(az * 4.0, v * 20.0)));
+    canal = max(canal, pow(abs(cos(wa * nR + 0.4 * sin(v * 7.0 + az))), 34.0) * smoothstep(0.55, 0.82, v) * 0.7);
+    float ringC = smoothstep(0.03, 0.0, abs(v - 0.87 - 0.012 * sin(az * 11.0 + hs * 5.0)));
+    // pigment: bruise-dark clouds about the apex and a band of tiny dark ocelli above the margin
+    float blot = smoothstep(0.52, 0.82, vnoise(vec2(az * 3.0, v * 6.0) + hs * 7.0)) * smoothstep(0.65, 0.15, v);
+    vec2 pq = vec2(az * 10.0, v * 30.0);
+    vec2 pc = floor(pq), pf = fract(pq) - 0.5, pj = hash22(pc + hs * 13.0) - 0.5;
+    float oc = smoothstep(0.3, 0.14, length(pf - pj * 0.4)) * step(0.45, hash12(pc + 2.0)) * smoothstep(0.62, 0.7, v) * smoothstep(0.84, 0.76, v);
+    float glow = 0.05 + 0.42 * fres + canal * 0.45 + ringC * 0.35 + smoothstep(0.9, 1.0, v) * 0.35;
+    if (layer > 0.5) glow = 0.06 + 0.3 * fres + (sp > 1.5 ? 0.3 * smoothstep(0.3, 1.0, v) : 0.0);
+    col = grad * glow;
+    float dark = max(blot * 0.55, oc * 0.85) * (1.0 - layer);
+    col = col * (1.0 - dark) + vec3(0.16, 0.04, 0.08) * dark * lit * 0.25;
+    alpha = 0.05 + 0.32 * fres + canal * 0.12 + dark * 0.6;
+    col += uSunColor * 0.05 * max(dot(N, uSunDir), 0.0) * sunK;
   } else if (part < 21.5) {
-    col = mix(c, vec3(1.0, 0.5, 0.8), 0.5) * (0.6 + 0.4 * pulse);
+    // the gastric organ (deep wine, veined) and the gonads that hold the light
+    if (vP.w > 0.5) { col = cA * (0.55 + 0.25 * pulse) * (0.7 + 0.3 * sin(vP.y * 9.0 + hs * 4.0)); alpha = 0.45; }
+    else {
+      float vein = smoothstep(0.75, 0.95, abs(sin(vLoc.y * 70.0 + vnoise(vLoc.xz * 30.0) * 4.0)));
+      col = mix(cA * 0.18, cA * 0.6, fres) + cA * vein * 0.2;
+      alpha = 0.55;
+    }
   } else if (part < 22.5) {
-    col = c * (0.25 + 0.3 * fres);
+    // oral curtains: thin frills, darker at their ruffled edges
+    float s2 = abs(vP.w), t = vP.y;
+    col = mix(cA, cB, t * 0.6) * (0.1 + 0.32 * s2 * s2) * (1.0 - 0.5 * t);
+    float edgeD = smoothstep(0.7, 1.0, s2) * (0.5 + 0.5 * vnoise(vec2(t * 40.0, vP.z * 3.0)));
+    col = col * (1.0 - edgeD * 0.6) + vec3(0.14, 0.02, 0.06) * edgeD * lit * 0.3;
+    alpha = 0.1 + 0.3 * s2 * s2 + edgeD * 0.25;
+  } else if (part < 23.5) {
+    // tentacles: the hunting ones banded with dark stinging batteries
+    float t = vP.y, hunt = vP.w;
+    col = mix(cR, cA, t) * (0.26 - 0.12 * t);
+    alpha = 0.22 * (1.0 - 0.55 * t);
+    float band = smoothstep(0.55, 0.85, sin(t * 90.0 + vnoise(vec2(t * 30.0, vP.z)) * 3.0)) * hunt * smoothstep(0.2, 0.4, t);
+    col = col * (1.0 - band * 0.7) + vec3(0.2, 0.03, 0.06) * band * lit * 0.4;
+    alpha += band * 0.5 + hunt * 0.15;
+  } else if (part < 24.5) {
+    // lens-eyes: dark lenses with an amber iris round a slit pupil
+    vec2 q = vP.zw;
+    float d = length(q);
+    float pupil = smoothstep(0.3, 0.2, length(q * vec2(1.0, 0.45)));
+    float iris = smoothstep(0.85, 0.7, d);
+    col = mix(vec3(0.02, 0.01, 0.015), vec3(0.75, 0.45, 0.1) * (0.55 + 0.45 * sin(atan(q.y, q.x) * 13.0 + d * 9.0)) * 0.4, iris);
+    col = mix(col, vec3(0.0), pupil);
+    col *= 0.6 + 0.4 * lit;
+    col += vec3(0.6, 0.7, 0.75) * pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 40.0) * 0.15;
+    alpha = 0.9;
+  } else if (part < 25.5) {
+    // the velum: a scalloped skirt
+    float k = vP.y, u = vP.z;
+    float edge = 0.62 + 0.38 * pow(abs(cos(u * 6.2831853 * 14.0 + 0.5 * sin(u * 37.0 + hs * 5.0))), 0.6);
+    if (k > edge) discard;
+    col = cR * (0.08 + 0.28 * k);
+    alpha = 0.08 + 0.18 * k;
+  } else if (part < 27.5) {
+    // the organ cage: pale cartilage hoops
+    col = vec3(0.82, 0.78, 0.7) * 0.22 * lit + cB * 0.12 + cB * fres * 0.2;
+    alpha = 0.5;
   } else {
-    col = c * 0.35 * (1.0 - vP.y * 0.7);
+    // barbs and the claw: amber horn, dark at the points
+    float tt = vQ.w;
+    col = mix(vec3(0.75, 0.55, 0.3), vec3(0.08, 0.04, 0.03), smoothstep(0.3, 1.0, tt)) * 0.35 * lit;
+    alpha = 0.85;
   }
-  col *= (1.1 + 1.2 * uNight) * (1.0 + flare * 2.5) * (0.8 + 0.5 * pulse);
-  // through the water: glow fades with the path, and the surface dims it seen from above
+  // steady glow (no flicker): brighter at night, flaring when startled, swelling with each beat
+  col *= (1.0 + 1.0 * uNight) * (1.0 + flare * 1.6) * (0.88 + 0.24 * pulse);
+  // through the water: the light fades with the path, and the surface dims it seen from above
   float dist = length(vWorldPos - uCamPos);
   vec3 T = exp(-uWaterAbsorb * dist * mix(0.0, 1.0, uUnderwater) * 0.8);
   float above = (1.0 - uUnderwater) * step(vWorldPos.y, uSeaLevel);
   T *= mix(vec3(1.0), exp(-uWaterAbsorb * max(uSeaLevel - vWorldPos.y, 0.0) * 2.0) * 0.5, above);
-  gl_FragColor = vec4(col * T, 1.0);
+  gl_FragColor = vec4(col * T, clamp(alpha, 0.0, 1.0) * dot(T, vec3(0.333)));
 #else
   Surface sf = makeSurface(albedo, N, vWorldPos);
   sf.ao = ao; sf.rim = rim; sf.trans = trans; sf.spec = spec; sf.gloss = gloss; sf.wrap = wrap;
@@ -764,7 +1055,7 @@ void main() {
   // light through the thin wing margins and lobes (backlit or lit from the far side), and the
   // surface caustics dancing over the dark back in shallow water
   float tb7 = pow(max(dot(-V, uSunDir), 0.0), 2.0) + 0.4 * max(-dot(N, uSunDir), 0.0);
-  col += vec3(0.16, 0.3, 0.38) * uSunColor * thin * tb7 * 0.45;
+  col += mix(vec3(0.16, 0.3, 0.38), vec3(0.45, 0.12, 0.1), 0.45) * uSunColor * thin * tb7 * 0.45;
   float dep7 = uSeaLevel - vWorldPos.y;
 #ifndef RAY_FAR
   if (dep7 > 0.15 && N.y > 0.05 && uWaterParams.x > 0.0) {
@@ -804,7 +1095,8 @@ export function reefMaterial(kind, actors, fade = null) {
     }),
     side: kind === 'kelp' || kind === 'fan' || kind === 'eel' || kind === 'puffer' || kind === 'ray' || kind === 'rayFar' || jelly ? DoubleSide : FrontSide,
   };
-  if (jelly) Object.assign(params, { transparent: true, depthWrite: false, blending: AdditiveBlending });
+  // premultiplied: glowing glass adds light, pigment, eyes and hooks darken what lies behind
+  if (jelly) Object.assign(params, { transparent: true, depthWrite: false, blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: OneMinusSrcAlphaFactor });
   return new ShaderMaterial(params);
 }
 

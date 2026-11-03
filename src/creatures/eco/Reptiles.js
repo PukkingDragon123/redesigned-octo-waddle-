@@ -90,7 +90,7 @@ export class ReptileSystem {
     this.birds = [];
     this.pools = { skimmer: new Pool(this, 'skimmer'), coilwing: new Pool(this, 'coilwing') };
     this.poolList = Object.values(this.pools);
-    this._eatOpts = { only: null, sparkles: 1 };
+    this._eatOpts = { only: null, sparkles: 0, quiet: true };
     this._seed = 911;
     this._frame = 0;
     this._roostInfo = new WeakMap();

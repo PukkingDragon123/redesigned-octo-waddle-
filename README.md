@@ -63,11 +63,22 @@ and hold to gather a sonic boom, flick sideways to roll, three-finger tap to pau
 Flick up for a loop, flick down for a tail slap, tap with two fingers to spout, and
 double-tap quickly to dash. A single quick tap bites.
 
+A newborn can only swim, steer, roll and bite. Your voice (hum), spout, tail slap, loop, dash,
+breach and sonic boom are learnt from your mother in short scenes during the first act; until
+then, trying one is a cute failed attempt.
+
+Some scenes ask for a quick response, shown only as a hand-drawn cue, never a button name: a
+closing ring (press as it meets the mark), a shuddering ring (press again and again), a filling
+ring (hold) or a brush stroke (steer that way). Any action input works: Space, Enter, a click, a
+tap or the A button. A miss never fails the scene; it only changes how it plays out.
+
 Controls are also listed under **Settings → Controls** in the floating title menu. That
 menu is the only place text ever appears.
 
 ### Things to try
 
+- Kick yourself free of the egg, then nuzzle back when your mother wraps her flippers around you.
+- When the skimmers and lanternjacks come in the Dawn Lagoon, stick to her side.
 - Stay with your mother and eat. You grow hungry: a hungry calf flies weakly and the world
   dims. Ride her slipstream just behind her wing; stray too far and it turns cold and
   lonely, and the lanternjacks and skimmers grow bold. When you are hungry she leads you to

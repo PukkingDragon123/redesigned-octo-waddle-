@@ -453,7 +453,10 @@ export class Abilities {
     });
     C.slowmo(0.75);
     C.setFocus(calf);
-    yield* this._play(C.blend(two, C.orbit({ center: calf, radius: [14, 34], height: [3, 16], angle: [calf.yaw - 0.9, calf.yaw - 0.5], fov: [42, 46], look: mom })), 4.2);
+    // the rise frames the pair (between them, nearer the calf), so neither drops out of frame
+    const pair = { pos: new Vector3() };
+    const rise = C.orbit({ center: calf, radius: [14, 34], height: [3, 16], angle: [calf.yaw - 0.9, calf.yaw - 0.5], fov: [42, 46], look: pair });
+    yield* this._play(C.blend(two, (k, t, s) => { pair.pos.copy(calf.pos).lerp(mom.pos, 0.35); rise(k, t, s); }), 4.2);
     C.slowmo(1);
     G.uSongAmp.value = 0;
     for (const w of herd.adults) w.drive.sing = 0;

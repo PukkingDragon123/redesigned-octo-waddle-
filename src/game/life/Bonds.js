@@ -344,6 +344,10 @@ export class Bonds {
     turnC.copy(mom.pos).addScaledVector(mom.right, side * 34);
     turn = 1;
     S.life.autoGoal = () => leeOf(mom);
+    // hand back to play facing her, the view leaning on her while you stick to her side
+    S.player?.syncAim?.();
+    if (S.player) S.player.aimPitch = Math.max(-0.25, Math.min(0.15, S.player.aimPitch));
+    S.camHint = { pos: mom.pos, w: 0.35, max: 10, until: g.time + 10 };
     let stuck = 0;
     for (let i = 0; i < 2; i++) {
       leeOf(mom);
@@ -365,6 +369,7 @@ export class Bonds {
       S.voiceCall(mom, i ? 'roar' : 'warn');
       yield 0.6;
     }
+    S.camHint = null;
     // something strikes: a lure flashes from below, wings rake past
     calf.anim.flinch?.(1.2);
     calf.drive.fear = 1;

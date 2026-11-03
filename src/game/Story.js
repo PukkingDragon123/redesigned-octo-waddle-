@@ -1630,7 +1630,9 @@ export class Story {
       if (this.calfWater && this.calfWater.depth > 0) { opts.distance = 7; opts.busy = true; }
       this.needs?.camera(opts);
       // the mother's lessons lean the view gently toward her (or what she is showing)
-      const lh = this.activities?.lessons?.camHint;
+      // a scene may lean the view for a few seconds (src/game/life/Bonds.js); it expires by itself
+      const sh = this.camHint && g.time < this.camHint.until ? this.camHint : null;
+      const lh = sh || this.activities?.lessons?.camHint;
       if (lh && !opts.lookBias) { opts.lookBias = lh.pos; opts.lookBiasW = lh.w; opts.lookBiasMax = lh.max; }
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
     }

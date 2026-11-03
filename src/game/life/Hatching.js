@@ -55,6 +55,8 @@ const AX = { x: new Vector3(), y: new Vector3(), z: new Vector3(), crown: new Ve
  */
 function* film(C, fn, dur, until = null, onFrame = null, maxT = 30, sway = null) {
   let t = 0;
+  // the frame is set before the first yield, so the camera never sees a stale shot
+  fn(0, 0, C.shot);
   for (;;) {
     const dt = yield 0;
     t += dt;
@@ -83,7 +85,7 @@ export function* kickFree(S, egg, eggAt) {
   C.sway = 0.5;
   S.audio.setIntensity?.(0.3);
   egg.setPulse?.(1.3);
-  egg.setGlow?.(0.9);
+  egg.setGlow?.(1.35);
   let crack = Math.max(0.08, egg._crackTarget || 0);
   egg.crack?.(crack);
   // the egg's own frame: x along its length, y up, z across (the embryo's curl lies in x-y, so it
@@ -152,15 +154,15 @@ export function* kickFree(S, egg, eggAt) {
   };
 
   // 1. inside, close: the curled calf behind the membrane
-  yield* film(C, eggShot({ off: [[0.7, 0.35], [0.25, 0.1], [2.95, 2.6]], look: [[0.15, 0.05], 0, 0], fov: [31, 27] }), 2.6, null, heart(1.25, 0.4));
+  yield* film(C, eggShot({ off: [[0.9, 0.4], [0.3, 0.12], [4.1, 3.3]], look: [[0.15, 0.05], 0, 0], fov: [33, 28] }), 2.6, null, heart(1.25, 0.4));
   // 2. the first kick, on the beat
-  const close = eggShot({ off: [[0.35, 0.2], [0.1, 0.05], [2.6, 2.45]], look: [0.05, 0.05, 0], fov: [27, 25.5] });
+  const close = eggShot({ off: [[0.4, 0.25], [0.12, 0.06], [3.3, 3.0]], look: [0.05, 0.05, 0], fov: [28, 26] });
   let weak = 0;
   const hP = Q ? Q.press({ at: eggAt, lead: 1.5, window: 0.45, retry: 2, onMiss: (h, again) => { if (again) { egg.embryo?.kick?.(0.45); weak++; } } }) : { done: true, ok: true };
   yield* film(C, close, 6, () => hP.done, null, 14);
   if (hP.ok) { kick(1.5, 0.2); hitStop(); } else kick(0.8, 0.12);
   // the crack takes the light in
-  yield* film(C, eggShot({ off: [[0.2, 0.0], [0.05, 0.15], [2.45, 2.25]], look: [0.05, [0.05, 0.35], 0], fov: [25.5, 24] }), 0.9);
+  yield* film(C, eggShot({ off: [[0.25, 0.0], [0.06, 0.2], [3.0, 2.7]], look: [0.05, [0.05, 0.35], 0], fov: [26, 24] }), 0.9);
   // 3. frantic kicks: the profile, then a glimpse from beneath
   const profile = eggShot({ off: [[1.4, 0.7], [0.5, 0.7], [5.4, 4.5]], look: [0, 0.15, 0], fov: [35, 31], roll: [0.03, -0.02] });
   const below = (k, t, s) => {

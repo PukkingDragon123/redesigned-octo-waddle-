@@ -19,6 +19,8 @@ const KRILL = { pos: new Vector3(), vel: new Vector3(), life: 1, size: 0.05, siz
 
 function* film(C, fn, dur, until = null, onFrame = null, maxT = 30) {
   let t = 0;
+  // the frame is set before the first yield, so the camera never sees a stale shot
+  fn(0, 0, C.shot);
   for (;;) {
     const dt = yield 0;
     t += dt;

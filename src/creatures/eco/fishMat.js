@@ -195,6 +195,7 @@ void main() {
   // ---- the jaw: the lanternjack's lower jaw (everything below the gape line in front of the jaw
   // joint, and the lower fangs) drops and splays; the lips tear apart over a dark gullet
   float jawK = 0.0;
+  vJaw = 0.0;
 #if SPECIES == 2
   float gapeA = iMisc.w;
   {
@@ -202,7 +203,9 @@ void main() {
     float mz = smoothstep(JAW_Z - 0.004, JAW_Z + 0.03, zj);
     float dyj = position.y - jackMouth(zj);
     // the mandible swings fully; the throat skin under it follows only part way (a gular pouch)
-    if (part < 0.5) jawK = (1.0 - smoothstep(-0.0015, 0.0025, dyj)) * mz * (0.35 + 0.65 * smoothstep(-0.12, -0.05, dyj));
+    float below = (1.0 - smoothstep(-0.0015, 0.0025, dyj)) * mz;
+    if (part < 0.5) jawK = below * (0.35 + 0.65 * smoothstep(-0.12, -0.05, dyj));
+    vJaw = part < 0.5 ? below : 0.0;
     else if (part > 10.5 && aF.w > 0.5 && aF.w < 1.5) jawK = mz;
     if (jawK > 0.0 && gapeA > 0.001) {
       vec3 hj = vec3(0.0, JAW_Y, JAW_Z);
@@ -244,7 +247,6 @@ void main() {
   vFwd = B[2];
   vMisc = vec4(flare, special, iMisc.w, px);
   vSeed = vec4(iSeed.x, iSeed.z, iSeed.w, len);
-  vJaw = jawK;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
 `;

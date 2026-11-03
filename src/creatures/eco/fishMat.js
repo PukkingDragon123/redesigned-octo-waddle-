@@ -128,7 +128,7 @@ void main() {
       pr = rotX(-fold) * pr;
       // the corkscrew: each ray leans further round the body axis than the one before it, and
       // twists along its own length, so the crest winds like a helix down the back
-      float twist = (aR.w - 0.45) * 1.9 + s * s * 0.8 + 0.1 * sin(ph * 0.4 + aR.w * 5.0);
+      float twist = (aR.w - 0.45) * 2.7 + s * s * 1.1 + 0.1 * sin(ph * 0.4 + aR.w * 5.0);
       mat3 Rt = rotZ(twist * (0.55 + 0.45 * max(special, 0.4)));
       pr = Rt * pr;
       n = Rt * n;
@@ -204,8 +204,8 @@ void main() {
     float dyj = position.y - jackMouth(zj);
     // the mandible swings fully; the throat skin under it follows only part way (a gular pouch)
     float below = (1.0 - smoothstep(-0.0015, 0.0025, dyj)) * mz;
-    if (part < 0.5) jawK = below * (0.35 + 0.65 * smoothstep(-0.12, -0.05, dyj));
     vJaw = part < 0.5 ? below : 0.0;
+    if (part < 0.5) jawK = below * (0.35 + 0.65 * smoothstep(-0.12, -0.05, dyj));
     else if (part > 10.5 && aF.w > 0.5 && aF.w < 1.5) jawK = mz;
     if (jawK > 0.0 && gapeA > 0.001) {
       vec3 hj = vec3(0.0, JAW_Y, JAW_Z);
@@ -472,10 +472,10 @@ void main() {
         float zk = opz + 0.008 + float(k) * 0.0065 + 0.002 * cos(phi * 2.0 + float(k));
         ga = max(ga, smoothstep(0.0022, 0.0, abs(L.z - zk - 0.004 * cos(phi * 1.6))) * smoothstep(0.6, 1.0, phi) * smoothstep(2.6, 2.1, phi));
       }
-      vec3 deep = mix(vec3(0.03, 0.07, 0.09), back * 0.25, 0.3);
+      vec3 deep = mix(vec3(0.05, 0.11, 0.13), back * 0.3, 0.3);
       vec3 inner = deep;
-      inner = mix(inner, vec3(0.5, 0.48, 0.42), brain * 0.35);
-      inner = mix(inner, vec3(0.82, 0.8, 0.72), max(max(brainRim * 0.7, orbit), max(maxilla, dentary) * 0.8));
+      inner = mix(inner, vec3(0.55, 0.52, 0.46), brain * 0.5);
+      inner = mix(inner, vec3(0.9, 0.88, 0.8), max(max(brainRim * 0.9, orbit), max(maxilla, dentary) * 0.9));
       inner = mix(inner, vec3(0.55, 0.06, 0.07), ga * 0.85);
       albedo = mix(albedo, inner, glass);
       mirror *= 1.0 - glass * 0.85;
@@ -535,8 +535,8 @@ void main() {
     float bw = vnoise(vec2(t * 26.0, phi * 5.0) + seed * 3.0);
     float barF = t * 8.5 + 0.18 * sin(phi * 2.6 + seed * 4.0 + t * 9.0) + 0.22 * bw;
     float bars = smoothstep(0.3, 0.12, abs(fract(barF) - 0.5) - 0.06 * sin(phi * 7.0 + t * 30.0)) * smoothstep(2.3, 1.2, phi) * smoothstep(0.1, 0.2, t) * smoothstep(0.86, 0.68, t);
-    bars *= smoothstep(0.25, 0.55, vnoise(vec2(t * 14.0 + seed, phi * 2.2)) + 0.25);
-    albedo = mix(albedo, back * 0.3, bars * 0.75);
+    bars *= smoothstep(0.2, 0.5, vnoise(vec2(t * 14.0 + seed, phi * 2.2)) + 0.3);
+    albedo = mix(albedo, back * 0.18, bars * 0.9);
     mirror = mix(0.36, 0.04, dors) * (1.0 - head * 0.85) * (1.0 - bars * 0.7);
     mirTint = mix(vec3(1.05, 0.88, 0.66), vec3(0.95), belly);
     // scale margins: a little darker
@@ -564,14 +564,14 @@ void main() {
     float armour = max(head, smoothstep(0.24, 0.3, L.z) * smoothstep(1.0, 0.55, phi));
 #ifdef NEAR
     if (armour > 0.01 && px > 18.0) {
-      vec4 pc = plateCells(vec2(L.z * 58.0, phi * (3.4 + 1.2 * smoothstep(0.9, 0.2, phi))) + seed * 11.0);
-      float sw = 0.05 + 0.04 * vnoise(vec2(L.z * 300.0, phi * 30.0));
-      float suture = smoothstep(sw, sw * 0.3, pc.x);
+      vec4 pc = plateCells(vec2(L.z * 36.0, phi * (2.4 + 0.8 * smoothstep(0.9, 0.2, phi))) + seed * 11.0);
+      float sw = 0.035 + 0.03 * vnoise(vec2(L.z * 200.0, phi * 20.0));
+      float suture = smoothstep(sw, sw * 0.3, pc.x) * smoothstep(30.0, 90.0, px);
       float worn = smoothstep(0.08, 0.2, pc.x) * smoothstep(0.32, 0.18, pc.x);
       vec3 plate = mix(back * 1.05 + vec3(0.04, 0.035, 0.03), vec3(0.5, 0.47, 0.42) * 0.55, 0.35 + 0.3 * pc.y);
       plate *= 0.75 + 0.35 * fbm2(vec2(L.z * 140.0, phi * 14.0) + pc.y * 9.0);
       plate = mix(plate, plate * 1.35 + vec3(0.03), worn * 0.5);
-      plate = mix(plate, vec3(0.012, 0.01, 0.01), suture * 0.9);
+      plate = mix(plate, vec3(0.02, 0.016, 0.015), suture * 0.8);
       float ak = armour * smoothstep(18.0, 50.0, px);
       albedo = mix(albedo, plate, ak);
       N = normalize(N + (T * pc.z * 0.5 - U * pc.w * 0.5) * ak * (1.0 - suture));
@@ -593,7 +593,6 @@ void main() {
     albedo = mix(albedo, gullet, maw);
     mirror *= 1.0 - max(mouth, maw);
     float irisK = 0.0;
-    float eS = 0.0;
     vec4 eye = fishEye(L, vec3(0.0, EYE_Y, EYE_Z), EYE_R, 0.0, vec3(0.85, 0.5, 0.16), irisK, eyeSpec);
     // the second and third eyes of the cluster: smaller, blood-amber
     float i2, s2, i3, s3;
@@ -717,6 +716,11 @@ void main() {
     float memA = 0.82;
 #elif SPECIES == 1
     float memA = part > 1.5 && part < 2.5 ? 0.78 : 0.66;
+    if (part > 1.5 && part < 2.5) {
+      // the crest's rays stand proud as hooked spines above a torn, notched web
+      float fr = fract(ray * 11.0 + 0.1 * sin(ray * 17.0 + seed * 3.0));
+      edge = min(edge, 1.0 - 0.16 * pow(min(fr, 1.0 - fr) * 2.0, 0.6));
+    }
 #else
     float memA = 0.8;
 #endif

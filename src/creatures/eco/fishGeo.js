@@ -437,7 +437,7 @@ export function buildSpiralback(near = true, hero = false) {
   {
     const n0 = prof(SPIRAL, 0.49);
     const nR = hero ? 12 : near ? 9 : 3, nSg = hero ? 14 : near ? 9 : 2;
-    const L = 0.2, r0 = 0.0125;
+    const L = 0.25, r0 = 0.014;
     const rows = [];
     for (let i = 0; i <= nSg; i++) {
       const u = i / nSg;

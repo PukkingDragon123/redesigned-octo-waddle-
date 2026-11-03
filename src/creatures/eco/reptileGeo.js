@@ -157,7 +157,7 @@ export function buildSkimmer(near = true) {
   // horns: a pair swept back from behind the eyes over the neck (Monster Hunter style)
   for (const side of [1, -1]) {
     const r = [side * 0.016, 0.022, 0.028];
-    spike(B, 2, r, [side * 0.03, 0.05, -0.02], [side * 0.034, 0.045, -0.085], 0.0075, near ? 5 : 3, near ? 4 : 1, 1);
+    spike(B, 2, r, [side * 0.042, 0.052, -0.012], [side * 0.072, 0.066, -0.075], 0.0095, near ? 5 : 3, near ? 4 : 1, 1);
     if (near) {
       // a cheek spur and a brow spike
       spike(B, 2, [side * 0.02, -0.006, 0.05], [side * 0.032, -0.012, 0.03], [side * 0.036, -0.022, 0.004], 0.0045, 4, 2, 1);
@@ -180,8 +180,13 @@ export function buildSkimmer(near = true) {
           const y = Bk.cy(u) + (dir < 0 ? -h * 0.3 : h * 0.36);
           const x = side * Bk.w(u) * 0.85;
           const z = Bk.z(u);
-          const len = (0.011 + 0.012 * Math.sin(Math.min(1, u * 1.6) * Math.PI * 0.85)) * (0.85 + 0.3 * ((k * 7) % 3) / 2);
-          spike(B, part, [x, y, z], [x + side * len * 0.35, y + dir * len * 0.55, z + len * 0.35], [x + side * len * 0.5, y + dir * len * 0.8, z + len * 0.75], 0.0022, 3, 1, 0);
+          // every needle its own: lengths, rake and splay vary (a few broken short)
+          const h1 = (Math.sin(k * 12.9898 + side * 4.1 + part * 7.3) * 43758.5453) % 1;
+          const jit = Math.abs(h1);
+          const len = (0.011 + 0.013 * Math.sin(Math.min(1, u * 1.6) * Math.PI * 0.85)) * (0.6 + 0.75 * jit);
+          const rake = 0.55 + 0.5 * Math.abs((h1 * 7.1) % 1);
+          const spl = 0.25 + 0.45 * Math.abs((h1 * 3.7) % 1);
+          spike(B, part, [x, y, z], [x + side * len * spl * 0.7, y + dir * len * 0.55, z + len * rake * 0.4], [x + side * len * spl, y + dir * len * (0.95 - rake * 0.25), z + len * rake], 0.0022, 3, 1, 0);
         }
       }
     }

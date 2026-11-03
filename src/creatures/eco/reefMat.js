@@ -950,11 +950,16 @@ void main() {
   float alarm = vI.z;
   vec3 Lc = vLoc;
   float morph = hs;
-  vec3 bodyC = morph < 0.55 ? vec3(0.02, 0.09, 0.42) : (morph < 0.8 ? vec3(0.025, 0.028, 0.04) : vec3(0.78, 0.62, 0.08));
-  vec3 finC = morph < 0.8 ? vec3(0.95, 0.78, 0.08) : vec3(0.95, 0.85, 0.3);
+  // an alien moray, not a reef-shop ribbon eel: dark slate, near-black or rust bronze hide, dusky
+  // violet fins edged in blood red
+  vec3 bodyC = morph < 0.55 ? vec3(0.035, 0.07, 0.08) : (morph < 0.8 ? vec3(0.02, 0.022, 0.03) : vec3(0.2, 0.09, 0.035));
+  vec3 finC = morph < 0.8 ? vec3(0.3, 0.2, 0.3) : vec3(0.36, 0.2, 0.16);
   if (part < 50.5) {
     float topK = smoothstep(-0.006, 0.01, Lc.y);
     albedo = bodyC * mix(1.25, 0.75, topK);
+    // leopard mottling: pale, irregular rosettes over the dark hide (thinning toward the belly)
+    float mot = vnoise(vec2(t * 170.0 + seed * 7.0, Lc.y * 950.0)) * 0.65 + vnoise(vec2(t * 420.0, Lc.y * 2300.0 + seed)) * 0.35;
+    albedo = mix(albedo, vec3(0.42, 0.4, 0.3) * (0.6 + 0.4 * morph), smoothstep(0.6, 0.72, mot) * 0.55 * (0.5 + 0.5 * topK));
     // a velvet sheen band along the upper flank
     albedo += bodyC * 0.35 * exp(-pow((Lc.y - 0.007) / 0.004, 2.0));
     // the head: gold jaw and a pale lip line drawn by hand
@@ -983,7 +988,7 @@ void main() {
     float ray = smoothstep(0.32, 0.08, abs(fract(t * spF + s * 0.25) - 0.5)) * smoothstep(0.05, 0.3, s);
     albedo = finC * (1.0 - ray * 0.3);
     float marg = smoothstep(0.72, 0.9, s + 0.06 * sin(t * 90.0 + seed * 7.0));
-    albedo = mix(albedo, vec3(0.95, 0.95, 0.9), marg * 0.85);
+    albedo = mix(albedo, vec3(0.5, 0.06, 0.08), marg * 0.85);
     albedo = mix(albedo, bodyC, smoothstep(0.25, 0.0, s) * 0.6);
     trans = 1.2; spec = 0.4; gloss = 0.75; rim = 0.7; wrap = 0.4;
     emis += vec3(0.35, 0.95, 1.0) * marg * (0.25 * uNight + alarm * 0.9);

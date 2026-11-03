@@ -445,7 +445,8 @@ export class Bonds {
     // the lens at the back of her mouth, the calf curled before it, the lips' light beyond
     const shot = (k, t, s) => {
       this._place(mom);
-      s.pos.copy(fr.c).addScaledVector(mom.fwd, -fr.s.z * lerp(0.78, 0.7, k)).addScaledVector(mom.up, fr.s.y * 0.55).addScaledVector(mom.right, side * fr.s.x * 0.5);
+      // (kept well inside the cavity's unit ellipsoid: |(x, y, z)| ~ 0.75)
+      s.pos.copy(fr.c).addScaledVector(mom.fwd, -fr.s.z * lerp(0.62, 0.56, k)).addScaledVector(mom.up, fr.s.y * 0.36).addScaledVector(mom.right, side * fr.s.x * 0.3);
       s.look.copy(fr.c).addScaledVector(mom.fwd, fr.s.z).addScaledVector(mom.up, -fr.s.y * 0.12).addScaledVector(mom.right, -side * fr.s.x * 0.1);
       s.fov = lerp(64, 58, k);
       s.roll = 0.04 * Math.sin(t * 0.7) * mom.drive.fear;

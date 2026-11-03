@@ -36,3 +36,27 @@ Files were downloaded from https://bigsoundbank.com/UPLOAD/flac/<id>.flac (or /o
 ### NOAA Northeast Fisheries Science Center, Passive Acoustics Branch - public domain (U.S. Government work)
 
 - sfx/w_chirp1-2, w_coo1-3, w_moan1-5, w_grunt, w_hum.ogg and amb/whalesong.ogg: humpback whale (Megaptera novaeangliae) song, "Meno-song-NOAA-PAGroup-13-humpback-clip.mp3", https://www.fisheries.noaa.gov/s3/2023-04/Meno-song-NOAA-PAGroup-13-humpback-clip.mp3, from "Sounds in the Sea" https://www.fisheries.noaa.gov/national/science-data/sounds-ocean-mammals . Citation: NOAA [National Oceanic and Atmospheric Administration]. Northeast Fisheries Science Center. Passive Acoustics Branch. Humpback whale song.
+
+## Music
+
+### Theme track - "thatgamejam#02 Official Theme Track", composed by Jason Grace
+
+public/music/theme.mp3 is the theme track provided by thatgamecompany for thatgamejam #02 (https://itch.io/jam/thatgamejam-02), used unmodified within this jam entry as the jam's rules allow (encoded to MP3 for the web; no remixing, sampling, chopping, rearranging or re-pitching). It plays whole at the title and at the ending (src/audio/Soundtrack.js). All other music is an original score written for the game in the theme's style (docs/MUSIC.md).
+
+### Score instruments: VS Chamber Orchestra 2 Community Edition (Versilian Studios) - CC0 1.0
+
+Licence: CC0 1.0 Universal (https://github.com/sgossner/VSCO-2-CE/blob/master/LICENSE). Recorded by Sam Gossner and Simon Dalzell; sample cutting by Elan Hickler / Soundemote; the upright piano sampled by Simon Dalzell of Ivy Audio ("Credit to both original author and Versilian Studios is encouraged"). Source: https://github.com/sgossner/VSCO-2-CE (files fetched from raw.githubusercontent.com/sgossner/VSCO-2-CE/master/...).
+
+The notes below were trimmed, faded, mixed to mono, loudness-matched per instrument, resampled to 32 kHz and encoded to Ogg Vorbis (q4); the string sustains were given crossfaded loops. They live in public/audio/music/ (about 2.2 MB in all); src/audio/musicSamples.js maps them, and the game's synthesized instruments stand in when a file is missing.
+
+| public/audio/music/ | Instrument | VSCO-2-CE source files |
+|---|---|---|
+| piano/33-101.ogg (18 notes, every 4 semitones) | Upright piano | Keys/Upright Piano/Player_dyn2_rr1_006...040.wav |
+| harp/35-98.ogg (19 notes) | Concert harp | Strings/Harp/KSHarp_B1...D7_mf.wav |
+| celesta/79-108.ogg (6 notes) | Glockenspiel (plays the score's celesta part) | Percussion/Glock/glock_medium_G4...C7.wav |
+| marimba/41-96.ogg (10 notes) | Marimba | Percussion/Marimba/Marimba_hit_Outrigger_*_loud_01.wav |
+| pizz/36-86.ogg (17 notes) | Cello section pizzicato (low), violin section pizzicato | Strings/Cello Section/pizzT/pizzT_*_v2_RR1.wav, Strings/Violin Section/Pizz/VlnEns_Pizz_*_v2_rr1.wav |
+| stac/36-86.ogg (17 notes) | Cello and violin section spiccato | Strings/Cello Section/spic/spic_*_v2_RR1.wav, Strings/Violin Section/Spic/VlnEns_Spic_*_v2_rr1.wav |
+| strings/36-86.ogg (16 notes, looped) | Cello, viola and violin sections, sustained with vibrato | Strings/Cello Section/susvib/susvib_*_v1_1.wav, Strings/Viola Section/susvib/ViolaEns_susvib_*_v1_1.wav, Strings/Violin Section/susVib/VlnEns_susVib_*_v1.wav |
+| kick/mp.ogg, kick/f.ogg | Concert bass drum | VSCO 1 Percussion/drums/bass/bdrum_mp_1.wav, bdrum_f_1.wav |
+| shaker/a.ogg, shaker/b.ogg | Shaker ("Camo's Shaker") | VSCO 1 Percussion/varWood/Camo's Shaker/shake2.wav, shake5.wav |

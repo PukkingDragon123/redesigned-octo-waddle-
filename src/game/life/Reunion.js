@@ -10,6 +10,9 @@
 import { Vector3 } from 'three';
 import { seaHeight } from '../Swim.js';
 import { clamp, lerp, easeInOutSine } from '../../core/math.js';
+import { clearCam, faceShot } from '../Abilities.js';
+
+let _S = null; // the story, for keeping every lens out of the whales and the rock
 
 const _v = new Vector3();
 const _a = new Vector3();
@@ -21,10 +24,12 @@ function* film(C, fn, dur, until = null, onFrame = null, maxT = 30) {
   let t = 0;
   // the frame is set before the first yield, so the camera never sees a stale shot
   fn(0, 0, C.shot);
+  if (_S) clearCam(_S, C.shot);
   for (;;) {
     const dt = yield 0;
     t += dt;
     fn(easeInOutSine(clamp(t / dur, 0, 1)), t, C.shot);
+    if (_S) clearCam(_S, C.shot);
     C.handheld(C.shot, C.sway);
     onFrame?.(t, dt);
     if (C.skipped) break;
@@ -34,6 +39,7 @@ function* film(C, fn, dur, until = null, onFrame = null, maxT = 30) {
 
 export function* reunion(S, opts = {}) {
   const g = S.game, C = S.cine, Q = g.qte, herd = S.herd, mom = herd.mother, calf = herd.calf, life = S.life;
+  _S = S;
   // the newborn is still small (Hatching grows it into its body over the first minutes)
   const cs = calf.group.scale.x || 1;
   const L = mom.L, cL = calf.L * cs, cR = calf.radius * cs;
@@ -155,13 +161,8 @@ export function* reunion(S, opts = {}) {
   }
   if (hugG) hugG.deep = hN.ok ? 1 : 0.4;
   // her eye, close: it softens and half-closes, the calf's soft flank beside it
-  const eye = (k, t, s) => {
-    eyeP(_a);
-    s.pos.copy(_a).addScaledVector(mom.right, side * L * lerp(0.3, 0.24, k)).addScaledVector(mom.fwd, L * 0.16).addScaledVector(mom.up, L * lerp(0.1, 0.07, k));
-    s.look.copy(_a).addScaledVector(mom.right, side * L * 0.02);
-    s.fov = lerp(30, 26, k);
-    s.roll = 0;
-  };
+  // (framed on her real eye and the corner of her mouth, a three-quarter view a body length out)
+  const eye = faceShot(mom, { side, dist: [0.85, 0.7], around: [0.55, 0.75], up: [0.16, 0.12], fov: [32, 28] });
   yield* film(C, eye, hN.ok ? 3.2 : 2.2, null, (t, dt) => {
     hugSpot(_a, hN.ok ? 1 : 0.6);
     poseCalf(dt, _a, eyeP(_v));

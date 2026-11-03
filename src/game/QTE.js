@@ -512,7 +512,7 @@ export class QTE {
       this._anchor(st.at, cam, u.uCenter.value);
       u.uAspect.value = aspect;
       // a narrow portrait screen: size by the shorter side
-      u.uSize.value = 0.24 * (st.o.size ?? 1) * (aspect < 1 ? aspect : 1);
+      u.uSize.value = 0.34 * (st.o.size ?? 1) * (aspect < 1 ? aspect : 1);
       u.uKind.value = KIND[st.kind];
       const outK = st.h.done ? clamp(st.outT / (st.out > 0 ? 0.7 : 0.9), 0, 1) : 0;
       u.uOut.value = st.h.done ? (st.out >= 0 ? 1 : -1) : 0;

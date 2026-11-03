@@ -198,6 +198,10 @@ export function* reunion(S, opts = {}) {
   const stepShot = (dt, dur) => {
     tShot += dt;
     shot(easeInOutSine(clamp(tShot / dur, 0, 1)), tShot, C.shot);
+    // the meal is at the surface: the lens stays above the waterline and out of both bodies
+    const sy = sea(C.shot.pos);
+    if (calf.pos.y > sea(calf.pos) - cR) C.shot.pos.y = Math.max(C.shot.pos.y, sy + 0.45 + cR * 0.5);
+    clearCam(S, C.shot);
     C.handheld(C.shot, C.sway);
   };
   // she draws it to her lips

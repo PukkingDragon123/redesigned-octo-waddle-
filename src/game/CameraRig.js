@@ -38,6 +38,7 @@ export class CameraRig {
     this.lookOffset = new Vector3();
     this.collide = null; // function(from, to) -> shortened distance or null
     this.avoid = null; // function(pos, out) -> out: a push keeping pos clear of the big whales
+    this.solid = null; // function(pos): pushes pos out of any whale's body, in place (a hard limit)
     this._avoid = new Vector3();
     this._push = new Vector3();
     this.lead = 0; // lateral lead room into turns
@@ -133,6 +134,9 @@ export class CameraRig {
       if (below && this.gPos.y > s - 0.7) this.gPos.y = s - 0.7;
       else if (!below && this.gPos.y < s + 0.9) this.gPos.y = s + 0.9;
     }
+    // a hard limit after all the smoothing: the lens is never inside a body (a whale swinging in
+    // fast, faster than the soft avoidance eases out)
+    if (this.solid) this.solid(this.gPos);
     // a slightly longer lens than before: calmer, less fish-eye at speed
     this.gFov = damp(this.gFov, clamp(44 + speed * 0.38 + diving * 5 + this.wide * 3, 43, 62), 1.4, dt);
     this.gRoll = damp(this.gRoll, -whale.roll * 0.2, 2.2, dt);

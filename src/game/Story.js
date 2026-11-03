@@ -124,6 +124,7 @@ export class Story {
     this.life = new LifeCycle(this);
     g.cameraRig.collide = (from, to) => this.cameraHit(from, to);
     g.cameraRig.avoid = (pos, out) => this.cameraAvoid(pos, out);
+    g.cameraRig.solid = (pos) => this.cameraSolid(pos);
     await this.loadOptional();
     // hunger and the mother's nearness (src/game/Needs.js)
     this.needs = new Needs(g, this);
@@ -1127,6 +1128,24 @@ export class Story {
     const L = out.length();
     if (L > 24 * sc) out.multiplyScalar((24 * sc) / L);
     return out;
+  }
+
+  /** Pushes a camera position out of every adult's body (a capsule a little fatter than the whale). */
+  cameraSolid(pos) {
+    const me = this.herd.calf;
+    for (const w of this.herd.adults) {
+      if (w === me || !w.group.visible) continue;
+      const half = Math.max(0, w.L * 0.5 - w.radius);
+      _avA.copy(w.pos).addScaledVector(w.fwd, -half);
+      _avB.copy(w.pos).addScaledVector(w.fwd, half).sub(_avA);
+      const t = clamp(_avD.copy(pos).sub(_avA).dot(_avB) / (_avB.lengthSq() || 1), 0, 1);
+      _avD.copy(_avA).addScaledVector(_avB, t);
+      _avD.subVectors(pos, _avD);
+      const d = _avD.length(), clear = w.radius * 1.45 + 0.8;
+      if (d >= clear) continue;
+      if (d < 1e-3) _avD.set(0, 1, 0); else _avD.divideScalar(d);
+      pos.addScaledVector(_avD, clear - d);
+    }
   }
 
   /** Yields until the score's next beat (offset seconds earlier), so a voice lands on the music's grid. */

@@ -130,16 +130,8 @@ export class Activities {
   }
 
   // ---- bugs -------------------------------------------------------------------------------------
-  /** A bug got caught in the suction: a faint glint where it was plucked from the air. */
-  onSuck(kind, x, y, z) {
-    const E = this._em, col = this._col[kind], calf = this.herd.calf;
-    E.pos.set(x, y, z);
-    E.vel.copy(calf.vel).multiplyScalar(0.8);
-    E.life = 0.35; E.size = kind === 'gnat' ? 0.14 : 0.26; E.sizeEnd = 0.02; E.alpha = 0.8;
-    E.drag = 3; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
-    E.color[0] = col[0] * 1.3; E.color[1] = col[1] * 1.3; E.color[2] = col[2] * 1.3;
-    this.game.glow?.emit(E);
-  }
+  /** A bug got caught in the suction (no glint: it simply streaks into the mouth). */
+  onSuck() {}
 
   /** The bite, the swallow and the contented afterglow (see the header). */
   _eating(dt, calf) {
@@ -171,17 +163,6 @@ export class Activities {
     calf.anim.snap?.(k);
     this.morsel += kind === 'gnat' ? 0.12 : 0.4;
     this.biteT = now;
-    // a small flash of its glow at the lips
-    const E = this._em, col = this._col[kind];
-    const n = kind === 'gnat' ? 2 : 4;
-    for (let i = 0; i < n; i++) {
-      E.pos.set(x, y, z);
-      E.vel.set((Math.random() - 0.5) * 1.2, (Math.random() - 0.2) * 1.2, (Math.random() - 0.5) * 1.2).addScaledVector(calf.vel, 0.9);
-      E.life = 0.3 + Math.random() * 0.3; E.size = kind === 'gnat' ? 0.14 : 0.24; E.sizeEnd = 0.03; E.alpha = 1;
-      E.drag = 3; E.gravity = 0; E.kind = 1; E.fadeIn = 0.01;
-      E.color[0] = col[0] * 1.5; E.color[1] = col[1] * 1.5; E.color[2] = col[2] * 1.5;
-      g.glow?.emit(E);
-    }
     if (now - this.lastCatchSfx > 0.08) {
       this.lastCatchSfx = now;
       const a = st.audio;
@@ -552,22 +533,9 @@ export class Activities {
     ring.passed = true;
     R.passed++;
     this.joy += 0.2;
-    // the ring bursts into a halo of sparks and the moths scatter
+    // the ring bursts: its moths scatter (no sparks)
     this.bugs.scatter(ring.c, ring.r * 2.2, 1.3);
     ring.S.life = ring.S.age + 1.6;
-    const E = this._em;
-    _v.set(0, 1, 0).cross(ring.n);
-    if (_v.lengthSq() < 1e-6) _v.set(1, 0, 0);
-    _v.normalize();
-    _v2.copy(ring.n).cross(_v).normalize();
-    for (let i = 0; i < 36; i++) {
-      const a = (i / 36) * TAU;
-      E.pos.copy(ring.c).addScaledVector(_v, Math.cos(a) * ring.r).addScaledVector(_v2, Math.sin(a) * ring.r);
-      E.vel.copy(_v).multiplyScalar(Math.cos(a) * 3).addScaledVector(_v2, Math.sin(a) * 3).addScaledVector(ring.n, 2);
-      E.life = 0.9 + Math.random() * 0.5; E.size = 0.35; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.6; E.gravity = 0.2; E.kind = 1;
-      E.color[0] = 1.6; E.color[1] = 1.3; E.color[2] = 0.7;
-      g.glow?.emit(E);
-    }
     st.audio?.sfx?.('trick', { position: ring.c, gain: 0.8, step: R.passed });
     // a speed ring: a little push forward
     calf.vel.addScaledVector(calf.fwd, 3);
@@ -592,13 +560,5 @@ export class Activities {
     c.barrelRoll(-1);
     calf.anim?.gesture?.('happyWiggle');
     if (herd.mother.pos.distanceTo(calf.pos) < 250) this.schedule(herd.mother, 0.8, 'answer');
-    const E = this._em;
-    for (let i = 0; i < 60; i++) {
-      E.pos.copy(calf.pos);
-      E.vel.set((Math.random() - 0.5) * 8, Math.random() * 7, (Math.random() - 0.5) * 8).addScaledVector(calf.vel, 0.5);
-      E.life = 1.2 + Math.random(); E.size = 0.3; E.sizeEnd = 0.05; E.alpha = 1; E.drag = 1.2; E.gravity = 1.5; E.kind = 1;
-      E.color[0] = 1.5; E.color[1] = 1.2; E.color[2] = 0.8;
-      g.glow?.emit(E);
-    }
   }
 }

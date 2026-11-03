@@ -390,7 +390,7 @@ export class WhaleEgg {
     this.shardMat.uniforms.uHot.value = 1;
 
     // fluid, bubbles, spray and a soft flash of the inner light
-    const mist = this.game.mist, glow = this.game.glow;
+    const mist = this.game.mist;
     const v = this._v;
     const sea = this._sea;
     if (mist) {
@@ -420,23 +420,7 @@ export class WhaleEgg {
         });
       }
     }
-    if (glow) {
-      v.set(0, 0.4, 0);
-      glow.emit({
-        pos: this._tp(c.x, c.y + b * 0.2, c.z), vel: v, life: 0.9, size: this.length * 1.6, sizeEnd: this.length * 3.2,
-        color: [1, 0.82, 0.6], alpha: 0.75, drag: 0, gravity: 0, kind: 1, fadeIn: 0.04,
-      });
-      for (let i = 0; i < 40; i++) {
-        const th = this._rand() * TAU;
-        const out = 0.5 + this._rand() * 2;
-        v.set(Math.cos(th) * out, 0.5 + this._rand() * 2.5, Math.sin(th) * out);
-        glow.emit({
-          pos: this._tp(c.x + Math.cos(th) * b * 0.6, c.y, c.z + Math.sin(th) * b * 0.6), vel: v,
-          life: 1.5 + this._rand() * 2, size: 0.06 + this._rand() * 0.08, sizeEnd: 0.02,
-          color: [1, 0.72, 0.42], alpha: 0.7, drag: 0.8, gravity: 0.3, kind: 1, fadeIn: 0.05,
-        });
-      }
-    }
+    // (no glow flash or sparks: the shell bursting, the bubbles and the splash tell it)
     this.game.ocean?.splash?.(this._tp(c.x, sea, c.z), 0.9, this.width * 1.1);
   }
 

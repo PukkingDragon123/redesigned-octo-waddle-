@@ -292,7 +292,7 @@ export class QTE {
     const paused = S && S.state === 'paused';
     if (!paused) this.time += dt;
     this._boilT += dt;
-    if (this._boilT > 0.14) { this._boilT = 0; this.boil = (this.boil + 1.618) % 97; }
+    if (this._boilT > 0.5) { this._boilT = 0; this.boil = (this.boil + 1.618) % 97; }
     this.punch = Math.max(0, this.punch - dt * 4);
     const inp = this.game.input;
     let pressed = !paused && inp.actAnyPressed;

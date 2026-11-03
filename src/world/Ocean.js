@@ -702,7 +702,7 @@ void main() {
       // (sampled outside any branch: mip selection needs derivatives in uniform control flow)
       float g1 = texture2D(uNoise, p / 6.0 + uWindDir * uTime * 0.05).b;
       float g2 = texture2D(uNoise, p / 4.3 - vec2(-uWindDir.y, uWindDir.x) * uTime * 0.07 + 0.41).b;
-      float spark = 0.4 + 4.0 * smoothstep(0.1, 0.3, g1 + g2 - 1.0);
+      float spark = 0.8 + 0.7 * smoothstep(0.1, 0.4, g1 + g2 - 1.0);
       spec *= mix(1.0, spark, glN);
     }
     spec += seaGlitter(N, V, uMoonDir, s2 + 1.2e-4, uMoonColor * 0.9) * uNight;

@@ -441,7 +441,6 @@ void main() {
     float wrack = smoothstep(0.06, 0.0, abs(P.y - 1.1 - uSeaState * 0.8 + (nm.g - 0.5) * 0.6)) * step(0.5, nu.g);
     sc = mix(sc, vec3(0.22, 0.2, 0.14), wrack * 0.5 * detail);
     // dark volcanic sand glints
-    sc += kind * vec3(0.5, 0.48, 0.45) * step(0.985, hash12(floor(P.xz * 9.0))) * detail * 0.4;
     albedo = mix(albedo, sc, sandW);
     heightB = mix(heightB, sh, sandW);
     // sparkle: quartz and mica grains flash when their facet mirrors the sun (only where single
@@ -534,7 +533,8 @@ void main() {
   s.spec = (wetAll * 0.75 + runnel * 0.35) * smoothstep(-0.5, 0.3, P.y) + algae * 0.3 * (1.0 - sandW)
          + 0.05 * (1.0 - wetGloss) * (1.0 - grassAmt);
   s.gloss = mix(0.22, 0.82, wetGloss);
-  s.emissive += uSunColor * sandGlint * 1.6 * s.shadow * (1.0 - uNight);
+  // (no grain flashes: the sun glinting off single sand grains read as a sparkling glitch)
+  s.emissive += uSunColor * sandGlint * 0.0;
   if (pool > 0.01) {
     // the pool mirrors the sky over a dark, weedy floor
     vec3 Vp = normalize(uCamPos - P);

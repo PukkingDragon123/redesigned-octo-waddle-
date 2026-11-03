@@ -248,7 +248,7 @@ export class Abilities {
     const beat = song.key().beat;
     const head = () => this._calfHead();
     // 1. the pair over the sea, the camera on the calf's far side, her head turned toward it
-    yield* C.play(C.rel({ subject: calf, side: [9, 6.5], up: [0.6, 1.4], back: [5, 3.5], ahead: [-2, 2], lookSide: [-6, -4], fov: [40, 34] }), 3.2);
+    yield* C.play(C.rel({ subject: calf, side: [7, 5.5], up: [3.2, 2.6], back: [6, 4.5], ahead: [-1, 2], lookSide: [-6, -4], fov: [42, 36] }), 3.2);
     // 2. she breathes in and sings to it: two notes (close on her eye, her crest flaring)
     C.setFocus(mom);
     const phrase1 = [[0, 1.2], [2, 1.4]];
@@ -263,7 +263,7 @@ export class Abilities {
       }
       mom.drive.sing = 0.4;
     };
-    const eyeShot = C.eye({ whale: mom, side: 1, dist: [0.5, 0.4], fov: [34, 28] });
+    const eyeShot = C.eye({ whale: mom, side: 1, dist: [0.85, 0.7], fov: [40, 36] });
     S.script.run(sing(phrase1), 'abilitySing');
     yield* C.play(eyeShot, phrase1.reduce((a, n) => a + n[1], 0) * beat + 0.4);
     // 3. its turn: the camera finds the calf's face; it tries... (hold the cue)

@@ -139,7 +139,7 @@ export class Bonds {
   _frame(m, out = {}) {
     const L = m.L;
     out.c = (out.c || new Vector3()).copy(m.pos).addScaledVector(m.fwd, L * 0.36).addScaledVector(m.up, -L * 0.035);
-    out.s = (out.s || new Vector3()).set(L * 0.085, L * 0.06, L * 0.14);
+    out.s = (out.s || new Vector3()).set(L * 0.1, L * 0.072, L * 0.17);
     return out;
   }
 
@@ -188,7 +188,7 @@ export class Bonds {
     if (this.carrying) {
       const f = this._frame(mom, this._f2 || (this._f2 = {}));
       const sc = calf.group.scale.x;
-      calf.pos.copy(f.c).addScaledVector(mom.fwd, -calf.L * sc * 0.05).addScaledVector(mom.up, -f.s.y * 0.25);
+      calf.pos.copy(f.c).addScaledVector(mom.fwd, f.s.z * 0.12).addScaledVector(mom.up, -f.s.y * 0.42);
       calf.vel.copy(mom.vel);
       calf.yaw = mom.yaw;
       calf.pitch = mom.pitch;
@@ -373,7 +373,15 @@ export class Bonds {
     const start = calf.pos.clone();
     const f = this._frame(mom, {});
     let tt = 0;
-    const scoop = C.rel({ subject: mom, side: [side * 9, side * 7], up: [0.5, 0.2], back: [-mom.L * 0.42, -mom.L * 0.36], ahead: mom.L * 0.3, fov: [40, 34], worldUp: true });
+    const mp = new Vector3();
+    const scoop = (k, tt2, s) => {
+      mp.copy(mom.pos).addScaledVector(mom.fwd, mom.L * 0.42);
+      s.pos.copy(mp).addScaledVector(mom.right, side * lerp(11, 8, k)).addScaledVector(mom.fwd, lerp(7, 5, k));
+      s.pos.y = Math.max(s.pos.y + 1, seaHeight(g, s.pos.x, s.pos.z) + 1.6);
+      s.look.copy(mp).lerp(calf.pos, 0.4);
+      s.fov = lerp(42, 34, k);
+      s.roll = 0.02 * side;
+    };
     S.audio.stinger?.('strike');
     while (tt < 1.8 && !C.skipped) {
       const dt = yield 0;
@@ -397,7 +405,7 @@ export class Bonds {
     S.eco && (S.eco.threat = null);
     this._releaseThreats(T, calf.pos);
     herd.motherScript = (m) => ({ target: _v2.copy(m.pos).addScaledVector(m.fwd, 30).setY(seaHeight(g, m.pos.x, m.pos.z) + m.radius * 0.7), speed: lerp(4, 14, m.drive.fear), arrive: 10, lookAt: null });
-    yield* C.play(C.track({ subject: mom, side: [side * 40, side * 32], up: [3, 6], ahead: [10, 18], fov: [42, 46] }), 3.0, { onFrame: () => { mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.004); } });
+    yield* C.play(C.track({ subject: mom, side: [side * 30, side * 24], up: [12, 9], ahead: [14, 22], fov: [46, 50] }), 3.0, { onFrame: () => { mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.004); } });
     yield* this._release(side);
     calf.drive.fear = 0;
     S.audio.setMood?.('dawn', { fade: 6 });
@@ -429,9 +437,9 @@ export class Bonds {
     // the lens at the back of her mouth, the calf curled before it, the lips' light beyond
     const shot = (k, t, s) => {
       this._place(mom);
-      s.pos.copy(fr.c).addScaledVector(mom.fwd, -fr.s.z * lerp(0.62, 0.5, k)).addScaledVector(mom.up, fr.s.y * 0.3).addScaledVector(mom.right, side * fr.s.x * 0.25);
-      s.look.copy(fr.c).addScaledVector(mom.fwd, fr.s.z).addScaledVector(mom.up, -fr.s.y * 0.05);
-      s.fov = lerp(62, 56, k);
+      s.pos.copy(fr.c).addScaledVector(mom.fwd, -fr.s.z * lerp(0.78, 0.7, k)).addScaledVector(mom.up, fr.s.y * 0.55).addScaledVector(mom.right, side * fr.s.x * 0.5);
+      s.look.copy(fr.c).addScaledVector(mom.fwd, fr.s.z).addScaledVector(mom.up, -fr.s.y * 0.12).addScaledVector(mom.right, -side * fr.s.x * 0.1);
+      s.fov = lerp(64, 58, k);
       s.roll = 0.04 * Math.sin(t * 0.7) * mom.drive.fear;
     };
     let t = 0, thudT = 0.6, calmK = 0, calmAt = null;
@@ -503,7 +511,7 @@ export class Bonds {
     const S = this.story, g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf, C = S.cine;
     herd.motherScript = (m) => ({ target: _v2.copy(m.pos).addScaledVector(m.fwd, 10).setY(seaHeight(g, m.pos.x, m.pos.z) + m.radius * 0.6), speed: 1.5, arrive: 10, lookAt: null });
     C.setFocus(mom);
-    const out = C.rel({ subject: mom, side: [side * 11, side * 9], up: [0.6, 0.8], back: [-mom.L * 0.55, -mom.L * 0.5], ahead: mom.L * 0.3, fov: [36, 32], worldUp: true });
+    const out = C.rel({ subject: mom, side: [side * 13, side * 11], up: [3.5, 2.5], back: [-mom.L * 0.8, -mom.L * 0.75], ahead: mom.L * 0.42, lookSide: side * 2, fov: [40, 36], worldUp: true });
     let t = 0;
     const f = this._frame(mom, {});
     const exitP = new Vector3();

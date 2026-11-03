@@ -277,6 +277,20 @@ abilities etc."*
   danger passes.
 - **Abilities:** voice and other abilities are unlocked through short QTE cutscenes during Act I.
 
+### 0.13 Alien monsters, and no sparkles at all (newest)
+User: *"Make the jellyfish and manta and other creatures more monster alien; also there's a weird lighting
+sparkle thing."*
+- **Creatures:** every creature should read as an alien monster of Vur Sok, strange and unsettling but
+  anatomically believable, never cute:
+  - jellies: lobed or nested bells with an inner cage, rim eyes and hooked tentacles;
+  - mantas: fanged maws, stalked eyes, strutted wings and barbed tails;
+  - lanternjacks: hinged lures and splaying fanged jaws;
+  - skimmers: four wings, horns and teeth;
+  - eels: dark mottled morays with hinged jaws.
+- **No sparkles anywhere.** That means no twinkling or flashing points: no sand glints, no sea flashes, and no
+  spark bursts when eating, catching bugs, hatching or racing. Glow, where a creature has one, is steady and
+  soft.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

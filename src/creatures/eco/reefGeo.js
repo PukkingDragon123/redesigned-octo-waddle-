@@ -348,12 +348,12 @@ export function buildJelly() {
     };
     for (let b = 0; b < 7; b++) {
       const t = 0.45 + b * 0.07, th = b * 2.1 + k;
-      spike(t, [Math.cos(th), -0.15, Math.sin(th)], 0.07 - b * 0.003, 0.009);
+      spike(t, [Math.cos(th), -0.15, Math.sin(th)], 0.11 - b * 0.006, 0.013);
     }
     // the hook at the tip: a curled claw
     {
       const b0 = m.count, hp = [], hr = [];
-      for (let i = 0; i < 6; i++) { const u = i / 5, ang = u * 2.6; hp.push([Math.cos(a) * Math.sin(ang) * 0.07, -Math.sin(ang * 0.5) * 0.02 - (1 - Math.cos(ang)) * 0.06 + 0.06 * u * u, Math.sin(a) * Math.sin(ang) * 0.07]); hr.push(0.011 * (1 - u) + 0.0008); }
+      for (let i = 0; i < 6; i++) { const u = i / 5, ang = u * 2.6; hp.push([Math.cos(a) * Math.sin(ang) * 0.12, -Math.sin(ang * 0.5) * 0.03 - (1 - Math.cos(ang)) * 0.1 + 0.1 * u * u, Math.sin(a) * Math.sin(ang) * 0.12]); hr.push(0.016 * (1 - u) + 0.001); }
       tube(m, hp, hr, 3, (i, tt) => [[28, 1, a, L], [0, 0, 0, tt]], true);
       for (let v = b0; v < m.count; v++) {
         m.q[v * 4] = m.p[v * 3]; m.q[v * 4 + 1] = m.p[v * 3 + 1]; m.q[v * 4 + 2] = m.p[v * 3 + 2];
@@ -365,7 +365,7 @@ export function buildJelly() {
   for (let k = 0; k < 12; k++) {
     const a = ((k + 0.5) / 12) * TAU;
     const c = [Math.cos(a) * 0.47, 0.035, Math.sin(a) * 0.47];
-    eyeDome(m, c, [Math.cos(a), -0.3, Math.sin(a)], 0.03, 2, 8, (qx, qy) => [[24, 0, qx, qy], [a, 0, 0, 0]]);
+    eyeDome(m, c, [Math.cos(a), -0.3, Math.sin(a)], 0.048, 2, 8, (qx, qy) => [[24, 0, qx, qy], [a, 0, 0, 0]]);
   }
   // the velum: a frilled skirt round the margin, folded in under the bell
   {
@@ -664,8 +664,11 @@ const lerpT = (Z, V, z) => {
 // water, when the belly balloons and they stand up (reefMat.js inflates it on the GPU).
 // Parts: 40 body (aP.y = t nose 0 .. tail 1, aP.z = angle round / TAU), 41 eye dome (aP.zw eye
 // plane, aQ centre, aQ.w side), 42 fins (aP.y along ray, aP.z across, aP.w fin id: 0 caudal,
-// 1 dorsal, 2 anal, 3 pectoral; aQ hinge, aQ.w side), 43 prickles (aP.y along; aP.zw + aQ.w the
-// skin normal; aQ.xyz root), 44 beak plates, 45 the gape.
+// 1 dorsal, 2 anal, 3 pectoral, 4 the ventral pectorals; aQ hinge, aQ.w side), 43 prickles (aP.y
+// along; aP.zw + aQ.w the skin normal; aQ.xyz root), 44 beak plates, 45 the gape, 46 hooked chitin
+// mandibles (aP.y along, aP.z 1 teeth; aQ hinge, aQ.w side), 47 brow horns and the spine crest
+// (aP.y along; aQ root, aQ.w 1 crest). The Vur Sok puffer is armoured: bony plates over the back,
+// a second pair of eyes, four pectorals, mandibles that scissor and gape when it puffs up.
 export const PUF = {
   z: [0.272, 0.266, 0.252, 0.228, 0.19, 0.13, 0.06, -0.02, -0.09, -0.145, -0.185, -0.21, -0.226],
   hw: [0.024, 0.044, 0.076, 0.112, 0.15, 0.18, 0.19, 0.18, 0.146, 0.098, 0.058, 0.04, 0.035],
@@ -810,6 +813,58 @@ export function buildPuffer() {
     const mid = [root[0] + n[0] * L * 0.35, root[1] + n[1] * L * 0.35, root[2] + n[2] * L * 0.35];
     tube(m, [root, mid, tip], [0.0075, 0.0042, 0.0006], 4, (i, t) => [[43, t, n[0], n[1]], [root[0], root[1], root[2], n[2]]], true);
   }
+  // ---- what makes it a monster of Vur Sok ----------------------------------------------------
+  // hooked chitin mandibles either side of the beak (part 46: aP.y along, aP.w side; aQ hinge),
+  // each with a row of teeth along its inner edge; they scissor as it breathes and gape when it puffs
+  for (const side of [1, -1]) {
+    const h = [side * 0.06, -0.05, 0.222];
+    const pts = [], rad = [];
+    for (let i = 0; i < 8; i++) {
+      const u = i / 7;
+      pts.push([side * (0.06 + 0.035 * Math.sin(u * 2.4) - 0.075 * u * u), -0.05 - 0.02 * Math.sin(u * 3.0), 0.222 + 0.15 * u]);
+      rad.push(0.016 * (1 - u * 0.85) + 0.0012);
+    }
+    tube(m, pts, rad, 5, (i, t) => [[46, t, 0, side], [h[0], h[1], h[2], side]], true, 0.75);
+    for (let k = 0; k < 4; k++) {
+      const u = 0.3 + k * 0.15, p0 = pts[Math.round(u * 7)];
+      tube(m, [p0, [p0[0] - side * 0.024, p0[1] + 0.004, p0[2] + 0.006]], [0.005, 0.0006], 3, (i, t) => [[46, u, 1, side], [h[0], h[1], h[2], side]], true);
+    }
+  }
+  // bony brow horns swept back over the eyes, and a crest of long spines down the back
+  // (part 47: aP.y along; aQ root, aQ.w 0 horn / 1 crest)
+  for (const side of [1, -1]) {
+    const r0 = [side * 0.068, 0.118, 0.165];
+    tube(m, [r0, [side * 0.1, 0.17, 0.14], [side * 0.135, 0.21, 0.06], [side * 0.13, 0.215, -0.0]], [0.018, 0.012, 0.006, 0.001], 5, (i, t) => [[47, t, 0, side], [r0[0], r0[1], r0[2], 0]], true);
+  }
+  for (let k = 0; k < 5; k++) {
+    const z = 0.13 - k * 0.045, sp = pufS(z);
+    const y0 = sp.cy + sp.ht - 0.004;
+    const hh = 0.1 - k * 0.012;
+    tube(m, [[0, y0, z], [0, y0 + hh * 0.6, z - hh * 0.25], [0, y0 + hh, z - hh * 0.6]], [0.008, 0.004, 0.0007], 4, (i, t) => [[47, t, 0, 0], [0, y0, z, 1]], true);
+  }
+  // a second, ventral pair of pectorals (fin id 4)
+  for (const side of [1, -1]) {
+    const nR = 9, roots = [], tips = [], mids = [];
+    const z = 0.035, sp = pufS(z);
+    for (let k = 0; k < nR; k++) {
+      const u = k / (nR - 1);
+      const y = sp.cy - 0.1 + u * 0.05;
+      const p = pufPoint(z - u * 0.006, Math.acos(Math.max(-1, Math.min(1, (y - sp.cy) / sp.hb))) * side);
+      const a = (u - 0.5) * 1.4 - 0.5;
+      const L = 0.075 * (1 - 0.2 * a * a);
+      roots.push([p[0] - side * 0.004, y, z - u * 0.006]);
+      tips.push([p[0] + side * L * 0.55, y + Math.sin(a) * L * 0.6, z - u * 0.006 - Math.cos(a) * L * 0.8]);
+      mids.push([p[0] + side * L * 0.3, y + Math.sin(a) * L * 0.3, z - u * 0.006 - Math.cos(a) * L * 0.38]);
+    }
+    fin(4, side, [roots[4][0], sp.cy - 0.08, z], roots, tips, mids, 3);
+  }
+  // a second, smaller pair of eyes above and behind the first
+  for (const side of [1, -1]) {
+    const p = pufPoint(0.115, side * 0.62);
+    const ax = norm([side * 0.7, 0.75, -0.1]);
+    const c = [p[0] - ax[0] * 0.006, p[1] - ax[1] * 0.006, p[2] - ax[2] * 0.006];
+    eyeDome(m, c, ax, 0.022, 4, 12, (qx, qy) => [[41, 0, qx, qy * side], [c[0], c[1], c[2], side]]);
+  }
   return m.build();
 }
 
@@ -819,7 +874,10 @@ export function buildPuffer() {
 // and an anal fin from mid-body that meets it there. Length 1 along z (nose +0.5).
 // Parts: 50 body (aP.y = t, aP.z = angle round / TAU), 51 fins (aP.y = t, aP.z = s up the fin,
 // aP.w = +1 dorsal / -1 anal), 52 eye (aP.zw eye plane, aQ.w side), 53 nostril flaps and chin
-// barbels (aP.y along, aP.w side).
+// barbels (aP.y along the flap, aP.w side; the shader pins them to the snout), 54 the hinged lower
+// jaw (aP.y = t, aP.z round; aQ.yz hinge), 55 needle teeth (aP.w -1 on the jaw, +1 on the upper
+// lip), 56 external gill plumes. The Vur Sok ribbon eel is armoured in bony bands, has a second
+// pair of eyes and a spined dorsal crest.
 const EEL_EYE = { t: 0.03, y: 0.0062, r: 0.0042 };
 function eelS(t) {
   // half depth, half width, centre height along the body
@@ -867,7 +925,7 @@ export function buildEel() {
     for (let i = 0; i < N; i++) {
       const t = t0 + (1 - t0) * (i / (N - 1)) * 0.998;
       const s = eelS(t), z = 0.5 - t;
-      const H = (ud > 0 ? 0.021 : 0.017) * Math.min(1, (t - t0) / 0.06) * (1 - 0.45 * Math.max(t - 0.85, 0) / 0.15) + 0.001;
+      const H = (ud > 0 ? 0.023 * (1 + 0.7 * Math.exp(-(((t - 0.14) / 0.09) ** 2))) : 0.017) * Math.min(1, (t - t0) / 0.06) * (1 - 0.45 * Math.max(t - 0.85, 0) / 0.15) + 0.001;
       for (let k = 0; k <= NSg; k++) {
         const sk = k / NSg;
         const y = s.cy + ud * (s.ht * 0.92 + H * sk);
@@ -892,6 +950,49 @@ export function buildEel() {
     const tips = [[side * 0.009, 0.012, 0.506], [side * 0.012, 0.006, 0.503]];
     finFan(m, roots, tips, null, 3, (u, s) => [[53, s, u, side], [r[0], r[1], r[2], side]]);
     tube(m, [[side * 0.002, -0.006, 0.497], [side * 0.004, -0.011, 0.5], [side * 0.005, -0.014, 0.505]], [0.0011, 0.0008, 0.0003], 3, (i, t) => [[53, t, 2, side], [side * 0.002, -0.006, 0.497, side]], true);
+  }
+  // ---- what makes it a monster of Vur Sok ----------------------------------------------------
+  // a hinged lower jaw (part 54: aP.y = t, aP.z = j round / NA, the last three the tongue; aQ.yz the
+  // hinge): a shell round the underside of the head that drops open on its hinge
+  const TJ = 0.062, hz = 0.5 - TJ, hy = eelS(TJ).cy;
+  {
+    const NJ = 9, NAJ = 10, rows = [], centres = [], tsJ = [];
+    for (let i = 0; i < NJ; i++) {
+      const t = 0.004 + (TJ - 0.004) * Math.pow(i / (NJ - 1), 0.8), sv = eelS(t), z = 0.5 - t;
+      const hw = sv.hw * 1.14 + 0.0004, ht = sv.ht * 1.12 + 0.0004;
+      const ring = [];
+      for (let j = 0; j < 7; j++) { const th = Math.PI * 0.5 + (j / 6) * Math.PI; ring.push([hw * Math.sin(th), sv.cy + ht * Math.cos(th) * 0.95 - 0.0003, z + (i === 0 ? 0.0015 : 0)]); }
+      for (let j = 0; j < 3; j++) { const x = -hw * 0.55 + (j / 2) * hw * 1.1; ring.push([x, sv.cy - 0.0006, z]); }
+      rows.push(ring); centres.push([0, sv.cy - ht * 0.45, z]); tsJ.push(t);
+    }
+    const jb = skin(m, rows, (i, j) => [[54, tsJ[i], j / NAJ, 0], [0, hy, hz, 0]], centres);
+    const c = m.v([0, eelS(0.004).cy - 0.004, 0.4985], [0, -0.3, 1], [54, 0.004, 0.2, 0], [0, hy, hz, 0]);
+    for (let j = 0; j < NAJ; j++) m.tri(c, jb + j, jb + ((j + 1) % NAJ));
+  }
+  // needle teeth: up from the jaw's rim (they drop with it) and down from the upper lip
+  // (part 55: aP.y = t, aP.w -1 jaw / +1 upper; aQ.yz the hinge)
+  for (const side of [1, -1]) for (let k = 0; k < 7; k++) {
+    const t = 0.008 + k * 0.0075, sv = eelS(t), z = 0.5 - t;
+    const L = 0.0062 - k * 0.0004 + (k === 1 ? 0.0025 : 0);
+    const xj = side * sv.hw * 1.0, xu = side * sv.hw * 0.82;
+    tube(m, [[xj, sv.cy - 0.0008, z], [xj * 0.9, sv.cy - 0.0008 + L, z - L * 0.25]], [0.0011, 0.0001], 3, (i, tt) => [[55, t, tt, -1], [0, hy, hz, 0]], true);
+    tube(m, [[xu, sv.cy - sv.ht * 0.35, z - 0.003], [xu * 0.92, sv.cy - sv.ht * 0.35 - L * 0.9, z - 0.003 - L * 0.2]], [0.001, 0.0001], 3, (i, tt) => [[55, t, tt, 1], [0, hy, hz, 0]], true);
+  }
+  // external gill plumes behind the head: three feathery fans a side (part 56: aP.y = t, aP.z along
+  // the plume, aP.w side)
+  for (const side of [1, -1]) for (let k = 0; k < 3; k++) {
+    const t = 0.07 + k * 0.011, sv = eelS(t), z = 0.5 - t;
+    const r = [side * sv.hw * 0.9, sv.cy + sv.ht * (0.15 + 0.25 * k), z];
+    const roots = [r, [r[0], r[1] - 0.003, r[2] - 0.004]];
+    const L = 0.026 - k * 0.004;
+    const tips = [[side * (sv.hw + L * 0.7), r[1] + L * 0.5, z - L * 0.75], [side * (sv.hw + L * 0.8), r[1] - L * 0.05, z - L * 0.9]];
+    finFan(m, roots, tips, null, 4, (u, sg) => [[56, t, sg, side], [r[0], r[1], r[2], u]]);
+  }
+  // a second, smaller pair of eyes behind the first
+  for (const side of [1, -1]) {
+    const t = 0.048, sv = eelS(t);
+    const c = [side * (sv.hw * 0.8), 0.0085, 0.5 - t];
+    eyeDome(m, c, [side, 0.55, 0.05], 0.0029, 3, 8, (qx, qy) => [[52, t, qx, qy * side], [c[0], c[1], c[2], side]]);
   }
   return m.build();
 }

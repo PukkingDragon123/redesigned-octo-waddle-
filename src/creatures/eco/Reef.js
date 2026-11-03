@@ -6,8 +6,11 @@
 //   All of them react to whales on the GPU (uActors): kelp parts, anemones close into buds, tube
 //   corals retract and glow, fans bend away.
 // Fauna (small recycled pools simulated on the CPU around the camera):
-//   jellies (drifting blooms that pulse, flare and flee), rays (glide over the reef; curious ones swim alongside the
-//   calf), lantern puffers (inflate into spiky balls when startled) and ribbon eels in the kelp.
+//   jellies (drifting blooms of three species: ribbed lanterns, lobed crowns and spired nested bells, with
+//   rim lens-eyes and barbed, hooked hunting tentacles; they pulse, flare and flee), rays (horned, many-eyed
+//   devil rays with bone-strutted wings, twin barbed tails and a fanged under-maw; they glide over the reef and
+//   curious ones swim alongside the calf), armoured lantern puffers with mandibles (inflate into spiky balls
+//   when startled) and armoured ribbon eels with hinged, needle-toothed jaws in the kelp.
 //   Small ones are food: eatAt() / nearestFood() feed Ecosystem.eat / nearestSwarm.
 // Placement uses the world's sea floor (ctx.seabed = world.seabedAt): kelp and gardens grow on
 // reef shelves, shoals and atoll lagoons; jellies and rays live in any water deep enough.

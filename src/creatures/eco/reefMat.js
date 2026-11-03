@@ -70,7 +70,7 @@ float jC(float az) {
   float lag = 0.85 * (1.0 - cos(az - az0));
   return pow(max(sin(jPul - lag), 0.0), 1.5);
 }
-float jH() { return jSp < 0.5 ? 0.66 : (jSp < 1.5 ? 0.3 : 0.48); }
+float jH() { return jSp < 0.5 ? 0.86 : (jSp < 1.5 ? 0.32 : 0.48); }
 vec3 jBell(float v, float u, float layer) {
   float az = u * 6.2831853;
   float ph = v * 1.5707963;
@@ -82,21 +82,22 @@ vec3 jBell(float v, float u, float layer) {
   float r = 0.5 * pow(sin(ph), jSp < 0.5 ? 0.7 : 0.9);
   float y = H * cos(ph);
   // the lantern pinches in a waist above a flared margin
-  if (jSp < 0.5) r *= 1.0 - 0.13 * smoothstep(0.5, 0.82, v) + 0.15 * smoothstep(0.82, 1.0, v);
-  r += rib * 0.05 * sin(ph * 2.0) * (1.0 - layer);
+  if (jSp < 0.5) r *= 1.0 - 0.2 * smoothstep(0.45, 0.8, v) + 0.24 * smoothstep(0.8, 1.0, v);
+  r += rib * (jSp < 0.5 ? 0.075 : 0.05) * sin(ph * 2.0) * (1.0 - layer);
   y += rib * 0.018 * (1.0 - v) * (1.0 - layer);
   if (jSp > 0.5 && jSp < 1.5) {
-    float lob = pow(abs(cos(az * 2.5)), 0.6);
-    float m = smoothstep(0.35, 1.0, v);
-    r *= 1.0 - 0.26 * (1.0 - lob) * m;
-    y -= 0.2 * lob * m * m;
-    r += 0.06 * lob * m;
+    float lob = pow(abs(cos(az * 2.5)), 1.8);
+    float m = smoothstep(0.3, 1.0, v);
+    r *= 1.0 - 0.42 * (1.0 - lob) * m;
+    y -= 0.3 * lob * m * m;
+    y += 0.06 * (1.0 - lob) * m;
+    r += 0.1 * lob * m;
   } else if (jSp > 1.5) {
     y += 0.34 * pow(1.0 - v, 4.0);
     r *= 1.0 - 0.35 * pow(1.0 - v, 2.5);
   }
   if (layer > 0.5) {
-    if (jSp > 1.5) { r *= 0.58; y = y * 0.9 - 0.26; }
+    if (jSp > 1.5) { r *= 0.5; y = y * 0.72 - 0.1; }
     else { r *= 0.84; y = y * 0.78 - 0.04; }
   }
   float c = jC(az);
@@ -400,7 +401,7 @@ void main() {
   float ph = iB.z;
   vec3 p = pos;
   vec3 hinge = aQ.xyz;
-  if (part < 40.5 || part > 43.5) {
+  if (part < 40.5 || (part > 43.5 && part < 45.5)) {
     float w = puffW(p);
     nrm = normalize(mix(nrm, normalize(p - vec3(0.0, 0.0, 0.02)), inf * 0.8 * w));
     p = puff(p, inf);
@@ -432,10 +433,21 @@ void main() {
       rel.x += sc * 0.045 * s * (0.6 + 0.4 * s);
     } else {
       // pectorals: fast fanning, a ripple running across the rays
-      float f = uTime * 13.0 + seed * 7.0 + side;
+      float f = uTime * 13.0 + seed * 7.0 + side + step(3.5, id) * 1.7;
       rel = rotY(side * (0.32 * sin(f) - 0.25)) * rel;
       rel.x += side * sin(f - u * 4.0 - s * 1.5) * 0.018 * s;
     }
+    p = puff(hinge, inf) + rel;
+  } else if (part > 45.5 && part < 46.5) {
+    // mandibles: they scissor as it breathes, and gape wide when it puffs up to threaten
+    float side = aQ.w;
+    float open = 0.16 + 0.14 * sin(uTime * 1.7 + seed * 5.0) + inf * 0.6;
+    vec3 rel = rotY(side * open) * (p - hinge);
+    nrm = rotY(side * open) * nrm;
+    p = puff(hinge, inf) + rel;
+  } else if (part > 46.5) {
+    // brow horns ride on the skull; the spine crest bristles taller when it puffs up
+    vec3 rel = (p - hinge) * (1.0 + 0.45 * inf * aQ.w);
     p = puff(hinge, inf) + rel;
   } else {
     // prickles: lying back in their skin pockets, erect when inflated
@@ -459,7 +471,8 @@ void main() {
   float L = iB.x;
   float wph = iB.z;
   vec3 p = pos;
-  float t = aP.y;
+  // the nostril flaps and barbels (53) keep their own coordinate in aP.y: they ride at the snout
+  float t = part > 52.5 && part < 53.5 ? 0.004 : aP.y;
   float alarm = iB.w;
   float k = 6.2831853 * 1.7;
   float amp = (0.018 + 0.085 * t) * (1.0 + alarm * 0.5);
@@ -470,9 +483,21 @@ void main() {
   float sl = -dX;
   float c = inversesqrt(1.0 + sl * sl), sn = sl * c;
   if (part > 50.5 && part < 51.5) p.x += sin(t * 70.0 - uTime * 11.0 + aP.w) * 0.0022 * aP.z;
-  if (part > 52.5) {
+  if (part > 52.5 && part < 53.5) {
     // nostril flaps and barbels tremble in the flow
     p.x += sin(uTime * 9.0 + aP.w * 2.0 + seed * 5.0) * 0.0008 * aP.y;
+  }
+  if (part > 53.5 && part < 55.5 && (part < 54.5 || aP.w < 0.0)) {
+    // the lower jaw: it works slowly open and shut as the eel breathes, and gapes when alarmed
+    float gape = 0.12 + 0.12 * sin(uTime * 1.3 + seed * 7.0) + alarm * 0.5;
+    vec3 hg = vec3(0.0, aQ.y, aQ.z);
+    p = hg + rotX(gape) * (p - hg);
+    nrm = rotX(gape) * nrm;
+  }
+  if (part > 55.5) {
+    // the gill plumes stream back and tremble
+    p.x += aP.w * sin(uTime * 6.0 + aQ.w * 3.0 + seed * 5.0) * 0.0012 * aP.z;
+    p.z -= 0.002 * aP.z * (1.0 + alarm);
   }
   vec3 q = vec3(p.x, p.y, p.z - zs);
   p = vec3(X + q.x * c + q.z * sn, q.y + 0.004 * sin(w * 0.5 + 1.0) * t, zs - q.x * sn + q.z * c);
@@ -692,8 +717,8 @@ void main() {
   }
   dorsal = mix(dorsal, vec3(0.5, 0.42, 0.42), scar * 0.75);
   // the giant's crust: pale encrusting growths about the head and the wing roots
-  float crust = smoothstep(0.62, 0.8, vnoise(L2 * 16.0 + seed * 9.0)) * smoothstep(0.5, 0.15, length(L2 - vec2(0.0, 0.2))) * giant;
-  dorsal = mix(dorsal, vec3(0.5, 0.48, 0.42) * (0.7 + 0.3 * vnoise(L2 * 90.0)), crust * 0.8);
+  float crust = smoothstep(0.6, 0.75, vnoise(L2 * 14.0 + wob * 0.8 + seed * 9.0)) * smoothstep(0.42, 0.12, length(vec2(ax, L2.y) - vec2(0.08, 0.22))) * giant;
+  dorsal = mix(dorsal, vec3(0.4, 0.38, 0.34) * (0.8 + 0.2 * vnoise(L2 * 30.0)), crust * 0.6);
   // belly: pale, the margins dusky with a ragged edge, veins showing through the thin wings
   vec3 belly = vec3(0.74, 0.73, 0.72);
   float marg = max(smoothstep(0.72, 0.95, ax + wob.x * 0.08), smoothstep(0.8, 0.97, vv + wob.y * 0.1) * smoothstep(0.2, 0.4, ax));
@@ -800,7 +825,7 @@ void main() {
   if (part < 40.5) {
     float t = vP.y;
     float topK = smoothstep(-0.06, 0.07, Lc.y - 0.012 * sin(Lc.z * 31.0 + seed * 6.0));
-    vec3 back = mix(vec3(0.2, 0.18, 0.08), vec3(0.27, 0.22, 0.1), hs);
+    vec3 back = mix(vec3(0.17, 0.12, 0.09), vec3(0.22, 0.18, 0.08), hs);
     vec3 belly = vec3(0.8, 0.79, 0.7);
     albedo = mix(belly, back, topK);
     // the maze: warped noise iso-lines, thick here and thin there, broken into strokes
@@ -827,12 +852,25 @@ void main() {
     vec2 cell = floor(sp), f = fract(sp) - 0.5;
     vec2 jt = hash22(cell + seed * 7.0) - 0.5;
     float spot = smoothstep(0.2, 0.11, length(f - jt * 0.5)) * step(0.45, hash12(cell + 3.0)) * topK * (1.0 - maze);
-    albedo = mix(albedo, vec3(0.85, 0.82, 0.62), spot * 0.7);
-    // photophores: a dotted line along each flank and round the lips
-    float lineY = 0.02 - 0.07 * smoothstep(0.2, -0.2, Lc.z) + 0.006 * sin(Lc.z * 25.0 + seed * 4.0);
-    float dots = smoothstep(0.3, 0.1, length(vec2(fract(Lc.z * 26.0) - 0.5, (Lc.y - lineY) * 26.0))) * smoothstep(-0.19, -0.12, Lc.z) * smoothstep(0.2, 0.12, Lc.z);
-    vec3 lum = mix(vec3(0.25, 0.95, 0.85), vec3(0.6, 1.0, 0.45), hs);
-    emis += lum * dots * (0.12 + 1.4 * uNight + 1.6 * inf);
+    albedo = mix(albedo, vec3(0.6, 0.55, 0.42), spot * 0.35);
+    // armour: bony plates over the back and the crown; their seams wander (domain-warped cells),
+    // the plate centres are paler and raised, and they part when it puffs up
+    vec2 ap = vec2(Lc.z * 24.0, atan(Lc.x, Lc.y + 0.03) * 4.2) + (vec2(vnoise(Lc.zy * 28.0 + seed * 5.0), vnoise(Lc.xz * 28.0 + 2.0)) - 0.5) * 0.8;
+    vec2 ac = floor(ap);
+    float d1 = 9.0, d2 = 9.0;
+    vec2 bo = vec2(0.0);
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 o = vec2(float(i), float(j));
+      vec2 dd = ac + o + hash22(ac + o + floor(seed * 50.0)) - ap;
+      float dq = dot(dd, dd);
+      if (dq < d1) { d2 = d1; d1 = dq; bo = dd; } else if (dq < d2) d2 = dq;
+    }
+    float seam = sqrt(d2) - sqrt(d1);
+    float plateK = smoothstep(-0.03, 0.06, Lc.y) * smoothstep(-0.2, -0.12, Lc.z);
+    float seamK = (1.0 - smoothstep(0.03 + 0.04 * inf, 0.1 + 0.05 * vnoise(ap * 3.0) + 0.06 * inf, seam)) * plateK;
+    albedo = mix(albedo, albedo * 1.4 + vec3(0.05, 0.04, 0.02), plateK * smoothstep(0.55, 0.0, sqrt(d1)) * 0.55);
+    albedo = mix(albedo, mix(vec3(0.025, 0.02, 0.015), vec3(0.42, 0.24, 0.24), inf), seamK * 0.85);
+    N = normalize(N - vec3(bo.y * 0.0, 0.0, bo.x) * 0.25 * plateK * (1.0 - seamK));
     // gill slit: a dark crescent before the pectoral base
     float gz = Lc.z - 0.09 - 0.012 * (Lc.y - 0.02) * (Lc.y - 0.02) * 400.0 * 0.03;
     float gill = smoothstep(0.0045, 0.0015, abs(gz)) * smoothstep(0.045, 0.02, abs(Lc.y - 0.012)) * step(0.12, abs(Lc.x));
@@ -861,11 +899,11 @@ void main() {
     vec3 irisC = mix(vec3(0.55, 0.4, 0.1), vec3(0.22, 0.4, 0.26), smoothstep(0.42, 0.85, d)) * stri;
     albedo = mix(vec3(0.05, 0.045, 0.03), irisC, iris);
     albedo = mix(albedo, vec3(0.006, 0.007, 0.01), pupil);
-    emis = mix(vec3(0.2, 0.9, 0.7), vec3(0.0), pupil) * smoothstep(0.5, 0.8, d) * iris * (1.2 * uNight + 1.5 * inf);
+    emis = vec3(0.0);
     spec = 1.8; gloss = 0.97; rim = 0.9; trans = 0.0;
     // a fixed soft catchlight on the cornea (the bright water overhead)
-    float cl = pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 120.0);
-    emis += vec3(0.9, 0.95, 1.0) * cl * 1.2 / max(glowK, 0.3);
+    float cl = pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 30.0);
+    emis += vec3(0.9, 0.95, 1.0) * cl * 0.25 / max(glowK, 0.3);
   } else if (part < 42.5) {
     // fins: translucent amber membranes with fine branching rays and a dusky margin
     float s = vP.y, u = vP.z, id = vP.w;
@@ -885,16 +923,25 @@ void main() {
     if (s > edge) discard;
   } else if (part < 43.5) {
     // prickles: ivory spines, darker at the base
-    albedo = mix(vec3(0.3, 0.27, 0.16), vec3(0.88, 0.84, 0.7), vP.y);
-    emis = vec3(0.3, 0.9, 1.0) * inf * 0.25 * vP.y;
+    albedo = mix(vec3(0.22, 0.14, 0.12), vec3(0.88, 0.84, 0.7), vP.y);
     spec = 0.5; gloss = 0.8;
   } else if (part < 44.5) {
     // the beak: fused ivory tooth plates
     albedo = vec3(0.86, 0.82, 0.68) * (0.85 + 0.15 * sin(vP.y * 30.0));
     spec = 0.8; gloss = 0.85; rim = 0.5;
-  } else {
+  } else if (part < 45.5) {
     albedo = vec3(0.04, 0.02, 0.02);
     spec = 0.1;
+  } else if (part < 46.5) {
+    // mandibles: lacquered oxblood chitin fading to bone at the hooks; ivory teeth
+    albedo = vP.z > 0.5 ? vec3(0.85, 0.8, 0.66) : mix(vec3(0.16, 0.04, 0.03), vec3(0.8, 0.72, 0.56), smoothstep(0.55, 1.0, vP.y));
+    albedo *= 0.85 + 0.15 * sin(vP.y * 50.0 + vnoise(Lc.xz * 200.0) * 2.0);
+    spec = 0.9; gloss = 0.88; rim = 0.6;
+  } else {
+    // brow horns and crest spines: ringed bone, dark at the root
+    albedo = mix(vec3(0.12, 0.09, 0.06), vec3(0.86, 0.8, 0.64), smoothstep(0.1, 0.9, vP.y));
+    albedo *= 0.82 + 0.18 * smoothstep(0.2, 0.8, sin(vP.y * 60.0 + vnoise(Lc.xy * 150.0) * 3.0));
+    spec = 0.6; gloss = 0.75; rim = 0.5;
   }
 #elif KIND == 9
   // ---- ribbon eel: velvet skin (blue males, black juveniles, gold females), yellow fins with a
@@ -919,21 +966,32 @@ void main() {
     // gill pore and a faint lateral line of pores
     float ll = smoothstep(0.0009, 0.0, abs(Lc.y - 0.006 * (1.0 - t))) * smoothstep(0.55, 0.85, fract(t * 140.0 + 0.3 * sin(t * 30.0))) * smoothstep(0.08, 0.12, t);
     albedo = mix(albedo, albedo * 2.0 + 0.04, ll * 0.6);
+    // armour: overlapping bony bands down the back, their seams wobbling (never ruled)
+    float bandP = t * 48.0 + 0.25 * sin(Lc.y * 500.0 + t * 37.0) + 0.3 * vnoise(vec2(t * 90.0, Lc.y * 300.0 + seed * 9.0));
+    float seamB = (1.0 - smoothstep(0.0, 0.09 + 0.05 * vnoise(vec2(t * 200.0, seed)), fract(bandP))) * smoothstep(-0.004, 0.004, Lc.y) * smoothstep(0.06, 0.1, t);
+    albedo = mix(albedo, albedo * 0.25, seamB * 0.85);
+    albedo *= 1.0 + 0.25 * smoothstep(0.3, 1.0, fract(bandP)) * smoothstep(-0.004, 0.004, Lc.y) * smoothstep(0.06, 0.1, t);
+    // the palate (hidden under the jaw until it gapes)
+    albedo = mix(albedo, vec3(0.28, 0.04, 0.05), smoothstep(-0.002, -0.006, Lc.y) * smoothstep(0.066, 0.055, t));
     // velvet micro relief and mucus gloss
-    N = normalize(N + (vec3(vnoise(Lc.zy * 900.0), vnoise(Lc.zx * 900.0 + 3.0), 0.0) - 0.5) * 0.12);
+    N = normalize(N + (vec3(vnoise(Lc.zy * 900.0), vnoise(Lc.zx * 900.0 + 3.0), 0.0) - 0.5) * 0.12 + vec3(0.0, 0.0, seamB * 0.25));
     spec = 0.75; gloss = 0.8; rim = 0.8; wrap = 0.24; trans = 0.25;
     emis += vec3(0.4, 0.9, 1.0) * ll * (0.3 * uNight + alarm * 1.2);
   } else if (part < 51.5) {
     float s = vP.z;
-    float ray = smoothstep(0.35, 0.1, abs(fract(t * 260.0 + s * 0.4) - 0.5)) * smoothstep(0.05, 0.3, s);
+    float spF = vP.w > 0.0 ? 130.0 : 200.0;
+    float ray = smoothstep(0.32, 0.08, abs(fract(t * spF + s * 0.25) - 0.5)) * smoothstep(0.05, 0.3, s);
     albedo = finC * (1.0 - ray * 0.3);
     float marg = smoothstep(0.72, 0.9, s + 0.06 * sin(t * 90.0 + seed * 7.0));
     albedo = mix(albedo, vec3(0.95, 0.95, 0.9), marg * 0.85);
     albedo = mix(albedo, bodyC, smoothstep(0.25, 0.0, s) * 0.6);
     trans = 1.2; spec = 0.4; gloss = 0.75; rim = 0.7; wrap = 0.4;
     emis += vec3(0.35, 0.95, 1.0) * marg * (0.25 * uNight + alarm * 0.9);
-    float edge = 0.97 + 0.03 * cos(t * 260.0 * 6.2831853);
+    // the membrane is torn back between spines that stand proud of it (dorsal), scalloped (anal)
+    float ph9 = fract(t * spF + s * 0.25 + 0.5);
+    float edge = vP.w > 0.0 ? 0.58 + 0.42 * pow(max(1.0 - abs(ph9 - 0.5) * 2.0, 0.0), 5.0) + 0.04 * vnoise(vec2(t * 400.0, seed)) : 0.9 + 0.1 * cos(t * spF * 6.2831853);
     if (s > edge) discard;
+    albedo = mix(albedo, vec3(0.1, 0.08, 0.06), smoothstep(0.6, 0.95, s) * step(0.0, vP.w) * ray);
   } else if (part < 52.5) {
     vec2 q = vP.zw;
     float d = length(q);
@@ -941,10 +999,27 @@ void main() {
     albedo = mix(finC * 0.8, vec3(0.005), pupil);
     albedo = mix(albedo, vec3(0.04), smoothstep(0.85, 1.0, d));
     spec = 1.8; gloss = 0.97; rim = 0.9;
-    emis += vec3(0.9, 0.95, 1.0) * pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 90.0) * 1.2 / max(glowK, 0.3);
-  } else {
+    emis += vec3(0.9, 0.95, 1.0) * pow(max(dot(N, normalize(V + vec3(0.0, 0.9, 0.0))), 0.0), 30.0) * 0.25 / max(glowK, 0.3);
+  } else if (part < 53.5) {
     albedo = finC;
     trans = 1.0; spec = 0.4; rim = 0.8;
+  } else if (part < 54.5) {
+    // the lower jaw: gold-scaled outside, the tongue dark red
+    albedo = finC * 0.85 * (0.85 + 0.15 * vnoise(Lc.zx * 2000.0));
+    float lip9 = smoothstep(0.0012, 0.0002, abs(Lc.y + 0.0018 + 0.0004 * sin(Lc.z * 2000.0)));
+    albedo = mix(albedo, vec3(0.02), lip9 * 0.6);
+    if (vP.z > 0.68) albedo = vec3(0.3, 0.05, 0.06);
+    spec = 0.7; gloss = 0.8; rim = 0.7;
+  } else if (part < 55.5) {
+    // needle teeth: glassy ivory
+    albedo = mix(vec3(0.5, 0.35, 0.3), vec3(0.92, 0.9, 0.82), vP.z);
+    spec = 0.9; gloss = 0.9; trans = 0.6;
+  } else {
+    // gill plumes: blood-red feathery filaments, darker at the root
+    float fil = smoothstep(0.3, 0.0, abs(fract(vP.z * 14.0 + vP.w * 0.3) - 0.5));
+    albedo = mix(vec3(0.25, 0.03, 0.04), vec3(0.75, 0.16, 0.12), vP.z) * (0.75 + 0.35 * fil);
+    trans = 1.3; spec = 0.4; rim = 0.9; wrap = 0.4;
+    if (vP.z > 0.92 + 0.08 * sin(vP.y * 900.0 + vQ.w * 20.0)) discard;
   }
 #endif
 
@@ -963,7 +1038,6 @@ void main() {
   float sunK = smoothstep(-0.05, 0.25, uSunDir.y) * (1.0 - uStorm * 0.6);
   float lit = 0.3 + 0.7 * max(dot(N, uSunDir), 0.0) * sunK;
   vec3 col;
-  float alpha;
   if (part < 20.5) {
     float v = vP.y, u = vP.z, layer = vP.w;
     float az = u * 6.2831853;
@@ -980,8 +1054,8 @@ void main() {
     vec2 pq = vec2(az * 10.0, v * 30.0);
     vec2 pc = floor(pq), pf = fract(pq) - 0.5, pj = hash22(pc + hs * 13.0) - 0.5;
     float oc = smoothstep(0.3, 0.14, length(pf - pj * 0.4)) * step(0.45, hash12(pc + 2.0)) * smoothstep(0.62, 0.7, v) * smoothstep(0.84, 0.76, v);
-    float glow = 0.05 + 0.42 * fres + canal * 0.45 + ringC * 0.35 + smoothstep(0.9, 1.0, v) * 0.35;
-    if (layer > 0.5) glow = 0.06 + 0.3 * fres + (sp > 1.5 ? 0.3 * smoothstep(0.3, 1.0, v) : 0.0);
+    float glow = 0.05 + 0.42 * fres + canal * 0.45 + ringC * 0.3 + smoothstep(0.92, 1.0, v) * 0.18;
+    if (layer > 0.5) glow = 0.04 + (sp > 1.5 ? 0.5 : 0.25) * fres;
     col = grad * glow;
     float dark = max(blot * 0.55, oc * 0.85) * (1.0 - layer);
     col = col * (1.0 - dark) + vec3(0.16, 0.04, 0.08) * dark * lit * 0.25;
@@ -998,18 +1072,18 @@ void main() {
   } else if (part < 22.5) {
     // oral curtains: thin frills, darker at their ruffled edges
     float s2 = abs(vP.w), t = vP.y;
-    col = mix(cA, cB, t * 0.6) * (0.1 + 0.32 * s2 * s2) * (1.0 - 0.5 * t);
+    col = mix(cA, cB, t * 0.6) * (0.16 + 0.45 * s2 * s2) * (1.0 - 0.5 * t);
     float edgeD = smoothstep(0.7, 1.0, s2) * (0.5 + 0.5 * vnoise(vec2(t * 40.0, vP.z * 3.0)));
     col = col * (1.0 - edgeD * 0.6) + vec3(0.14, 0.02, 0.06) * edgeD * lit * 0.3;
-    alpha = 0.1 + 0.3 * s2 * s2 + edgeD * 0.25;
+    alpha = 0.14 + 0.36 * s2 * s2 + edgeD * 0.3;
   } else if (part < 23.5) {
     // tentacles: the hunting ones banded with dark stinging batteries
     float t = vP.y, hunt = vP.w;
     col = mix(cR, cA, t) * (0.26 - 0.12 * t);
     alpha = 0.22 * (1.0 - 0.55 * t);
-    float band = smoothstep(0.55, 0.85, sin(t * 90.0 + vnoise(vec2(t * 30.0, vP.z)) * 3.0)) * hunt * smoothstep(0.2, 0.4, t);
-    col = col * (1.0 - band * 0.7) + vec3(0.2, 0.03, 0.06) * band * lit * 0.4;
-    alpha += band * 0.5 + hunt * 0.15;
+    float band = smoothstep(0.35, 0.9, sin(t * 55.0 + vnoise(vec2(t * 12.0, vP.z * 3.0)) * 5.0)) * hunt * smoothstep(0.2, 0.4, t) * (0.5 + 0.5 * vnoise(vec2(t * 9.0, vP.z)));
+    col = col * (1.0 - band * 0.5) + vec3(0.2, 0.03, 0.06) * band * lit * 0.4;
+    alpha += band * 0.3 + hunt * 0.2;
   } else if (part < 24.5) {
     // lens-eyes: dark lenses with an amber iris round a slit pupil
     vec2 q = vP.zw;
@@ -1026,8 +1100,8 @@ void main() {
     float k = vP.y, u = vP.z;
     float edge = 0.62 + 0.38 * pow(abs(cos(u * 6.2831853 * 14.0 + 0.5 * sin(u * 37.0 + hs * 5.0))), 0.6);
     if (k > edge) discard;
-    col = cR * (0.08 + 0.28 * k);
-    alpha = 0.08 + 0.18 * k;
+    col = cR * (0.03 + 0.1 * k);
+    alpha = 0.05 + 0.12 * k;
   } else if (part < 27.5) {
     // the organ cage: pale cartilage hoops
     col = vec3(0.82, 0.78, 0.7) * 0.22 * lit + cB * 0.12 + cB * fres * 0.2;

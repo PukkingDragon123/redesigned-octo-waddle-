@@ -6,31 +6,41 @@
 // lead | flute). `on: [a, b]` fades the layer in as intensity goes from a to b, `off`
 // fades it out again; `secs` limits a layer to some sections; `melodic` layers stop as
 // soon as the mood is left (accompaniment layers fade out over the new mood's harmony).
-import { THEME, THEME_CHORDS, CADENCE_MELODY, CADENCE_CHORDS, SCALES } from './theory.js';
-import { mod } from './util.js';
+//
+// The whole score lives in the jam theme's world (docs/MUSIC.md): F minor / A-flat major (one
+// set of notes), 60 BPM with a sixteenth-note pulse, the theme's VI - i (D-flat - F minor) loop,
+// its B-flat-minor-seventh opening and its dorian lift (B-flat over D) at the close, its soft
+// kick (beat 1, the 'a' of 1, beat 3, the 'a' of 3) and off-beat shaker. Side keys stay close:
+// F dorian for the forest, F phrygian for danger, D-flat (the theme's VI) for the courtship.
+import { THEME, THEME_CHORDS, THEME_DARK_CHORDS, CADENCE_MELODY, CADENCE_CHORDS, SCALES } from './theory.js';
 
-const D = 62;
-const MAJOR = { root: D, scale: SCALES.major };
-const MINOR = { root: D, scale: SCALES.minor };
-const E_DORIAN = { root: 64, scale: SCALES.dorian };
-const D_PHRYGIAN = { root: D, scale: SCALES.phrygian };
+const F = 65;
+const HOME = { root: F, scale: SCALES.minor }; // F aeolian = A-flat major's notes
+const F_DORIAN = { root: F, scale: SCALES.dorian };
+const F_PHRYGIAN = { root: F, scale: SCALES.phrygian };
+const DB_MAJOR = { root: 61, scale: SCALES.major };
 
 const theme = (extra) => ({ bars: THEME_CHORDS, melody: THEME, ...extra });
 
-// The leitmotif in D minor for the falcon chase climax (F# -> F, C# -> C, B -> Bb).
-const MINOR_MAP = { 6: -1, 1: -1, 11: -1 };
-const THEME_MINOR = THEME.map((bar, i) => bar.map(([m, d]) => [i === 7 ? m : m + (MINOR_MAP[mod(m, 12)] || 0), d]));
-const THEME_MINOR_CHORDS = ['Dm', 'C', 'Bb', 'F', 'Gm', 'Dm/F', 'Em7b5', 'Asus4:2 A:2'];
+// the jam theme's groove, on 16 steps of a 4/4 bar
+const KICK = 'X..x....X..x....';
+const KICK_FULL = 'X..x....X..x..o.';
+const SHAKE = '..x...x...x...x.';
+const SHAKE_FULL = 'o.x.o.x.o.x.o.xo';
+const groove = (on, vel = 0.5, shakeOn = null) => [
+  { p: 'drums', inst: 'kick', midi: 36, vel, pats: [{ at: 0, p: KICK }, { at: 0.9, p: KICK_FULL }], on },
+  { p: 'drums', inst: 'shaker', midi: 60, vel: vel * 0.9, pats: [{ at: 0, p: SHAKE }, { at: 0.85, p: SHAKE_FULL }], on: shakeOn || [on[0] + 0.1, on[1] + 0.1] },
+];
 
 export const MOODS = {
   title: {
     level: 1.33,
-    bpm: 64,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
-      intro: { bars: ['Bm7', 'Gmaj7', 'D/F#', 'Asus4:2 A:2'] },
+      intro: { bars: ['Bbm7', 'Dbmaj7', 'Fm9', 'Ebsus4:2 Eb:2'] },
       theme: theme(),
-      inter: { bars: ['G', 'D/F#', 'Em7', 'Asus4:2 A:2'] },
+      inter: { bars: ['Db', 'Fm', 'Db', 'Ebsus4:2 Eb:2'] },
     },
     form: ['intro', 'theme', 'inter', 'theme'],
     layers: [
@@ -46,12 +56,12 @@ export const MOODS = {
 
   dawn: {
     level: 1.33,
-    bpm: 62,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
-      a: { bars: ['Dadd9', 'G/D', 'Dadd9', 'Asus4/D:2 A/D:2'] },
+      a: { bars: ['Abadd9', 'Db/Ab', 'Abadd9', 'Ebsus4/Ab:2 Eb/Ab:2'] },
       frag: theme(),
-      b: { bars: ['Bm7', 'Gmaj7', 'Em7', 'Asus4:2 A:2'] },
+      b: { bars: ['Bbm7', 'Dbmaj7', 'Fm7', 'Ebsus4:2 Eb:2'] },
     },
     form: ['a', 'frag', 'a', 'b'],
     layers: [
@@ -68,13 +78,13 @@ export const MOODS = {
 
   flight: {
     level: 1.26,
-    bpm: 66,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
-      a: { bars: ['D', 'G', 'Bm', 'A'] },
-      b: { bars: ['G', 'D/F#', 'Em7', 'Asus4:2 A:2'] },
+      a: { bars: ['Db', 'Fm', 'Db', 'Eb'] },
+      b: { bars: ['Bbm7', 'Fm/Ab', 'Db', 'Ebsus4:2 Eb:2'] },
       theme: theme(),
-      c: { bars: ['Bm', 'G', 'D', 'A'] },
+      c: { bars: ['Fm', 'Db', 'Ab', 'Eb'] },
     },
     form: ['a', 'b', 'theme', 'c', 'b', 'theme'],
     layers: [
@@ -88,17 +98,18 @@ export const MOODS = {
       { p: 'pad', target: 'choir', n: 4, lo: 57, hi: 79, vowel: 'ah', gain: 0.28, on: [0.6, 0.95] },
       { p: 'bells', inst: 'bell', every: 4, lo: 78, hi: 93, vel: 0.3, on: [0.7, 1] },
       { p: 'swell', inst: 'swell', every: 4, vel: 0.6, on: [0.8, 1] },
+      ...groove([0.45, 0.75], 0.5),
     ],
   },
 
   krill: {
     level: 1.9,
-    bpm: 76,
-    key: MAJOR,
+    bpm: 80,
+    key: HOME,
     sections: {
-      a: { bars: ['D', 'G', 'Em7', 'A'] },
-      b: { bars: ['Bm', 'G', 'D', 'Asus4:2 A:2'] },
-      c: { bars: ['G', 'A', 'F#m', 'Bm', 'G', 'A', 'D', 'D'] },
+      a: { bars: ['Ab', 'Db', 'Fm7', 'Eb'] },
+      b: { bars: ['Cm', 'Db', 'Ab', 'Ebsus4:2 Eb:2'] },
+      c: { bars: ['Db', 'Eb', 'Cm', 'Fm', 'Db', 'Eb', 'Ab', 'Ab'] },
     },
     form: ['a', 'b', 'a', 'c'],
     layers: [
@@ -108,16 +119,17 @@ export const MOODS = {
       { p: 'pad', target: 'strings', n: 4, lo: 62, hi: 81, gain: 0.14 },
       { p: 'rhythm', inst: 'marimba', pat: 'x.xx.x.x', lo: 62, hi: 79, vel: 0.52, on: [0.35, 0.6] },
       { p: 'gen', target: 'flute', lo: 71, hi: 88, vel: 0.5, phrase: 2, restProb: 0.5, cells: [[0.5, 0.5, 1, 2], [1, 0.5, 0.5, 2], [1, 1, 2]], melodic: true, on: [0.6, 0.9] },
+      { p: 'drums', inst: 'shaker', midi: 60, vel: 0.42, pats: [{ at: 0, p: SHAKE }, { at: 0.7, p: SHAKE_FULL }], on: [0.4, 0.7] },
     ],
   },
 
   forest: {
     level: 1.26,
     bpm: 60,
-    key: E_DORIAN,
+    key: F_DORIAN,
     sections: {
-      a: { bars: ['Em9', 'A/E', 'Em9', 'Gmaj7:2 A:2'] },
-      b: { bars: ['Bm7', 'Gmaj7', 'Em7', 'F#m7'] },
+      a: { bars: ['Fm9', 'Bb/F', 'Fm9', 'Abmaj7:2 Bb:2'] },
+      b: { bars: ['Cm7', 'Abmaj7', 'Fm7', 'Gm7'] },
     },
     form: ['a', 'a', 'b', 'a'],
     layers: [
@@ -133,13 +145,13 @@ export const MOODS = {
 
   song: {
     level: 1.12,
-    bpm: 66,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     steady: true,
     sections: {
-      a: { bars: ['D', 'D', 'G/D', 'D'] },
-      b: { bars: ['Bm', 'G', 'D', 'Asus4:2 A:2'] },
-      c: { bars: ['G', 'D/F#', 'Em7', 'A'] },
+      a: { bars: ['Fm', 'Fm', 'Db/F', 'Fm'] },
+      b: { bars: ['Db', 'Bbm7', 'Fm', 'Ebsus4:2 Eb:2'] },
+      c: { bars: ['Db', 'Ab/C', 'Bbm7', 'Eb'] },
     },
     form: ['a', 'b', 'a', 'c'],
     layers: [
@@ -156,16 +168,17 @@ export const MOODS = {
       { p: 'pad', target: 'brass', n: 3, lo: 50, hi: 67, gain: 0.4, on: [0.85, 1] },
       { p: 'swell', target: 'brass', every: 4, on: [0.85, 1] },
       { p: 'swell', inst: 'swell', every: 4, vel: 0.45, on: [0.85, 1] },
+      ...groove([0.55, 0.85], 0.5),
     ],
   },
 
   night: {
     level: 1.33,
-    bpm: 58,
-    key: MAJOR,
+    bpm: 56,
+    key: HOME,
     sections: {
-      a: { bars: ['Dmaj7', 'Gmaj7', 'Bm9', 'Asus4:2 A:2'] },
-      b: { bars: ['Gmaj7', 'F#m7', 'Em9', 'Asus4'] },
+      a: { bars: ['Dbmaj7', 'Fm9', 'Bbm9', 'Ebsus4:2 Eb:2'] },
+      b: { bars: ['Dbmaj7', 'Cm7', 'Bbm9', 'Ebsus4'] },
     },
     form: ['a', 'a', 'b', 'a'],
     layers: [
@@ -181,12 +194,12 @@ export const MOODS = {
 
   storm: {
     level: 1.6,
-    bpm: 72,
-    key: MINOR,
+    bpm: 66,
+    key: HOME,
     sections: {
-      a: { bars: ['Dm', 'Dm', 'Bb', 'Asus4:2 A:2'] },
-      b: { bars: ['Gm', 'Bb', 'Dm/A', 'A'] },
-      c: { bars: ['Dm', 'C', 'Bb', 'A'] },
+      a: { bars: ['Fm', 'Fm', 'Db', 'Csus4:2 C:2'] },
+      b: { bars: ['Bbm', 'Db', 'Fm/C', 'C'] },
+      c: { bars: ['Fm', 'Eb', 'Db', 'C'] },
     },
     form: ['a', 'b', 'a', 'c'],
     layers: [
@@ -204,11 +217,11 @@ export const MOODS = {
 
   danger: {
     level: 1.26,
-    bpm: 84,
-    key: D_PHRYGIAN,
+    bpm: 80,
+    key: F_PHRYGIAN,
     sections: {
-      a: { bars: ['Dcl', 'Dcl', 'Bbcl4/D', 'C#dim/D'] },
-      b: { bars: ['Dcl', 'Ebmaj7/D', 'Dcl', 'Bbcl4/D'] },
+      a: { bars: ['Fcl', 'Fcl', 'Dbcl4/F', 'Edim/F'] },
+      b: { bars: ['Fcl', 'Gbmaj7/F', 'Fcl', 'Dbcl4/F'] },
     },
     form: ['a', 'b'],
     layers: [
@@ -225,12 +238,12 @@ export const MOODS = {
 
   chase: {
     level: 1.25,
-    bpm: 132,
-    key: MINOR,
+    bpm: 120,
+    key: HOME,
     sections: {
-      a: { bars: ['Dm', 'Dm', 'Bb', 'C', 'Dm', 'Dm', 'Gm', 'A'] },
-      b: { bars: ['Gm', 'Bb', 'C', 'A', 'Gm', 'Bb', 'Asus4:2 A:2', 'A'] },
-      climax: { bars: THEME_MINOR_CHORDS, melody: THEME_MINOR },
+      a: { bars: ['Fm', 'Fm', 'Db', 'Eb', 'Fm', 'Fm', 'Bbm', 'C'] },
+      b: { bars: ['Bbm', 'Db', 'Eb', 'C', 'Bbm', 'Db', 'Csus4:2 C:2', 'C'] },
+      climax: { bars: THEME_DARK_CHORDS, melody: THEME },
     },
     form: ['a', 'b', 'a', 'climax'],
     layers: [
@@ -251,11 +264,11 @@ export const MOODS = {
 
   relief: {
     level: 1.12,
-    bpm: 63,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
       theme: theme(),
-      b: { bars: ['G', 'D/F#', 'Em7', 'Asus4:2 A:2'] },
+      b: { bars: ['Db', 'Ab/C', 'Bbm7', 'Ebsus4:2 Eb:2'] },
     },
     form: ['theme', 'b', 'theme'],
     layers: [
@@ -271,15 +284,15 @@ export const MOODS = {
 
   cloudwall: {
     level: 1.26,
-    bpm: 66,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
-      a: { bars: ['D/A', 'Em/A', 'D/A', 'Asus4:2 A:2'] },
-      b: { bars: ['F#m/A', 'G/A', 'Bm/A', 'Asus4:2 A:2'] },
+      a: { bars: ['Ab/Eb', 'Bbm/Eb', 'Ab/Eb', 'Ebsus4:2 Eb:2'] },
+      b: { bars: ['Cm/Eb', 'Db/Eb', 'Fm/Eb', 'Ebsus4:2 Eb:2'] },
     },
     form: ['a', 'b'],
     layers: [
-      { p: 'drone', target: 'drone', pc: 9, lo: 33, notes: [0, 12], gain: 0.2 },
+      { p: 'drone', target: 'drone', pc: 3, lo: 33, notes: [0, 12], gain: 0.2 },
       { p: 'pad', target: 'strings', n: 4, lo: 69, hi: 88, gain: 0.2 },
       { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 76, vowel: 'oo', gain: 0.18 },
       { p: 'rising', inst: 'celesta', lo: 69, vel: 0.3, dens: [0.45, 1] },
@@ -290,11 +303,11 @@ export const MOODS = {
 
   oasis: {
     level: 1.06,
-    bpm: 66,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sections: {
       theme: theme(),
-      b: { bars: ['G', 'A', 'F#m', 'Bm', 'Em7', 'A/C#', 'D', 'Asus4:2 A:2'] },
+      b: { bars: ['Db', 'Eb', 'Cm', 'Fm', 'Bbm7', 'Eb/G', 'Ab', 'Ebsus4:2 Eb:2'] },
     },
     form: ['theme', 'theme', 'b', 'theme'],
     layers: [
@@ -310,19 +323,20 @@ export const MOODS = {
       { p: 'drums', inst: 'timpani', pitch: 'root', lo: 38, hi: 45, vel: 0.5, pat: ['X...............', '................', '................', '................'] },
       { p: 'pad', target: 'brass', n: 3, lo: 50, hi: 67, gain: 0.2, on: [0.6, 0.9] },
       { p: 'swell', target: 'brass', every: 4, on: [0.6, 0.9] },
+      ...groove([0.4, 0.7], 0.45),
     ],
   },
 
   finale: {
     level: 1.12,
-    bpm: 64,
-    key: MAJOR,
+    bpm: 60,
+    key: HOME,
     sectionEnergy: true,
     sections: {
       soft: theme({ energy: 0.25 }),
       full: theme({ energy: 0.88 }),
       cadence: { bars: CADENCE_CHORDS, melody: CADENCE_MELODY, energy: 1 },
-      coda: { bars: ['D', 'G/D', 'D', 'Gmaj7/D:2 D:2'], energy: 0.12 },
+      coda: { bars: ['Fm9', 'Bb/F', 'Fm9', 'Dbmaj7/F:2 Fm9:2'], energy: 0.12 },
     },
     form: ['soft', 'full', 'cadence', 'coda'],
     loopFrom: 3,
@@ -342,6 +356,7 @@ export const MOODS = {
       { p: 'pad', target: 'brass', n: 3, lo: 50, hi: 67, gain: 0.24, on: [0.85, 1] },
       { p: 'swell', target: 'brass', every: 4, on: [0.85, 1] },
       { p: 'swell', inst: 'swell', every: 4, vel: 0.42, on: [0.9, 1] },
+      ...groove([0.8, 0.95], 0.5),
     ],
   },
 
@@ -349,12 +364,12 @@ export const MOODS = {
   // Act II: the courtship duet and spiral dance at golden hour (warm, lilting, a little waltz).
   courtship: {
     level: 1.2,
-    bpm: 68,
-    key: { root: 64, scale: SCALES.major },
+    bpm: 66,
+    key: DB_MAJOR,
     sections: {
-      a: { bars: ['E', 'A/E', 'C#m7', 'Bsus4:2 B:2'] },
-      b: { bars: ['Amaj7', 'F#m7', 'G#m7', 'Bsus4:2 B:2'] },
-      c: { bars: ['C#m', 'Amaj7', 'E/B', 'B'] },
+      a: { bars: ['Db', 'Gb/Db', 'Bbm7', 'Absus4:2 Ab:2'] },
+      b: { bars: ['Gbmaj7', 'Ebm7', 'Fm7', 'Absus4:2 Ab:2'] },
+      c: { bars: ['Bbm', 'Gbmaj7', 'Db/Ab', 'Ab'] },
     },
     form: ['a', 'b', 'a', 'c'],
     layers: [
@@ -372,12 +387,12 @@ export const MOODS = {
   // Act III: new life in the lagoon at dawn (hushed, a lullaby on celesta and harp over strings).
   birth: {
     level: 1.3,
-    bpm: 58,
-    key: MAJOR,
+    bpm: 56,
+    key: HOME,
     sections: {
-      a: { bars: ['Dmaj7', 'Gmaj7/D', 'Bm9', 'Asus4:2 A:2'] },
+      a: { bars: ['Dbmaj7', 'Fm9', 'Bbm9', 'Ebsus4:2 Eb:2'] },
       frag: theme(),
-      b: { bars: ['Gmaj7', 'D/F#', 'Em9', 'Asus4:2 A:2'] },
+      b: { bars: ['Dbmaj7', 'Ab/C', 'Bbm9', 'Ebsus4:2 Eb:2'] },
     },
     form: ['a', 'a', 'frag', 'b'],
     layers: [
@@ -394,16 +409,16 @@ export const MOODS = {
   // Act IV: the elder's rest (slow, deep and luminous; the theme once more, very far away).
   rest: {
     level: 1.33,
-    bpm: 52,
-    key: MAJOR,
+    bpm: 50,
+    key: HOME,
     sections: {
-      a: { bars: ['D/A', 'Gmaj7/A', 'Bm7/A', 'Asus4:2 A:2'] },
+      a: { bars: ['Fm/C', 'Dbmaj7/C', 'Bbm7/C', 'Csus4:2 C:2'] },
       theme: theme({ energy: 0.3 }),
-      b: { bars: ['Gmaj7', 'Em9', 'F#m7', 'Asus4'] },
+      b: { bars: ['Dbmaj7', 'Bbm9', 'Cm7', 'Csus4'] },
     },
     form: ['a', 'theme', 'b', 'a'],
     layers: [
-      { p: 'drone', target: 'drone', pc: 9, lo: 33, notes: [0, 7, 12], gain: 0.22 },
+      { p: 'drone', target: 'drone', pc: 0, lo: 33, notes: [0, 7, 12], gain: 0.22 },
       { p: 'pad', target: 'strings', n: 4, lo: 50, hi: 72, gain: 0.26 },
       { p: 'pad', target: 'choir', n: 4, lo: 55, hi: 76, vowel: 'oo', gain: 0.2 },
       { p: 'melody', target: 'lead', octs: [-1], vel: 0.45, secs: ['theme'], melodic: true, on: [0.3, 0.6] },

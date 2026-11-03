@@ -188,6 +188,59 @@ export class Sfx {
     return { end: t + s.buffer.duration / src.playbackRate.value, src };
   }
 
+  /**
+   * Layer a recorded take of `group` (src/audio/SampleLib.js) into dest; null while none is
+   * loaded, so the caller keeps its synthesis. o: rate, vol, lp / hp (Hz), delay, offset.
+   */
+  _rec(group, t, dest, nodes, o = {}) {
+    const lib = this.sys.samples;
+    const take = lib && lib.pick(group, this.rng);
+    if (!take) return null;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = take.buffer;
+    const rate = clamp(finite(o.rate, 1), 0.1, 8);
+    src.playbackRate.value = rate;
+    nodes.push(src);
+    let last = src;
+    if (o.lp) {
+      const f = this._filter('lowpass', o.lp, 0.6, nodes);
+      last.connect(f);
+      last = f;
+    }
+    if (o.hp) {
+      const f = this._filter('highpass', o.hp, 0.6, nodes);
+      last.connect(f);
+      last = f;
+    }
+    const g = this._gain(finite(o.vol, 1), nodes);
+    last.connect(g);
+    g.connect(dest);
+    const t0 = t + (o.delay || 0);
+    const off = Math.min(Math.max(0, o.offset || 0), take.buffer.duration * 0.5);
+    try {
+      src.start(t0, off);
+    } catch (e) {
+      return null;
+    }
+    return { src, end: t0 + (take.buffer.duration - off) / rate, take };
+  }
+
+  /** A random factor around 1 (+-k): pitch/level variety so repeats never sound identical. */
+  _vary(k = 0.08) {
+    return 1 + (this.rng() * 2 - 1) * k;
+  }
+
+  /** Clean up after whichever of the synth source or the recording ends last. */
+  _cleanupLast(src, end, r, nodes) {
+    if (r && r.end > end) {
+      this._cleanup(r.src, nodes);
+      return r.end;
+    }
+    this._cleanup(src, nodes);
+    return end;
+  }
+
   // ---- effects (each returns its end time) ----------------------------------------------
 
   /** Sonic boom: pressure thump, a deep whoomph and a long rolling tail. */
@@ -233,8 +286,10 @@ export class Sfx {
       glide(rg.gain, 0, t + 0.4, 1.1);
       n3.connect(lp3); lp3.connect(rg); rg.connect(amp);
     }
-    this._cleanup(th, nodes);
-    return end;
+    // recorded blasts slowed into a deep air-burst under the synthesis
+    this._rec('blastNear', t, amp, nodes, { rate: (small ? 0.62 : 0.42) * pitch * this._vary(0.06), vol: small ? 0.55 : 0.7, lp: 2600 });
+    const r = small ? null : this._rec('blastFar', t + 0.02, amp, nodes, { rate: 0.55 * pitch * this._vary(0.05), vol: 0.75, lp: 1400 });
+    return this._cleanupLast(th, end, r, nodes);
   }
 
   _boomSmall(t, gain, pitch, pos, o) {
@@ -266,8 +321,11 @@ export class Sfx {
     const ng = this._gain(0, nodes);
     this._env(ng.gain, t + 0.05, 0.15, 0.01, 0.04);
     n.connect(nb); nb.connect(ng); ng.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    // a recorded bite (crunch), then a wet swallow, slowed to a big mouth
+    const r1 = this._rec('crunch', t, amp, nodes, { rate: 0.72 * pitch * this._vary(0.1), vol: 0.7, lp: 5200 });
+    const r2 = this._rec('glug', t + 0.1, amp, nodes, { rate: 0.55 * pitch * this._vary(0.08), vol: 0.35, lp: 1800 });
+    const r = r2 && (!r1 || r2.end > r1.end) ? r2 : r1;
+    return this._cleanupLast(n, end, r, nodes);
   }
 
   /** Glitter: a quick run of high celesta notes on the current chord. */
@@ -312,8 +370,9 @@ export class Sfx {
     const ng = this._gain(0, nodes);
     this._env(ng.gain, t, 0.5, 0.001, 0.012);
     n.connect(bp); bp.connect(ng); ng.connect(amp);
-    this._cleanup(o1, nodes);
-    return end;
+    // a recorded body thump, muffled, for weight
+    const r = this._rec('thump', t, amp, nodes, { rate: 0.75 * pitch * this._vary(0.1), vol: 0.6, lp: 1500 * Math.min(2, pitch) });
+    return this._cleanupLast(o1, end, r, nodes);
   }
 
   /** A whale wing stroke: a soft whump of air with a feathery edge. */
@@ -332,8 +391,9 @@ export class Sfx {
     glide(g.gain, 0, t + 0.09, 0.11);
     const g2 = this._gain(0.25, nodes);
     n.connect(b1); b1.connect(g); n.connect(b2); b2.connect(g2); g2.connect(g); g.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    // a recorded wing stroke, slowed down to a whale-sized wing
+    const r = this._rec('wing', t, amp, nodes, { rate: 0.5 * pitch * this._vary(0.1), vol: 0.45, lp: 2400 });
+    return this._cleanupLast(n, end, r, nodes);
   }
 
   /** Air rushing past: a band of noise sweeping up and down, panning across. */
@@ -361,8 +421,9 @@ export class Sfx {
     rampAt(g.gain, 0.7, t + 0.38);
     rampAt(g.gain, 0, t + 1.05);
     n.connect(bp); bp.connect(g); g.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    // a recorded swish (rope, stick), slowed into a big body moving air, peaking with the sweep
+    const r = this._rec('whoosh', t + 0.18, amp, nodes, { rate: 0.6 * pitch * this._vary(0.12), vol: 0.25 });
+    return this._cleanupLast(n, end, r, nodes);
   }
 
   /** Thunder: a crack and a long rolling rumble, both delayed and darkened by distance. */
@@ -396,6 +457,17 @@ export class Sfx {
     const crackG = 0.9 / Math.pow(1 + d / 500, 1.5);
     const rumbleG = 0.85 / (1 + d / 2500);
     const cut = clamp(7000 / (1 + d / 450), 350, 7000) * pitch;
+    // a recorded thunderclap when one is loaded (the synthesis below is the fallback): crackling
+    // close by, a dark roll far off, retuned a little each time
+    const rec = this._rec(d < 900 ? 'thunderNear' : 'thunderFar', t0, amp, nodes, {
+      rate: (0.82 + 0.22 * this.rng()) * pitch * (d > 2500 ? 0.85 : 1),
+      vol: 1.9 * (0.4 * crackG + rumbleG),
+      lp: clamp(9000 / (1 + d / 700), 260, 9000),
+    });
+    if (rec) {
+      this._cleanup(rec.src, nodes);
+      return rec.end;
+    }
     if (crackG > 0.01) {
       const n = this._noise('white', t0, t0 + 0.6, nodes);
       const hp = this._filter('highpass', 300, 0.7, nodes);
@@ -466,8 +538,9 @@ export class Sfx {
     const rg = this._gain(0, nodes);
     this._env(rg.gain, t, 0.7, 0.03, 0.5);
     n3.connect(lp3); lp3.connect(rg); rg.connect(amp);
-    this._cleanup(o, nodes);
-    return end;
+    // the real clap right on the strike
+    const r = this._rec('thunderNear', t, amp, nodes, { rate: (0.95 + 0.15 * this.rng()) * pitch, vol: 0.9 });
+    return this._cleanupLast(o, end, r, nodes);
   }
 
   /** Storm falcon: an FM "kee-eee-arr" through a formant, gently driven, with echo. */
@@ -520,8 +593,9 @@ export class Sfx {
     const nb = this._filter('bandpass', 3400 * pitch, 2, nodes);
     const ng = this._gain(0.12, nodes);
     n.connect(nb); nb.connect(ng); ng.connect(env);
-    this._cleanup(car, nodes);
-    return end;
+    // a real seabird's cry under the FM screech gives it a throat
+    const r = this._rec('gull', t, amp, nodes, { rate: 0.85 * pitch * this._vary(0.1), vol: 1.6, hp: 500 });
+    return this._cleanupLast(car, end, r, nodes);
   }
 
   /** Falcon wing: a sharp feathered snap with flutter. */
@@ -544,8 +618,8 @@ export class Sfx {
     flg.connect(g.gain);
     const lg = this._gain(0.6, nodes);
     n.connect(bp); bp.connect(g); n.connect(low); low.connect(lg); lg.connect(g); g.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    const r = this._rec('wing', t, amp, nodes, { rate: 1.05 * pitch * this._vary(0.12), vol: 0.35 });
+    return this._cleanupLast(n, end, r, nodes);
   }
 
   /** Water splash: a broadband burst, a low plunge and scattered droplets. */
@@ -555,17 +629,22 @@ export class Sfx {
     const out = this._out(t, pos, nodes, { ref: 15, wet: 0.3 });
     const amp = this._gain(gain * 0.55, nodes);
     amp.connect(out);
-    const n = this._noise('white', t, end, nodes);
+    // a recorded splash (a stone into a pond, or a boulder into a tank for the big ones),
+    // slowed for the whale's size; the synthesis below is the fallback, and its plunge stays
+    const big = gain >= 0.8;
+    const r = this._rec(big ? 'splashBig' : 'splashSmall', t, amp, nodes, { rate: (big ? 0.78 : 0.85) * pitch * this._vary(0.1), vol: big ? 1.3 : 1.1 });
+    const n = this._noise('white', t, r ? t + 0.05 : end, nodes);
+    const pl = this._osc('sine', 130 * pitch, t, t + 0.4, nodes);
+    expAt(pl.frequency, 55 * pitch, t + 0.25);
+    const pg = this._gain(0, nodes);
+    this._env(pg.gain, t, r ? 0.35 : 0.6, 0.01, 0.08);
+    pl.connect(pg); pg.connect(amp);
+    if (r) return this._cleanupLast(pl, t + 0.4, r, nodes);
     const bp = this._filter('bandpass', 1300 * pitch, 0.6, nodes);
     const lp = this._filter('lowpass', 6000, 0.7, nodes);
     const g = this._gain(0, nodes);
     this._env(g.gain, t, 0.8, 0.006, 0.2);
     n.connect(bp); bp.connect(lp); lp.connect(g); g.connect(amp);
-    const pl = this._osc('sine', 130 * pitch, t, t + 0.4, nodes);
-    expAt(pl.frequency, 55 * pitch, t + 0.25);
-    const pg = this._gain(0, nodes);
-    this._env(pg.gain, t, 0.6, 0.01, 0.08);
-    pl.connect(pg); pg.connect(amp);
     for (let i = 0; i < 8; i++) {
       const tt = t + 0.05 + this.rng() * 0.8;
       const f = (800 + this.rng() * 1800) * pitch;
@@ -621,6 +700,8 @@ export class Sfx {
     const ng = this._gain(0, nodes);
     this._env(ng.gain, t, 0.12, 0.002, 0.012);
     n.connect(hp); hp.connect(ng); ng.connect(amp);
+    // the bug's tiny crunch
+    this._rec('crunch', t, amp, nodes, { rate: 1.5 * pitch * this._vary(0.12), vol: 0.35, hp: 900 });
     // the note
     const key = this.sys._keyNow();
     const tones = chordTones(key.ch, 76, 101, []);
@@ -659,6 +740,14 @@ export class Sfx {
     rampAt(g.gain, 0.45, t + 0.2);
     glide(g.gain, 0, t + 0.25, 0.35);
     n.connect(bp); bp.connect(g); g.connect(amp);
+    // recorded: a big splash slowed under the crack, a muffled body thump
+    const r = this._rec('splashBig', t, amp, nodes, { rate: 0.66 * pitch * this._vary(0.08), vol: 1.0 });
+    this._rec('thump', t, amp, nodes, { rate: 0.55 * pitch * this._vary(0.08), vol: 0.8, lp: 900 });
+    if (r) {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(0, t);
+      return this._cleanupLast(n, end, r, nodes);
+    }
     for (let i = 0; i < 10; i++) {
       const tt = t + 0.25 + this.rng() * 1.1;
       const f = (700 + this.rng() * 1600) * pitch;
@@ -679,22 +768,24 @@ export class Sfx {
     const out = this._out(t, pos, nodes, { ref: 12, wet: 0.25 });
     const amp = this._gain(gain * 0.7, nodes);
     amp.connect(out);
+    // a recorded exhale (a horse's snort, a man blowing hard) slowed into a blowhole's blast;
+    // the synthesized roar stays under it as the spray, softer
+    const rb = this._rec('breath', t, amp, nodes, { rate: 0.5 * pitch * this._vary(0.1), vol: 0.55, lp: 3200 * Math.min(2, pitch) });
     const n = this._noise('pink', t, end, nodes);
     const bp = this._filter('bandpass', 380 * pitch, 0.8, nodes);
     expAt(bp.frequency, 1500 * pitch, t + 0.18);
     expAt(bp.frequency, 520 * pitch, t + 1.4);
     const g = this._gain(0, nodes);
     setAt(g.gain, 0, t);
-    rampAt(g.gain, 0.9, t + 0.06);
-    glide(g.gain, 0, t + 0.12, 0.4);
+    rampAt(g.gain, rb ? 0.45 : 0.9, t + 0.06);
+    glide(g.gain, 0, t + 0.12, rb ? 0.35 : 0.4);
     n.connect(bp); bp.connect(g); g.connect(amp);
     const r = this._osc('triangle', 72 * pitch, t, t + 0.6, nodes);
     expAt(r.frequency, 50 * pitch, t + 0.5);
     const rg = this._gain(0, nodes);
     this._env(rg.gain, t, 0.35, 0.02, 0.15);
     r.connect(rg); rg.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    return this._cleanupLast(n, end, rb, nodes);
   }
 
   /** A burst of bubbles under water: a quick cluster of rising blips. */
@@ -705,7 +796,9 @@ export class Sfx {
     const amp = this._gain(gain * 0.4, nodes);
     amp.connect(out);
     let lastO = null;
-    for (let i = 0; i < 16; i++) {
+    const rb = this._rec('bubbles', t, amp, nodes, { rate: 0.7 * pitch * this._vary(0.12), vol: 0.8, lp: 3000 });
+    const blips = rb ? 5 : 16;
+    for (let i = 0; i < blips; i++) {
       const tt = i === 15 ? t + 0.95 : t + Math.pow(this.rng(), 1.6) * 0.9;
       const f = (240 + this.rng() * 700) * pitch;
       const ob = this._osc('sine', f, tt, tt + 0.07, nodes);
@@ -720,8 +813,7 @@ export class Sfx {
     const ng = this._gain(0, nodes);
     this._env(ng.gain, t, 0.3, 0.01, 0.12);
     n.connect(lp); lp.connect(ng); ng.connect(amp);
-    this._cleanup(lastO || n, nodes);
-    return end;
+    return this._cleanupLast(lastO || n, end, rb, nodes);
   }
 
   /** A dash: a fast tearing whoosh with a bright airy whistle on top. */
@@ -746,8 +838,8 @@ export class Sfx {
     const wg = this._gain(0, nodes);
     this._env(wg.gain, t, 0.06, 0.03, 0.12);
     w.connect(wg); wg.connect(amp);
-    this._cleanup(n, nodes);
-    return end;
+    const r = this._rec('whoosh', t, amp, nodes, { rate: 0.5 * pitch * this._vary(0.1), vol: 0.25 });
+    return this._cleanupLast(n, end, r, nodes);
   }
 
   /** A trick landed / a ring flown through: a quick harp run up the chord (o.step lifts it). */

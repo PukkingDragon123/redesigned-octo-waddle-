@@ -256,28 +256,35 @@ export function stepScale(m, root, scale, k) {
   return c;
 }
 
-// ---- The SKYSONG leitmotif (D major, 4/4, ~66 BPM) -----------------------------------
-// One entry per bar: [midi, beats]. F#4 = 66, A4 = 69, D5 = 74, C#5 = 73, B4 = 71, E4 = 64,
-// G4 = 67, E5 = 76.
+// ---- The SKYSONG leitmotif (F minor / A-flat major, 4/4, 60 BPM) ----------------------
+// Written to echo the jam theme (docs/MUSIC.md), not to quote it: the theme's hook climbs a
+// D-flat-major arpeggio to its top and leans on the minor sixth (D-flat) above the fifth (C).
+// Here the climb is A-flat - C - D-flat, the lean resolves down (D-flat -> C), and the second
+// half sequences the climb a fourth higher before settling on the tonic. Over the theme's own
+// VI - i (D-flat - F minor) loop. One entry per bar: [midi, beats]. F4 = 65, A-flat4 = 68,
+// B-flat4 = 70, C5 = 72, D-flat5 = 73, E-flat5 = 75, F5 = 77, A-flat5 = 80, D5 = 74.
 export const THEME = [
-  [[66, 2], [69, 1], [74, 1]],
-  [[73, 3], [71, 1]],
-  [[69, 2], [66, 1], [64, 1]],
-  [[66, 4]],
-  [[67, 2], [71, 1], [76, 1]],
-  [[74, 3], [73, 1]],
-  [[71, 2], [69, 1], [67, 1]],
-  [[69, 4]],
+  [[68, 2], [72, 1], [73, 1]],
+  [[72, 3], [68, 1]],
+  [[65, 2], [68, 1], [70, 1]],
+  [[72, 4]],
+  [[73, 2], [77, 1], [80, 1]],
+  [[77, 3], [75, 1]],
+  [[73, 2], [70, 1], [72, 1]],
+  [[65, 4]],
 ];
-export const THEME_CHORDS = ['D', 'A/C#', 'Bm', 'F#m', 'G', 'D/F#', 'Em7', 'Asus4:2 A:2'];
+export const THEME_CHORDS = ['Db', 'Fm', 'Db6', 'Ab/C', 'Bbm7', 'Db', 'Bbm7:2 Eb:2', 'Fm'];
+// The same tune darkened for the falcon chase climax (B-flat minor, the dominant C).
+export const THEME_DARK_CHORDS = ['Db', 'Fm', 'Bbm', 'C', 'Bbm7', 'Db', 'Bbm7:2 C:2', 'Fm'];
 
-// The ending: the last phrase turns toward home (leading tone C#5 -> D5) and rests on D.
+// The ending: the second phrase turns through the jam theme's own last colour (B-flat major
+// over D, the dorian lift: D natural falling to C) and rises a fourth to rest on F.
 export const CADENCE_MELODY = [
-  [[67, 2], [71, 1], [76, 1]],
-  [[74, 3], [73, 1]],
-  [[71, 2], [69, 1], [67, 1]],
-  [[69, 2], [73, 2]],
-  [[74, 8]], // held through the last bar
+  [[73, 2], [77, 1], [80, 1]],
+  [[77, 3], [75, 1]],
+  [[73, 2], [70, 1], [72, 1]],
+  [[74, 2], [72, 2]],
+  [[77, 8]], // held through the last bar
   [[null, 4]],
 ];
-export const CADENCE_CHORDS = ['G', 'D/F#', 'Em7', 'Asus4:2 A:2', 'D', 'D'];
+export const CADENCE_CHORDS = ['Bbm7', 'Db', 'Ebsus4:2 Eb:2', 'Bb/D', 'Fm9', 'Fm9'];

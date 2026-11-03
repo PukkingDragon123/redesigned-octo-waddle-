@@ -904,7 +904,8 @@ export class LifeCycle {
     herd.mode = 'rest';
     herd.targetSpeed = 0;
     g.atmosphere.set('dawn');
-    S.audio.setMood?.('dawn', { fade: 4 });
+    // the jam's theme track plays whole from here, through the last dissolve into the title
+    S.audio.setMood?.('dawn', { fade: 4, track: true });
     const c = maelstromCenter(S);
     nur.open(c, { radius: 120, depth: 7, spin: 0.22 });
     const eye = nur.eyeY();

@@ -3,6 +3,9 @@
 // and call snaps to the current key or chord so the herd sings inside the score.
 // Spatialised with an HRTF panner, distance attenuation and an air-absorption lowpass;
 // the reverb and sky-echo sends are taken before the panner so far voices sound wetter.
+// Real humpback song (NOAA, public domain; src/audio/SampleLib.js) is layered in once loaded:
+// each call adds a song unit retuned to the call's main note, and a hum adds a looped moan
+// whose playback rate follows the sung pitch, so the singing game's pitch control is intact.
 import {
   clamp, lerp, mtof, glide, setAt, rampAt, expAt, cancelFrom, holdAt, disconnect, stopAt, startAt,
   finite, smoothstep, driveCurve,
@@ -171,6 +174,7 @@ export class WhaleVoice {
       const now = sys.ctx.currentTime;
       if (!this._attached(now)) this._place(now, true);
       this._playCall(def, now + 0.02);
+      this._playRecCall(String(kind), def, now + 0.02);
       this.lastActive = now;
     } catch (err) {
       this.sys._warn(err);
@@ -374,13 +378,31 @@ export class WhaleVoice {
     nbp.Q.value = 1.3;
     const ng = G(0);
     nsrc.connect(nbp); nbp.connect(ng); ng.connect(mix);
+    // a real humpback moan looped under the tone, its rate driven by the sung pitch (Hz / f0)
+    let hsrc = null, hscale = null, hlp = null, hg = null;
+    const hum = sys.samples && sys.samples.pick('wHum');
+    if (hum && hum.f0) {
+      hsrc = ctx.createBufferSource();
+      hsrc.buffer = hum.buffer;
+      hsrc.loop = true;
+      hsrc.playbackRate.value = 0;
+      hscale = G(1 / hum.f0);
+      pitch.connect(hscale);
+      hscale.connect(hsrc.playbackRate);
+      hlp = ctx.createBiquadFilter();
+      hlp.type = 'lowpass';
+      hlp.frequency.value = (this.calf ? 2600 : 1700) * k;
+      hg = G(this.calf ? 0.5 : 0.9);
+      hsrc.connect(hlp); hlp.connect(hg); hg.connect(mix);
+    }
     const amp = G(0);
     mix.connect(amp);
     amp.connect(io.air);
     startAt(pitch, t); startAt(osc, t); startAt(vib, t);
     if (sub) { startAt(sub, t); startAt(growl, t); }
     try { nsrc.start(t, Math.random() * (nsrc.buffer.duration - 0.1)); } catch (e) { /* ignore */ }
-    this.eng = { pitch, osc, vib, vibG, mix, f1, f2, dry, g1, g2, gd, sub, subG, half, growl, growlD, nsrc, nbp, ng, amp };
+    if (hsrc) try { hsrc.start(t, Math.random() * hsrc.buffer.duration); } catch (e) { /* ignore */ }
+    this.eng = { pitch, osc, vib, vibG, mix, f1, f2, dry, g1, g2, gd, sub, subG, half, growl, growlD, nsrc, nbp, ng, amp, hsrc, hscale, hlp, hg };
     return this.eng;
   }
 
@@ -402,14 +424,14 @@ export class WhaleVoice {
     if (!e) return;
     this.eng = null;
     this.humming = false;
-    const nodes = [e.pitch, e.osc, e.vib, e.vibG, e.mix, e.f1, e.f2, e.dry, e.g1, e.g2, e.gd, e.sub, e.subG, e.half, e.growl, e.growlD, e.nsrc, e.nbp, e.ng, e.amp];
+    const nodes = [e.pitch, e.osc, e.vib, e.vibG, e.mix, e.f1, e.f2, e.dry, e.g1, e.g2, e.gd, e.sub, e.subG, e.half, e.growl, e.growlD, e.nsrc, e.nbp, e.ng, e.amp, e.hsrc, e.hscale, e.hlp, e.hg].filter(Boolean);
     if (fade > 0) {
       holdAt(e.amp.gain, now);
       rampAt(e.amp.gain, 0, now + fade);
-      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc]) if (n) stopAt(n, now + fade + 0.02);
+      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc, e.hsrc]) if (n) stopAt(n, now + fade + 0.02);
       e.osc.onended = () => disconnect(...nodes);
     } else {
-      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc]) if (n) stopAt(n, now);
+      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc, e.hsrc]) if (n) stopAt(n, now);
       disconnect(...nodes);
     }
     this.sys._releaseVoiceEngine(this);
@@ -553,6 +575,52 @@ export class WhaleVoice {
       default:
         return null;
     }
+  }
+
+  /** Layer a real humpback song unit under a call, retuned (by octaves) to its main note. */
+  _playRecCall(kind, def, t) {
+    const lib = this.sys.samples;
+    const group = { chirp: 'wChirp', play: 'wChirp', coo: 'wCoo', answer: 'wMoan', warn: 'wGrunt', yawn: 'wLong', roar: 'wLong' }[kind];
+    if (!lib || !group || !this.io) return;
+    const takes = [lib.pick(group)];
+    if (kind === 'roar') takes.push(lib.pick('wGrunt'));
+    let m = def.segs[0].m;
+    let top = -1;
+    for (const s of def.segs) if (s.g > top) { top = s.g; m = s.m; }
+    const ctx = this.sys.ctx;
+    const k = this.p.formant;
+    takes.forEach((take, i) => {
+      if (!take || !take.f0) return;
+      let rate = mtof(m - i * 12) / take.f0;
+      while (rate > 2.4) rate /= 2;
+      while (rate < 0.5) rate *= 2;
+      if (kind === 'play') rate = Math.min(2.4, rate * 1.25);
+      const src = ctx.createBufferSource();
+      src.buffer = take.buffer;
+      src.playbackRate.value = rate;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = (this.calf ? 3200 : 2200) * k;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      const vol = def.gain * this.trim * (kind === 'roar' ? 2.4 : this.calf ? 1.4 : 1.8) * (i ? 0.8 : 1);
+      const dur = take.buffer.duration / rate;
+      setAt(g.gain, 0, t);
+      rampAt(g.gain, vol, t + 0.04);
+      setAt(g.gain, vol, Math.max(t + 0.05, t + dur - 0.2));
+      rampAt(g.gain, 0, t + dur);
+      src.connect(lp); lp.connect(g); g.connect(this.io.air);
+      if (def.wet) {
+        const w = ctx.createGain();
+        w.gain.value = def.wet;
+        g.connect(w);
+        w.connect(this.sys.bus.worldWet);
+        src.onended = () => disconnect(src, lp, g, w);
+      } else src.onended = () => disconnect(src, lp, g);
+      startAt(src, t);
+      stopAt(src, t + dur + 0.05);
+      this._callEnd = Math.max(this._callEnd, t + dur + 0.05);
+    });
   }
 
   _playCall(def, t) {

@@ -2,6 +2,9 @@
 // distant thunder, the hush inside clouds, a positional waterfall, night twinkles,
 // birdsong, and the sea: swells washing and breaking below, the muffled deep beneath them. Layers are created lazily when they become audible and stopped when silent.
 // setAmbience() only merges numbers; the audio graph is touched at most ~12 times a second.
+// Recorded beds (src/audio/SampleLib.js: sea, wind, gale, storm, rain, the deep, a bug swarm,
+// distant humpback song, seabird calls) replace the noise layers once they have loaded; a
+// layer built from noise is swapped for its recording as soon as that arrives.
 import { clamp, lerp, smoothstep, glide, setAt, rampAt, expAt, disconnect, stopAt, startAt, finite, makeRng } from './util.js';
 import { chordTones } from './theory.js';
 
@@ -24,6 +27,8 @@ export class Ambience {
     this.gust = 0;
     this.gustT = 0;
     this.nextBubble = 1;
+    this.nextSong = 6;
+    this.swarm = null;
   }
 
   set(a) {
@@ -54,6 +59,22 @@ export class Ambience {
     return src;
   }
 
+  /** A looping recorded bed (null while not loaded); two calls give decorrelated copies. */
+  _recLoop(group, rate = 1) {
+    const take = this.sys.samples && this.sys.samples.pick(group, this.rng);
+    if (!take) return null;
+    const src = this.ctx.createBufferSource();
+    src.buffer = take.buffer;
+    src.loop = true;
+    src.playbackRate.value = rate;
+    try { src.start(this.ctx.currentTime + 0.01, this.rng() * take.buffer.duration); } catch (e) { /* ignore */ }
+    return src;
+  }
+
+  _has(group) {
+    return !!(this.sys.samples && this.sys.samples.has(group));
+  }
+
   _filter(type, f, q) {
     const b = this.ctx.createBiquadFilter();
     b.type = type;
@@ -79,10 +100,20 @@ export class Ambience {
     return l;
   }
 
-  _level(name, v, now, tc = 0.25, make) {
+  _level(name, v, now, tc = 0.25, make, group) {
     let l = this.L[name];
+    if (l && group && !l.rec && this._has(group)) {
+      // the recording arrived: fade the noise version out (it is rebuilt from the recording)
+      const old = l;
+      glide(old.out.gain, 0, now, 0.25);
+      for (const s of old.srcs) stopAt(s, now + 1.2);
+      setTimeout(() => disconnect(...old.nodes), 1500);
+      delete this.L[name];
+      l = null;
+    }
     if (v > 0.0005 && !l && make) l = this._layer(name, make);
     if (!l) return null;
+    if (group && l.rec === undefined) l.rec = false;
     if (v > 0.0005) l.zero = -1;
     else if (l.zero < 0) l.zero = now;
     glide(l.out.gain, v, now, tc);
@@ -121,14 +152,16 @@ export class Ambience {
     const windAmt = clamp(Math.max(s.wind, s.storm * 0.9));
 
     // wind: two decorrelated bands of pink noise, panned apart
-    const wl = this._level('wind', windAmt * (0.55 + 0.45 * this.gust) * 0.2, now, 0.3, () => {
+    const windRec = this._has('wind');
+    const wl = this._level('wind', windAmt * (0.55 + 0.45 * this.gust) * (windRec ? 0.35 : 0.2), now, 0.3, () => {
       const out = this._gain();
       const nodes = [out];
       const srcs = [];
       const bps = [];
+      const rec = this._has('wind');
       for (const pan of [-0.6, 0.6]) {
-        const src = this._loop('pink', 0.9 + this.rng() * 0.2);
-        const bp = this._filter('bandpass', 380, 0.55);
+        const src = (rec && this._recLoop('wind', 0.92 + this.rng() * 0.16)) || this._loop('pink', 0.9 + this.rng() * 0.2);
+        const bp = rec ? this._filter('lowpass', 1500, 0.5) : this._filter('bandpass', 380, 0.55);
         const sp = this.ctx.createStereoPanner();
         sp.pan.value = pan;
         src.connect(bp); bp.connect(sp); sp.connect(out);
@@ -137,9 +170,18 @@ export class Ambience {
         bps.push(bp);
       }
       out.connect(amb);
-      return { out, nodes, srcs, bps };
+      return { out, nodes, srcs, bps, rec };
+    }, 'wind');
+    if (wl) for (const bp of wl.bps) glide(bp.frequency, wl.rec ? 700 + 2600 * this.gust + 1800 * windAmt : 240 + 420 * this.gust + 260 * windAmt, now, 0.35);
+    // a gale: the recorded roar of a strong wind, rising with the square of the wind and the gusts
+    const gl = this._level('gale', this._has('gale') ? windAmt * windAmt * (0.4 + 0.6 * this.gust) * 0.3 : 0, now, 0.4, () => {
+      const out = this._gain();
+      const src = this._recLoop('gale', 1);
+      const lp = this._filter('lowpass', 2500, 0.5);
+      src.connect(lp); lp.connect(out); out.connect(amb);
+      return { out, nodes: [out, src, lp], srcs: [src], lp };
     });
-    if (wl) for (const bp of wl.bps) glide(bp.frequency, 240 + 420 * this.gust + 260 * windAmt, now, 0.35);
+    if (gl) glide(gl.lp.frequency, 1200 + 3800 * clamp(this.gust * windAmt), now, 0.4);
 
     // whistle: a faint narrow band wandering with the gusts
     const wh = this._level('whistle', windAmt * windAmt * this.gust * 0.025, now, 0.4, () => {
@@ -165,22 +207,41 @@ export class Ambience {
     if (rl) glide(rl.bp.frequency, clamp(350 + sp * 38, 350, 3200), now, 0.2);
 
     // rain bed
-    this._level('rain', s.rain * 0.3, now, 0.6, () => {
+    this._level('rain', s.rain * (this._has('rain') ? 0.55 : 0.3), now, 0.6, () => {
       const out = this._gain();
-      const src = this._loop('rain');
       const lp = this._filter('lowpass', 7000, 0.5);
-      src.connect(lp); lp.connect(out); out.connect(amb);
-      return { out, nodes: [out, src, lp], srcs: [src] };
-    });
+      lp.connect(out); out.connect(amb);
+      const nodes = [out, lp];
+      const srcs = [];
+      if (this._has('rain')) {
+        // two decorrelated copies of the recording, spread wide
+        for (const pan of [-0.55, 0.55]) {
+          const src = this._recLoop('rain', 0.97 + this.rng() * 0.06);
+          const p = this.ctx.createStereoPanner();
+          p.pan.value = pan;
+          src.connect(p); p.connect(lp);
+          nodes.push(src, p);
+          srcs.push(src);
+        }
+        return { out, nodes, srcs, rec: true };
+      }
+      const src = this._loop('rain');
+      src.connect(lp);
+      nodes.push(src);
+      srcs.push(src);
+      return { out, nodes, srcs };
+    }, 'rain');
 
     // storm: a low rumbling bed and distant thunder now and then
-    const stl = this._level('storm', s.storm * 0.32 * (0.8 + 0.3 * Math.sin(this.t * 0.23)), now, 0.8, () => {
+    const stormRec = this._has('storm');
+    const stl = this._level('storm', s.storm * (stormRec ? 0.5 : 0.32) * (0.8 + 0.3 * Math.sin(this.t * 0.23)), now, 0.8, () => {
       const out = this._gain();
-      const src = this._loop('brown', 0.8);
-      const lp = this._filter('lowpass', 140, 0.5);
+      const rec = this._has('storm');
+      const src = (rec && this._recLoop('storm', 0.9)) || this._loop('brown', 0.8);
+      const lp = this._filter('lowpass', rec ? 1600 : 140, 0.5);
       src.connect(lp); lp.connect(out); out.connect(amb);
-      return { out, nodes: [out, src, lp], srcs: [src] };
-    });
+      return { out, nodes: [out, src, lp], srcs: [src], rec };
+    }, 'storm');
     if (stl && s.storm > 0.35) {
       this.nextThunder -= step;
       if (this.nextThunder <= 0) {
@@ -218,11 +279,19 @@ export class Ambience {
     const sw = 0.5 + 0.32 * Math.sin(this.t * (0.72 + 0.3 * st)) + 0.18 * Math.sin(this.t * 0.31 + 1.7);
     const crest = smoothstep(0.62, 0.95, sw);
     const seaAmt = s.sea * up;
-    const wash = this._level('seaWash', seaAmt * (0.08 + 0.1 * st) * (0.45 + 0.55 * sw), now, 0.35, () => {
+    const seaRec = this._has('seaCalm');
+    const wash = this._level('seaWash', seaAmt * (seaRec ? (0.34 + 0.12 * st) * (0.75 + 0.25 * sw) : (0.08 + 0.1 * st) * (0.45 + 0.55 * sw)), now, 0.35, () => {
       const out = this._gain();
       const nodes = [out];
       const srcs = [];
       const lps = [];
+      if (this._has('seaCalm')) {
+        // the recorded sea (stereo): its own waves wash in and out, the swell only breathes on it
+        const src = this._recLoop('seaCalm', 1);
+        const lp = this._filter('lowpass', 3000, 0.5);
+        src.connect(lp); lp.connect(out); out.connect(amb);
+        return { out, nodes: [out, src, lp], srcs: [src], lps: [lp], rec: true };
+      }
       for (const pan of [-0.5, 0.5]) {
         const src = this._loop('brown', 0.9 + this.rng() * 0.2);
         const lp = this._filter('lowpass', 500, 0.5);
@@ -235,26 +304,54 @@ export class Ambience {
       }
       out.connect(amb);
       return { out, nodes, srcs, lps };
-    });
-    if (wash) for (const lp of wash.lps) glide(lp.frequency, 320 + 700 * sw + 500 * st, now, 0.3);
-    const foam = this._level('seaFoam', seaAmt * (0.025 + 0.06 * st) * (0.15 + 0.85 * crest), now, 0.2, () => {
+    }, 'seaCalm');
+    if (wash) for (const lp of wash.lps) glide(lp.frequency, wash.rec ? 1800 + 2600 * sw + 3000 * st : 320 + 700 * sw + 500 * st, now, 0.3);
+    // rough water: recorded breakers crashing (stereo) come in with the sea state and each crest
+    const foamRec = this._has('seaRough');
+    const foam = this._level('seaFoam', seaAmt * (foamRec ? smoothstep(0.2, 0.9, st) * 0.45 * (0.55 + 0.45 * crest) : (0.025 + 0.06 * st) * (0.15 + 0.85 * crest)), now, 0.2, () => {
       const out = this._gain();
-      const src = this._loop('pink', 1.05);
-      const bp = this._filter('bandpass', 2600, 0.6);
-      const w = this._gain(0.3);
+      const rec = this._has('seaRough');
+      const src = (rec && this._recLoop('seaRough', 1)) || this._loop('pink', 1.05);
+      const bp = rec ? this._filter('lowpass', 4000, 0.5) : this._filter('bandpass', 2600, 0.6);
+      const w = this._gain(rec ? 0.15 : 0.3);
       src.connect(bp); bp.connect(out); out.connect(amb); out.connect(w); w.connect(sys.bus.worldWet);
-      return { out, nodes: [out, src, bp, w], srcs: [src], bp };
-    });
-    if (foam) glide(foam.bp.frequency, 1900 + 1400 * crest + 600 * st, now, 0.25);
+      return { out, nodes: [out, src, bp, w], srcs: [src], bp, rec };
+    }, 'seaRough');
+    if (foam) glide(foam.bp.frequency, foam.rec ? 2200 + 4000 * crest + 2500 * st : 1900 + 1400 * crest + 600 * st, now, 0.25);
 
     // beneath the surface: a deep pressure rumble, the swell felt as a slow throb, and stray bubbles
-    const deep = this._level('deep', s.under * (0.07 + 0.03 * Math.sin(this.t * 0.6)), now, 0.25, () => {
+    const deepRec = this._has('under');
+    const deep = this._level('deep', s.under * (deepRec ? 0.16 + 0.03 * Math.sin(this.t * 0.6) : 0.07 + 0.03 * Math.sin(this.t * 0.6)), now, 0.25, () => {
       const out = this._gain();
+      const rec = this._has('under');
+      const nodes = [out];
+      const srcs = [];
+      if (rec) {
+        // the surf heard from below: the recorded sea slowed and muffled, two copies spread wide
+        for (const pan of [-0.5, 0.5]) {
+          const src = this._recLoop('under', 0.96 + this.rng() * 0.08);
+          const p = this.ctx.createStereoPanner();
+          p.pan.value = pan;
+          src.connect(p); p.connect(out);
+          nodes.push(src, p);
+          srcs.push(src);
+        }
+        out.connect(amb);
+        return { out, nodes, srcs, rec };
+      }
       const src = this._loop('brown', 0.7);
       const lp = this._filter('lowpass', 170, 0.7);
       src.connect(lp); lp.connect(out); out.connect(amb);
       return { out, nodes: [out, src, lp], srcs: [src] };
-    });
+    }, 'under');
+    // far off in the deep, the herd's kin sing: a passage of real humpback song, rarely
+    if (s.under > 0.6 && this._has('whaleSong')) {
+      this.nextSong -= step;
+      if (this.nextSong <= 0) {
+        this.nextSong = 28 + r() * 40;
+        this._song(now, s.under);
+      }
+    }
     if (deep && s.under > 0.5) {
       this.nextBubble -= step;
       if (this.nextBubble <= 0) {
@@ -296,6 +393,9 @@ export class Ambience {
         glide(p.positionZ, wf.z, now, 0.1);
       } else p.setPosition(wf.x, wf.y, wf.z);
     }
+
+    // a bug swarm close by: a recorded buzz placed on the nearest swarm
+    this._swarm(now);
 
     // night: sparse tuned twinkles high up
     if (s.night > 0.05) {
@@ -365,10 +465,94 @@ export class Ambience {
     src.onended = () => disconnect(src, g, p, w);
   }
 
+  /** Distant humpback song through the water: a random passage, faded, mostly reverb. */
+  _song(now, amt) {
+    const ctx = this.ctx;
+    const sys = this.sys;
+    const take = sys.samples.pick('whaleSong', this.rng);
+    if (!take) return;
+    const dur = 7 + this.rng() * 6;
+    const off = this.rng() * Math.max(0, take.buffer.duration - dur);
+    const src = ctx.createBufferSource();
+    src.buffer = take.buffer;
+    src.playbackRate.value = 0.85 + this.rng() * 0.25;
+    const lp = this._filter('lowpass', 1400, 0.5);
+    const g = this._gain(0);
+    const p = ctx.createStereoPanner();
+    p.pan.value = this.rng() * 1.4 - 0.7;
+    const w = this._gain(1.2);
+    src.connect(lp); lp.connect(g); g.connect(p); p.connect(sys.bus.amb); g.connect(w); w.connect(sys.bus.worldWet);
+    const vol = 0.32 * amt;
+    setAt(g.gain, 0, now);
+    rampAt(g.gain, vol, now + 1.5);
+    setAt(g.gain, vol, now + dur - 2);
+    rampAt(g.gain, 0, now + dur);
+    try { src.start(now + 0.02, off); } catch (e) { return; }
+    stopAt(src, now + dur + 0.1);
+    src.onended = () => disconnect(src, lp, g, p, w);
+  }
+
+  /** A looping buzz on the nearest active bug swarm within 160 m (SkyBugs via the story). */
+  _swarm(now) {
+    const sys = this.sys;
+    let best = null;
+    let bd = 160;
+    try {
+      const sw = this._has('swarm') && sys.game && sys.game.story && sys.game.story.activities && sys.game.story.activities.bugs && sys.game.story.activities.bugs.swarms;
+      if (sw) {
+        const L = sys.listener;
+        for (const S of sw) {
+          if (!S.active || S.dying || !S.count || !S.center) continue;
+          const d = Math.hypot(S.center.x - L.x, S.center.y - L.y, S.center.z - L.z);
+          if (d < bd) { bd = d; best = S; }
+        }
+      }
+    } catch (e) { best = null; }
+    const v = best ? clamp(best.count / 40, 0.3, 1) * 0.5 * (1 - this.s.under) : 0;
+    const l = this._level('swarm', v, now, 0.5, () => {
+      const out = this._gain();
+      const src = this._recLoop('swarm', 1);
+      const hp = this._filter('highpass', 180, 0.6);
+      const pan = this.ctx.createPanner();
+      pan.panningModel = 'equalpower';
+      pan.distanceModel = 'inverse';
+      pan.refDistance = 8;
+      pan.rolloffFactor = 1.2;
+      pan.maxDistance = 2000;
+      src.connect(hp); hp.connect(out); out.connect(pan); pan.connect(sys.bus.sfx);
+      return { out, nodes: [out, src, hp, pan], srcs: [src], pan };
+    });
+    if (l && best) {
+      const p = l.pan;
+      const c = best.center;
+      if (p.positionX) {
+        glide(p.positionX, c.x, now, 0.1);
+        glide(p.positionY, c.y, now, 0.1);
+        glide(p.positionZ, c.z, now, 0.1);
+      } else p.setPosition(c.x, c.y, c.z);
+    }
+  }
+
   _bird(now, amt) {
     const ctx = this.ctx;
     const sys = this.sys;
     const r = this.rng;
+    // the skimmers' cries: a recorded seabird call, retuned, placed somewhere around
+    if (this._has('gull')) {
+      const take = sys.samples.pick('gull', r);
+      const src = ctx.createBufferSource();
+      src.buffer = take.buffer;
+      src.playbackRate.value = 0.8 + r() * 0.6;
+      const g = this._gain(0.13 * amt * (0.4 + r() * 0.6));
+      const p = ctx.createStereoPanner();
+      p.pan.value = r() * 1.8 - 0.9;
+      const lp = this._filter('lowpass', 2500 + r() * 5000, 0.5);
+      const w = this._gain(0.5);
+      src.connect(lp); lp.connect(g); g.connect(p); p.connect(sys.bus.amb); g.connect(w); w.connect(sys.bus.worldWet);
+      startAt(src, now + 0.02);
+      src.onended = () => disconnect(src, g, p, lp, w);
+      return;
+    }
     const t = now + 0.02;
     const notes = 2 + Math.floor(r() * 4);
     const base = 2600 + r() * 2200;

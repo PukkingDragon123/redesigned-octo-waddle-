@@ -54,7 +54,7 @@ class AudioStub {
   setMood() {}
   setIntensity() {}
   stinger() {}
-  getKey() { return { rootMidi: 62, scale: [0, 2, 4, 5, 7, 9, 11], chord: [62, 66, 69], beat: 60 / 66 }; }
+  getKey() { return { rootMidi: 65, scale: [0, 2, 3, 5, 7, 8, 10], chord: [65, 68, 72], beat: 1 }; }
   createVoice() { return new VoiceStub(); }
   sfx() {}
   setAmbience() {}
@@ -1354,7 +1354,8 @@ export class Story {
     yield* this.untilNextBeat(4);
     // the mother begins the song of the herd
     const key = this.song;
-    const theme = [[2, 2], [4, 1], [7, 1], [6, 3], [5, 1], [4, 2], [2, 1], [1, 1], [2, 4]];
+    // the leitmotif's first phrase (src/audio/theory.js THEME) as degrees of the score's F minor
+    const theme = [[2, 2], [4, 1], [5, 1], [4, 3], [2, 1], [0, 2], [2, 1], [3, 1], [4, 4]];
     const beat = key.key().beat;
     herd.motherScript = (m) => ({ target: calf.pos.clone().add(new Vector3(-10, 2, 6)), speed: 4, arrive: 10, lookAt: calf.pos, face: center });
     for (const [deg, b] of theme) {

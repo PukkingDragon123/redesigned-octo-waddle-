@@ -9,11 +9,13 @@ import { MOODS } from './moods.js';
 import { PATTERNS } from './patterns.js';
 import { parseBar, parseChord, bassNote, chordTones, voiceChord, SCALES } from './theory.js';
 import { Sampler, Section, Line, getWaves } from './instruments.js';
-import { clamp, smoothstep, makeRng, disconnect } from './util.js';
+import { clamp, smoothstep, makeRng, disconnect, mod } from './util.js';
 
 const LOOKAHEAD = 0.15;
 const BURST = 12; // events per frame before deferring the ones not yet due
-const DEFAULT_KEY = { root: 62, scale: SCALES.major };
+// the score's home: the jam theme's F minor (aeolian: the same notes as A-flat major)
+const DEFAULT_KEY = { root: 65, scale: SCALES.minor };
+const PC_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
 // dev/test: AudioSystem opts.layers = ['harp', 'strings'] keeps only those instruments/sections
 const keep = (sys, L) => !sys.opts.layers || sys.opts.layers.includes(L.inst || L.target);
@@ -66,6 +68,13 @@ class MoodInstance {
   }
 }
 
+/** The note of pitch class pc inside [lo, hi]. */
+function noteAboveIn(pc, lo, hi) {
+  let m = Math.ceil(lo);
+  while (mod(m, 12) !== pc && m < hi) m++;
+  return m;
+}
+
 export class Conductor {
   constructor(sys) {
     this.sys = sys;
@@ -84,7 +93,7 @@ export class Conductor {
     this.nextBar = 0;
     this.running = false;
     this.grids = [{ t0: 0, beat: this.beatDur }];
-    this.timeline = [{ t: 0, ch: parseChord('D'), key: DEFAULT_KEY }];
+    this.timeline = [{ t: 0, ch: parseChord('Fm'), key: DEFAULT_KEY }];
     this.levelT = 0;
     this._lv = {};
     this._per = {};
@@ -111,6 +120,10 @@ export class Conductor {
       heart: S('heart', { cap: 4, send: 0.12, gain: 1.6 }),
       swell: S('swell', { cap: 3, spread: 0.3, send: 0.4, gain: 0.6 }),
       crash: S('crash', { cap: 3, spread: 0.3, send: 0.4, gain: 0.7 }),
+      // the theme's groove: a soft concert bass drum and an off-beat shaker (recorded only; the
+      // kick falls back to the synthesized taiko, the shaker to silence)
+      kick: new Sampler(sys, 'kick', bank.inst.kick || bank.inst.taiko, { out: B.musicDry, wet: B.musicWet, cap: 6, send: 0.32, gain: 1.3, release: 0.4 }),
+      shaker: new Sampler(sys, 'shaker', bank.inst.shaker || [], { out: B.musicDry, wet: B.musicWet, cap: 6, pan: 0.32, spread: 0.12, send: 0.3, gain: 0.9 }),
     };
     // stingers sit outside the mood mix (not ducked, not faded with moods)
     const ST = (name, o) => S(name, o, B.stingDry, B.stingWet);
@@ -125,9 +138,11 @@ export class Conductor {
       stac: ST('stac', { cap: 8, spread: 0.2, send: 0.3, gain: 1.2, release: 0.1 }),
     };
     const sec = (o) => new Section(sys, o);
+    // recorded string sections (violins / violas / celli, looped) where they loaded
+    const strs = bank.sus && bank.sus.strings;
     this.sec = {
-      strings: sec({ wave: W.strings, voices: 5, unison: 3, spread: 10, width: 0.42, filter: 3100, body: [340, 2.5], attack: 0.9, release: 1.2, vib: [5.2, 9], send: 0.45, gain: 0.4, glide: 0.06, rebow: true }),
-      low: sec({ wave: W.strings, voices: 2, unison: 2, spread: 7, width: 0.18, pan: 0.18, filter: 900, body: [220, 2], attack: 0.7, release: 1.0, vib: [4.8, 6], send: 0.3, gain: 0.28, glide: 0.08 }),
+      strings: sec({ wave: W.strings, voices: 5, unison: 3, spread: 10, width: 0.42, filter: 3100, body: [340, 2.5], attack: 0.9, release: 1.2, vib: [5.2, 9], send: 0.45, gain: 0.4, glide: 0.06, rebow: true, samples: strs, sampleFilter: 7500, sampleGain: 1.5 }),
+      low: sec({ wave: W.strings, voices: 2, unison: 2, spread: 7, width: 0.18, pan: 0.18, filter: 900, body: [220, 2], attack: 0.7, release: 1.0, vib: [4.8, 6], send: 0.3, gain: 0.28, glide: 0.08, samples: strs, sampleFilter: 2400, sampleGain: 1.4 }),
       trem: sec({ wave: W.strings, voices: 3, unison: 2, spread: 8, width: 0.3, filter: 1500, attack: 0.25, release: 0.6, tremolo: { rate: 11.5, depth: 0.85 }, send: 0.3, gain: 0.4, glide: 0.04 }),
       choir: sec({ wave: W.choir, voices: 4, unison: 2, spread: 11, width: 0.5, filter: 5200, formants: true, attack: 1.3, release: 1.6, vib: [4.6, 14], send: 0.6, gain: 0.5, glide: 0.09, breath: 0.035 }),
       brass: sec({ wave: W.brass, voices: 3, unison: 2, spread: 6, width: 0.3, pan: 0.1, filter: 800, filterSwell: 2600, attack: 0.6, release: 0.9, vib: [4.5, 4], send: 0.4, gain: 0.45, artBase: 0.45, glide: 0.07 }),
@@ -137,11 +152,22 @@ export class Conductor {
       lead: new Line(sys, { wave: W.strings, unison: 3, spread: 8, filter: 4400, body: [420, 3], attack: 0.2, release: 0.5, vib: { rate: 5.4, depth: 16, delay: 0.3 }, portamento: 0.05, send: 0.5, gain: 0.3, pan: -0.08 }),
       flute: new Line(sys, { wave: W.flute, unison: 1, filter: 5200, attack: 0.08, release: 0.22, vib: { rate: 5, depth: 13, delay: 0.25 }, breath: 0.11, portamento: 0.03, send: 0.5, gain: 0.42, pan: 0.15 }),
     };
-    this.stingPad = new Section(sys, { wave: W.strings, voices: 5, unison: 2, spread: 10, width: 0.5, filter: 3400, attack: 0.3, release: 1.5, vib: [5, 8], send: 0.6, gain: 0.45, manual: true, glide: 0.05, dry: B.stingDry, wetBus: B.stingWet });
+    this.stingPad = new Section(sys, { wave: W.strings, voices: 5, unison: 2, spread: 10, width: 0.5, filter: 3400, attack: 0.3, release: 1.5, vib: [5, 8], send: 0.6, gain: 0.45, manual: true, glide: 0.05, dry: B.stingDry, wetBus: B.stingWet, samples: strs, sampleFilter: 8000, sampleGain: 1.5 });
     for (const k of [...Object.keys(this.sec), ...Object.keys(this.lines)]) {
       this._lv[k] = 0;
       this._per[k] = 0;
     }
+  }
+
+  /** Recorded instruments arrived after the score started: new notes use them from now on. */
+  useSamples(bank) {
+    const all = [...Object.values(this.inst), ...Object.values(this.st)];
+    for (const s of all) {
+      const n = bank.inst[s.name];
+      if (n && n.length) s.notes = n;
+    }
+    const strs = bank.sus && bank.sus.strings;
+    if (strs) for (const sec of [this.sec.strings, this.sec.low, this.stingPad]) sec.setSamples(strs);
   }
 
   // ---- control --------------------------------------------------------------------------
@@ -547,31 +573,41 @@ export class Conductor {
         return true;
       }
       case 'resolve': {
+        // the score's cadence in the current key: VI - VII(sus) - i in minor (the jam theme's
+        // aeolian close), IV - V(sus) - I in major; piano, strings, harp and a last bell
         const g = this.getKey(now);
         const b = clamp(g.beat, 0.5, 1.1);
         const t0 = g.nextBeatTime - now < 0.6 ? Math.max(t, g.nextBeatTime) : t;
         const t1 = t0 + b;
         const t2 = t1 + b;
-        const sus = parseChord('Asus4');
-        const A = parseChord('A');
-        const Dm = parseChord('D');
-        const v0 = voiceChord(sus, 4, 57, 76);
-        const v1 = voiceChord(A, 4, 57, 76, v0);
-        const v2 = voiceChord(Dm, 4, 57, 76, v1);
-        this.stingPad.hit([45, ...v0], t0, 0.5, 0.25, 2 * b + 2.2, 3.2);
-        this.stingPad.setNotes([45, ...v1], t1);
-        this.stingPad.setNotes([38, ...v2], t2);
-        st.piano.play(45, t0, 0.5, b * 2);
-        st.piano.play(69, t0, 0.55, b);
-        st.piano.play(73, t1, 0.55, b);
-        st.piano.play(38, t2, 0.6, 4);
-        st.piano.play(74, t2, 0.65, 4);
-        for (const m of [62, 66, 69]) st.piano.play(m, t2 + 0.02, 0.35, 4);
-        const gl = chordTones(Dm, 50, 86, []);
+        const r = h.key.root;
+        const minor = h.key.scale[2] === 3;
+        const nm = (iv, q) => PC_NAMES[mod(r + iv, 12)] + q;
+        const c0 = parseChord(minor ? nm(8, 'add9') : nm(5, 'add9'));
+        const c1 = parseChord(minor ? nm(10, 'sus4') : nm(7, 'sus4'));
+        const c2 = parseChord(minor ? nm(0, 'madd9') : nm(0, 'add9'));
+        const v0 = voiceChord(c0, 4, 57, 77);
+        const v1 = voiceChord(c1, 4, 57, 77, v0);
+        const v2 = voiceChord(c2, 4, 57, 77, v1);
+        const b0 = bassNote(c0, 36, 47);
+        const b1 = bassNote(c1, 36, 47);
+        const b2 = bassNote(c2, 36, 47);
+        this.stingPad.hit([b0, ...v0], t0, 0.5, 0.25, 2 * b + 2.2, 3.2);
+        this.stingPad.setNotes([b1, ...v1], t1);
+        this.stingPad.setNotes([b2, ...v2], t2);
+        st.piano.play(b0, t0, 0.5, b);
+        st.piano.play(v0[v0.length - 1], t0, 0.55, b);
+        st.piano.play(b1, t1, 0.5, b);
+        st.piano.play(v1[v1.length - 1], t1, 0.55, b);
+        st.piano.play(b2 - 12 >= 33 ? b2 - 12 : b2, t2, 0.6, 4);
+        const top = noteAboveIn(c2.root, 72, 84);
+        st.piano.play(top, t2, 0.65, 4);
+        for (const m of v2) st.piano.play(m, t2 + 0.02, 0.32, 4);
+        const gl = chordTones(c2, 50, 86, []);
         gl.forEach((m, i) => st.harp.play(m, t2 + (i / gl.length) * 0.7, 0.25 + 0.2 * (i / gl.length)));
-        st.bell.play(86, t2 + 0.05, 0.5);
-        st.bell.play(78, t2 + 0.75, 0.35);
-        st.timpani.play(38, t2, 0.6);
+        st.bell.play(top + 12, t2 + 0.05, 0.45);
+        st.bell.play(top + 7, t2 + 0.75, 0.3);
+        st.timpani.play(bassNote(c2, 38, 45), t2, 0.6);
         this.sys.duck(0.6, t2 - now + 2.5);
         return true;
       }

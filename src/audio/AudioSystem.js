@@ -20,6 +20,7 @@ import { Conductor } from './Conductor.js';
 import { WhaleVoice } from './WhaleVoice.js';
 import { Sfx } from './Sfx.js';
 import { Ambience } from './Ambience.js';
+import { SampleLib } from './SampleLib.js';
 import { Soundtrack } from './Soundtrack.js';
 import { loadBank, preloadBank, IR_SPLIT } from './SampleBank.js';
 import { MOODS, MOOD_NAMES } from './moods.js';
@@ -31,7 +32,7 @@ const SFX_NAMES = ['boom', 'boomSmall', 'gulp', 'sparkle', 'bonk', 'wingbeat', '
   'bugCatch', 'tailSlap', 'spout', 'bubbles', 'dash', 'trick'];
 const STINGERS = ['discover', 'boom', 'strike', 'harmony', 'resolve'];
 const MAX_VOICE_ENGINES = 16;
-const DEFAULT_CHORD = parseChord('D');
+const DEFAULT_CHORD = parseChord('Fm'); // the score's home key: F minor (docs/MUSIC.md)
 const MUSIC_TRIM = 0.55;
 const WORLD_TRIM = 1.0;
 
@@ -332,17 +333,24 @@ export class AudioSystem {
     this.conductor = new Conductor(this);
     this.sfxEngine = new Sfx(this);
     this.ambience = new Ambience(this);
+    // recorded beds, effects and whale song (CC0 / public domain): fetched in the background,
+    // the synthesis stands in until they arrive; offline renders wait so they hear them
+    this.samples = new SampleLib(this);
+    const samplesLoaded = this.samples.load();
+    if (this.offline) await samplesLoaded;
     await yieldNow();
     this._warmup();
     this.ambience.set(this._amb);
     this.conductor.setIntensity(this._intensity, true);
     this._built = true;
     if (this._mood) this.conductor.setMood(this._mood.name, this._mood.fade);
-    // the game jam's recorded soundtrack takes over the music when its file is present
+    // recorded instruments that arrive after the start swap in for the synthesized ones
+    if (this.bank.samplesLate) this.bank.samplesLate.then((b) => { if (b) this.conductor.useSamples(b); }).catch((e) => this._warn(e));
+    // the game jam's theme track plays whole at the title and the ending (Soundtrack.js)
     if (!this.offline) {
       this.soundtrack = new Soundtrack(this);
-      if (this._mood) this.soundtrack.setMood(this._mood.name, 0);
-      this.soundtrack.load().then((ok) => { if (ok) this.soundtrack.play(); }).catch((e) => this._warn(e));
+      if (this._mood) this.soundtrack.setMood(this._mood.name, 0, this._mood);
+      this.soundtrack.load().catch((e) => this._warn(e));
     }
     if (!this.offline && typeof setInterval !== 'undefined') {
       // keeps the score going through long frames or a paused game loop
@@ -390,6 +398,7 @@ export class AudioSystem {
       this._updateListener(now);
       this.conductor.update(dt, now);
       this.ambience.update(dt, now);
+      this.soundtrack?.update(now);
       for (const v of this.voices) v.update(now);
     } catch (e) {
       this._warn(e);
@@ -531,9 +540,9 @@ export class AudioSystem {
       name = String(name);
       if (!MOODS[name] && name !== 'silence') return;
       const fade = clamp(finite(+(opts && opts.fade), 6), 0, 60);
-      this._mood = { name, fade };
+      this._mood = { name, fade, track: !!(opts && opts.track) };
       if (this._built) this.conductor.setMood(name, fade);
-      this.soundtrack?.setMood(name, fade);
+      this.soundtrack?.setMood(name, fade, this._mood);
     } catch (e) {
       this._warn(e);
     }
@@ -564,12 +573,12 @@ export class AudioSystem {
       this._warn(e);
     }
     const now = this.ctx ? this.ctx.currentTime : 0;
-    const beat = 60 / 66;
+    const beat = 60 / 60;
     return {
-      rootMidi: 62,
-      scale: SCALES.major.slice(),
+      rootMidi: 65,
+      scale: SCALES.minor.slice(),
       chord: [bassNote(DEFAULT_CHORD, 38, 49), ...chordTones(DEFAULT_CHORD, 60, 71, [])],
-      chordName: 'D',
+      chordName: 'Fm',
       chordPcs: DEFAULT_CHORD.tones.slice(),
       beat,
       nextBeatTime: Math.ceil(now / beat) * beat,
@@ -584,7 +593,7 @@ export class AudioSystem {
       const h = this.conductor._harmonyAt(this.ctx.currentTime);
       return { root: h.key.root, scale: h.key.scale, ch: h.ch, pcs: h.ch.pcs };
     }
-    return { root: 62, scale: SCALES.major, ch: DEFAULT_CHORD, pcs: DEFAULT_CHORD.pcs };
+    return { root: 65, scale: SCALES.minor, ch: DEFAULT_CHORD, pcs: DEFAULT_CHORD.pcs };
   }
 
   // ---- voices ------------------------------------------------------------------------

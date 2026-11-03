@@ -4,6 +4,8 @@
 //   Section: a sustained real-time ensemble (string pad, choir "aah", brass, drone) with
 //            persistent voices that voice-lead from chord to chord. Built lazily when it
 //            becomes audible and torn down after a few silent seconds.
+//            With `samples` (looped recordings, see SampleBank) each voice plays a real
+//            sustained note instead of oscillators, crossfading (re-bowing) on every change.
 //   Line:    a monophonic legato voice (solo strings, flute) with delayed vibrato.
 import {
   clamp, mtof, glide, setAt, cancelFrom, holdAt, rampAt, disconnect, stopAt, startAt,
@@ -163,6 +165,7 @@ export class Section {
     this.n = o.voices || 4;
     this.notes = [];
     this.vowel = o.vowel || 'ah';
+    this.samples = o.samples && o.samples.length ? o.samples : null;
     this.built = false;
     this.zeroSince = 0;
     this.lastLv = -1;
@@ -182,18 +185,24 @@ export class Section {
     }
   }
 
+  /** Use recorded sustains (or null for the oscillators) from the next build on. */
+  setSamples(notes) {
+    this.samples = notes && notes.length ? notes : null;
+  }
+
   _build(t) {
     const ctx = this.ctx;
     const o = this.o;
     const nch = o.width ? 2 : 1;
-    const U = o.unison || 1;
+    this.sampled = !!this.samples;
+    const U = this.sampled ? 1 : o.unison || 1;
     this.chains = [];
     for (let c = 0; c < nch; c++) {
       const input = ctx.createGain();
-      input.gain.value = 1 / Math.sqrt(Math.max(1, (this.n / nch) * U));
+      input.gain.value = (this.sampled ? o.sampleGain ?? 1 : 1) / Math.sqrt(Math.max(1, (this.n / nch) * U));
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = o.filter || 3000;
+      lp.frequency.value = (this.sampled && o.sampleFilter) || o.filter || 3000;
       lp.Q.value = o.q ?? 0.4;
       input.connect(lp);
       let last = lp;
@@ -243,7 +252,7 @@ export class Section {
       this.chains.push({ input, lp, formants, trem, pan });
     }
     this.lfos = [];
-    const vib = o.vib;
+    const vib = this.sampled ? null : o.vib; // the recordings carry their own vibrato
     if (vib) {
       for (let k = 0; k < 2; k++) {
         const l = ctx.createOscillator();
@@ -265,7 +274,7 @@ export class Section {
       startAt(l, t);
       this.tremLfo = { l, g };
     }
-    if (o.breath && this.sys.bank) {
+    if (o.breath && this.sys.bank && !this.sampled) {
       const src = ctx.createBufferSource();
       src.buffer = this.sys.bank.noise.white;
       src.loop = true;
@@ -282,7 +291,7 @@ export class Section {
       vg.gain.value = 0;
       vg.connect(this.chains[i % nch].input);
       const oscs = [];
-      for (let u = 0; u < U; u++) {
+      for (let u = 0; u < (this.sampled ? 0 : U); u++) {
         const osc = ctx.createOscillator();
         osc.setPeriodicWave(o.wave);
         osc.frequency.value = 220;
@@ -292,7 +301,7 @@ export class Section {
         startAt(osc, t + (i * U + u) * 0.0037);
         oscs.push(osc);
       }
-      this.voices.push({ vg, oscs, note: null });
+      this.voices.push({ vg, oscs, note: null, cur: null });
     }
     this.built = true;
     this._apply(this.notes, t, true);
@@ -302,6 +311,7 @@ export class Section {
     if (!this.built) return;
     for (const v of this.voices) {
       for (const o of v.oscs) stopAt(o, t);
+      if (v.cur) stopAt(v.cur.src, t);
       disconnect(v.vg, ...v.oscs);
     }
     for (const l of this.lfos) {
@@ -332,7 +342,60 @@ export class Section {
     setAt(this.out.gain, 0, t);
   }
 
+  /** Sampled voice: start note m (looped) at t, crossfading out whatever the voice played. */
+  _sampleNote(v, m, t, fade) {
+    const ctx = this.ctx;
+    const a = this.samples;
+    let s = a[0];
+    for (let i = 1; i < a.length; i++) if (Math.abs(a[i].midi - m) < Math.abs(s.midi - m)) s = a[i];
+    const src = ctx.createBufferSource();
+    src.buffer = s.buffer;
+    src.loop = true;
+    src.loopStart = s.loop[0];
+    src.loopEnd = Math.min(s.loop[1], s.buffer.duration);
+    src.playbackRate.value = Math.pow(2, (m - s.midi) / 12);
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(g);
+    g.connect(v.vg);
+    startAt(src, t);
+    glide(g.gain, 1, t, fade / 3);
+    src.onended = () => disconnect(g, src);
+    this._sampleOff(v, t, fade);
+    v.cur = { src, g };
+  }
+
+  _sampleOff(v, t, fade) {
+    const old = v.cur;
+    if (!old) return;
+    holdAt(old.g.gain, t);
+    glide(old.g.gain, 0, t, fade / 3);
+    stopAt(old.src, t + fade * 2.5 + 0.05);
+    v.cur = null;
+  }
+
+  _applySampled(notes, t, immediate) {
+    const o = this.o;
+    const rel = o.release || 1;
+    const att = o.attack || 0.5;
+    for (let i = 0; i < this.voices.length; i++) {
+      const v = this.voices[i];
+      const m = notes[i];
+      if (m == null) {
+        if (v.note != null) this._sampleOff(v, t, rel);
+        v.note = null;
+        continue;
+      }
+      if (immediate || v.note == null) {
+        setAt(v.vg.gain, 1, t);
+        this._sampleNote(v, m, t, att);
+      } else if (v.note !== m) this._sampleNote(v, m, t, Math.max(0.12, Math.min(att, 0.35)));
+      v.note = m;
+    }
+  }
+
   _apply(notes, t, immediate) {
+    if (this.sampled) return this._applySampled(notes, t, immediate);
     const o = this.o;
     const rel = o.release || 1;
     for (let i = 0; i < this.voices.length; i++) {

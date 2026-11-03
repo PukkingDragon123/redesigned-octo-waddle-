@@ -9,6 +9,7 @@
 //         requires a matching rate). Built per sample rate once the context exists.
 import { makeRng, runSliced } from './util.js';
 import * as S from './synthesis.js';
+import { MUSIC_SAMPLES, MUSIC_SAMPLE_BASE } from './musicSamples.js';
 
 // Pitched instruments: sampled every `step` semitones and pitch-shifted in between.
 // They are rendered with gentle highs (lowpassed at 4-9 kHz), so they are stored at a
@@ -27,9 +28,16 @@ const CYMBAL_RATE = 32000;
 export const IR_SECONDS = 5;
 export const IR_SPLIT = 2.5;
 
+// Real instruments (src/audio/musicSamples.js) replace the synthesized ones when their files load;
+// a start does not wait for them longer than this (they swap in later through bank.samplesLate).
+const SAMPLE_WAIT_MS = 2500;
+const SAMPLE_RATE = 32000;
+const SAMPLE_JOBS = 6;
+
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const envCache = new Map();
 let core = null; // { promise, stats }
+let samples = null; // promise of { name: [{ midi, buffer, loop? }] } or null
 
 function makeBuffer(ctx, channels, length, sr) {
   try {
@@ -63,6 +71,7 @@ function track(gen) {
  * returns the shared promise, or null where AudioBuffers need a context (old Safari).
  */
 export function preloadBank(ctx = null) {
+  preloadSamples();
   if (!core) {
     if (!ctx && !canBuildWithoutContext()) return null;
     core = track(buildCore(ctx));
@@ -84,6 +93,11 @@ export function loadBank(ctx, stats = null) {
       const env = track(buildEnv(ctx, sr));
       const bank = await env.promise;
       bank.inst = inst;
+      bank.sus = {};
+      const smp = preloadSamples();
+      const got = await Promise.race([smp, new Promise((r) => setTimeout(() => r(undefined), SAMPLE_WAIT_MS))]);
+      if (got) applySamples(bank, got);
+      else if (got === undefined) bank.samplesLate = smp.then((x) => (x ? applySamples(bank, x) : null));
       bank.buildMs = core.stats.ms + env.stats.ms;
       bank.waitMs = now() - t0;
       const worst = core.stats.maxStepMs > env.stats.maxStepMs ? core.stats : env.stats;
@@ -104,6 +118,80 @@ export function loadBank(ctx, stats = null) {
     }).catch(() => {});
   }
   return p;
+}
+
+/**
+ * Fetch and decode the real instrument samples (once; shared by every context). Decoding runs
+ * on a tiny OfflineAudioContext, so it needs no user gesture. Resolves to null when the files
+ * cannot be had (the synthesized instruments then stay). Never rejects.
+ */
+export function preloadSamples() {
+  if (samples) return samples;
+  samples = (async () => {
+    if (typeof fetch === 'undefined' || typeof OfflineAudioContext === 'undefined') return null;
+    let dec;
+    try {
+      dec = new OfflineAudioContext(1, 1, SAMPLE_RATE);
+    } catch (e) {
+      try { dec = new OfflineAudioContext(1, 1, 44100); } catch (e2) { return null; }
+    }
+    const jobs = [];
+    const out = {};
+    for (const name of Object.keys(MUSIC_SAMPLES)) {
+      const set = MUSIC_SAMPLES[name];
+      const notes = (out[name] = []);
+      for (const [midi, file, cents, loop] of set.notes) {
+        jobs.push(async () => {
+          const res = await fetch(`${MUSIC_SAMPLE_BASE}${name}/${file}.ogg`);
+          if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) return;
+          const data = await res.arrayBuffer();
+          const buffer = await dec.decodeAudioData(data);
+          const k = set.level ?? 1;
+          if (k !== 1) for (let c = 0; c < buffer.numberOfChannels; c++) {
+            const d = buffer.getChannelData(c);
+            for (let i = 0; i < d.length; i++) d[i] *= k;
+          }
+          // the measured tuning (cents) becomes a fractional nominal pitch: the sampler retunes it
+          const n = { midi: midi + Math.max(-0.3, Math.min(0.3, (cents || 0) / 100)), buffer };
+          if (loop) n.loop = loop;
+          notes.push(n);
+        });
+      }
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < jobs.length) {
+        const job = jobs[next++];
+        try { await job(); } catch (e) { /* that note stays missing */ }
+      }
+    };
+    await Promise.all(Array.from({ length: SAMPLE_JOBS }, worker));
+    let any = false;
+    for (const name of Object.keys(out)) {
+      // a set with gaps would jump in timbre and pitch-shift too far: keep the synthesis then
+      if (out[name].length < MUSIC_SAMPLES[name].notes.length * 0.75) delete out[name];
+      else {
+        out[name].sort((a, b) => a.midi - b.midi);
+        any = true;
+      }
+    }
+    return any ? out : null;
+  })().catch(() => null);
+  return samples;
+}
+
+/** Swap the loaded samples into a bank (a fresh object: the synthesized core stays shared). */
+function applySamples(bank, smp) {
+  const inst = Object.assign({}, bank.inst);
+  const sus = Object.assign({}, bank.sus);
+  for (const name of Object.keys(smp)) {
+    if (smp[name][0] && smp[name][0].loop) sus[name] = smp[name];
+    else inst[name] = smp[name];
+  }
+  bank.inst = inst;
+  bank.sus = sus;
+  bank.sampled = Object.keys(smp);
+  return bank;
 }
 
 function* buildEnv(ctx, sr) {

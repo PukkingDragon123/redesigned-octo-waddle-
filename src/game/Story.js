@@ -298,8 +298,9 @@ export class Story {
     return v;
   }
 
-  voiceHum(w, midi, dur) {
-    this.voiceOf(w).hum?.(midi, dur, { gain: w.role === 'player' || w.role === 'mother' ? 1 : 0.6 });
+  /** opts (optional) go to WhaleVoice.hum: { vowel, intensity, gain, glideFrom, vibrato, crack } */
+  voiceHum(w, midi, dur, opts) {
+    this.voiceOf(w).hum?.(midi, dur, { gain: w.role === 'player' || w.role === 'mother' ? 1 : 0.6, ...opts });
     w.drive.hum = 1;
     this.humTimers.set(w, dur);
   }

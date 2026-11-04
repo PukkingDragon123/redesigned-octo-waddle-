@@ -481,11 +481,15 @@ export class WhaleVoice {
     drift.frequency.value = 0.17 + Math.random() * 0.12;
     const driftG = G(this.calf ? 7 : 5);
     drift.connect(driftG); driftG.connect(det);
-    const cr = ctx.createOscillator();
-    cr.type = 'sawtooth';
-    cr.frequency.value = 13 + Math.random() * 4;
+    // the croak's wobble (only a calf's voice cracks); a dummy gain keeps the param list uniform
+    const cr = this.calf ? ctx.createOscillator() : null;
     const crG = G(0);
-    cr.connect(crG); crG.connect(det);
+    if (cr) {
+      cr.type = 'sawtooth';
+      cr.frequency.value = 13 + Math.random() * 4;
+      cr.connect(crG);
+      crG.connect(det);
+    }
     det.connect(osc.detune);
     const mix = G(1);
     const f1 = BQ('bandpass', VOW.oo[0] * k, 4.5);
@@ -563,7 +567,7 @@ export class WhaleVoice {
     const amp = G(0);
     mix.connect(amp);
     amp.connect(io.air);
-    for (const n of [pitch, osc, vib, drift, cr, sh1, sh2]) startAt(n, t);
+    for (const n of [pitch, osc, vib, drift, cr, sh1, sh2]) if (n) startAt(n, t);
     if (sub) { startAt(sub, t); startAt(growl, t); }
     try { nsrc.start(t, Math.random() * (nsrc.buffer.duration - 0.1)); } catch (e) { /* ignore */ }
     if (hsrc) try { hsrc.start(t, Math.random() * hsrc.buffer.duration); } catch (e) { /* ignore */ }

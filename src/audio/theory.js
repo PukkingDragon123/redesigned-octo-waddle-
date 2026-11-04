@@ -288,3 +288,44 @@ export const CADENCE_MELODY = [
   [[null, 4]],
 ];
 export const CADENCE_CHORDS = ['Bbm7', 'Db', 'Ebsus4:2 Eb:2', 'Bb/D', 'Fm9', 'Fm9'];
+
+// ---- Score notation for the authored songs (moods.js) ---------------------------------
+// One string per line of music, bars split by '|', notes by spaces:
+//   'Ab4:2 C5 Db5> | C5:3 r | F4. G4_ Ab4:2'
+// NOTE = letter, optional # or b, octave (C4 = 60); 'r' is a rest. ':beats' (default 1).
+// Marks: '>' accent (louder), '_' soft, '.' staccato (short gate), '~' legato (full gate).
+// Returns bars of [midi | null, beats, accent, gate], as the melody and part patterns read.
+const NOTE_RE = /^([A-Ga-g])([#b]?)(-?\d)$/;
+
+export function noteNum(s) {
+  const m = NOTE_RE.exec(s);
+  if (!m) return null;
+  let pc = LETTER[m[1].toUpperCase()];
+  if (m[2] === '#') pc += 1;
+  if (m[2] === 'b') pc -= 1;
+  return 12 * (+m[3] + 1) + pc;
+}
+
+export function score(str) {
+  return String(str).split('|').map((bar) => {
+    const out = [];
+    for (let tok of bar.trim().split(/\s+/)) {
+      if (!tok) continue;
+      let accent = 1;
+      let gate;
+      while (/[>_.~]$/.test(tok)) {
+        const c = tok[tok.length - 1];
+        if (c === '>') accent *= 1.25;
+        else if (c === '_') accent *= 0.7;
+        else if (c === '.') gate = 0.45;
+        else gate = 1.02;
+        tok = tok.slice(0, -1);
+      }
+      const [n, d] = tok.split(':');
+      const beats = d ? +d : 1;
+      const midi = n === 'r' ? null : noteNum(n);
+      out.push(gate == null ? [midi, beats, accent] : [midi, beats, accent, gate]);
+    }
+    return out;
+  });
+}

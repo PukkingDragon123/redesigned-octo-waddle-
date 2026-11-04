@@ -408,10 +408,10 @@ export class LifeCycle {
     const faceSpot = () => mate.lc.target.copy(me.pos).addScaledVector(me.fwd, 22).addScaledVector(me.right, 6).setY(me.pos.y + 2);
     const keep = S.script.run((function* () { for (;;) { faceSpot(); mate.lc.speed = Math.max(3, me.vel.length()); mate.drive.lookAt = me.pos; yield 0; } })(), 'mateFace');
     S.audio.setIntensity?.(0.3);
-    yield* S.song.duet(mate, {
-      auto: this.auto,
-      onSuccess: () => this.motes(_v2.copy(me.pos).lerp(mate.pos, 0.5), 18, 10, [1.0, 0.8, 0.55]),
-    });
+    // the duet, cue by cue, ending on one long note together (src/game/life/Songs.js)
+    const duetOpts = { auto: this.auto, onSuccess: () => this.motes(_v2.copy(me.pos).lerp(mate.pos, 0.5), 18, 10, [1.0, 0.8, 0.55]) };
+    if (S.songs && g.qte) yield* S.songs.duet(mate, duetOpts);
+    else yield* S.song.duet(mate, duetOpts);
     keep.done = true;
     S.script.cancel('mateFace');
     mate.drive.lookAt = null;
@@ -620,6 +620,8 @@ export class LifeCycle {
     S.audio.setMood?.('birth', { fade: 5 });
     S.audio.stinger?.('resolve');
     yield 2;
+    // ---- a lullaby for the egg: its light pulses a rhythm, he sings it back (src/game/life/Songs.js) ----
+    if (S.songs && g.qte) yield* S.songs.lullaby(egg, eggP, { right: f.right, fwd: f.fwd });
     // ---- weeks pass; the shell gives (a time-lapse, then a macro) ----
     this.mark('hatch3');
     C.begin({ focus: eggP, rate: 0.4 });
@@ -812,6 +814,8 @@ export class LifeCycle {
     this.autoGoal = () => _v2.copy(center).add(_p.set(0, -6, 30));
     const hums0 = this.calls;
     yield* until(() => this.calls > hums0 || this.auto, 10);
+    if (S.songs && g.qte) yield* S.songs.lastSong(me, mate, center);
+    else {
     C.begin({ focus: me, rate: 0.3 });
     const beat = S.song.key().beat;
     herd.whales.concat([mate]).forEach((w, i) => {
@@ -828,6 +832,7 @@ export class LifeCycle {
     for (const w of herd.whales) w.drive.sing = 0;
     mate.drive.sing = 0;
     G.uSongAmp.value = 0;
+    }
     this.mark('descend');
     // ---- rest: the elder descends into the deep
     S.audio.setMood?.('rest', { fade: 6 });

@@ -20,6 +20,7 @@ import { LifeCycle } from './life/LifeCycle.js';
 import { Needs } from './Needs.js';
 import { Abilities } from './Abilities.js';
 import { Bonds } from './life/Bonds.js';
+import { Songs } from './life/Songs.js';
 import { hatching, restoreHatching } from './life/Hatching.js';
 import { waterStep, seaHeight } from './Swim.js';
 import { Whale } from '../creatures/Whale.js';
@@ -131,6 +132,8 @@ export class Story {
     // abilities learnt one by one in ACT I (src/game/Abilities.js); the bond with the mother (src/game/life/Bonds.js)
     this.abilities = new Abilities(g, this);
     this.bonds = new Bonds(g, this);
+    // wordless singing scenes across the whole life (src/game/life/Songs.js)
+    this.songs = new Songs(this);
     this.player.on('hum', () => this.onCalfHum());
     this.player.on('humEnd', () => this.onCalfHumEnd());
     this.player.on('boom', (e) => this.onCalfBoom(e));
@@ -855,7 +858,8 @@ export class Story {
     yield* this.moment(function* (C) {
       yield* C.play(C.orbit({ center, radius: [170, 120], height: [50, 24], angle: [0.6, 1.2], fov: [48, 44], look: center }), 5);
     }, { focus: center, rate: 0.4 });
-    yield* this.song.run();
+    // call and response with the mother and the elder, held note by note (src/game/life/Songs.js)
+    if (this.songs && g.qte) { if (!this.songs.recent('herd')) yield* this.songs.herdSong(); } else yield* this.song.run();
     // dusk falls as the herd moves on
     herd.mode = 'travel';
     herd.songCenter = null;
@@ -876,6 +880,8 @@ export class Story {
     yield* this.moment(function* (C) {
       yield* C.play(C.track({ subject: mom, side: [-60, -44], up: [4, 22], ahead: [0, 26], fov: [48, 54] }), 5);
     }, { rate: 0.4 });
+    // singing to the plankton: each held note lights a wave across the black sea (src/game/life/Songs.js)
+    if (this.songs && this.game.qte && !this.songs.recent('plankton')) yield* this.songs.planktonSong();
     // down into the glowing sea after her, and out under the galaxy: breach, loop, dash (src/game/Abilities.js)
     if (this.abilities) yield* this.abilities.scene('acro');
     yield () => herd.s > this.path.chapters[6].start;
@@ -1427,6 +1433,19 @@ export class Story {
     calf.drive.happy = Math.max(calf.drive.happy, 0.5);
   }
 
+  /** Free humming follows the nose: tilt up to sing higher (a held note slides, in key). */
+  followHum() {
+    const p = this.player;
+    if (!p?.humming || this.song?.listening) { this._humV = null; return; }
+    const v = clamp((p.aimPitch + 0.6) * 5, 0, 9);
+    if (this._humV == null) { this._humV = Math.round(v); return; }
+    if (Math.abs(v - this._humV) < 0.75) return; // hysteresis: no flutter between two notes
+    this._humV = Math.round(v);
+    const k = this.song.key();
+    const deg = this._humV;
+    this.voiceOf(this.herd.calf).bend?.(k.rootMidi + 12 + k.scale[deg % 7] + 12 * Math.floor(deg / 7));
+  }
+
   onCalfHumEnd() {
     const calf = this.herd.calf;
     this.song.humEnd();
@@ -1708,6 +1727,7 @@ export class Story {
     if (!a || !a.update) return;
     a.update(dt);
     const calf = this.herd.calf;
+    this.followHum();
     const wf = this.world.nearestWaterfall(calf.pos);
     const cam = g.engine.camera.position;
     const camH = cam.y - seaHeight(g, cam.x, cam.z);

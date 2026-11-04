@@ -6,15 +6,24 @@
 // Real humpback song (NOAA, public domain; src/audio/SampleLib.js) is layered in once loaded:
 // each call adds a song unit retuned to the call's main note, and a hum adds a looped moan
 // whose playback rate follows the sung pitch, so the singing game's pitch control is intact.
+// The hum is a playable instrument (see _engine): a breathy onset, a scoop into the note,
+// portamento with a small overshoot on leaps (bend() slides a held note), vowels that open
+// oo -> oh -> ah and drift on long notes, a third formant's ring, vibrato that blooms as the
+// note is held, a growl under loud adult notes, an overtone shimmer, and a shared long hall
+// (src/audio/SongSpace.js). sing(midi, { dur, vowel, intensity, ... }) is the same with named
+// options; a short calf note slid into (or { crack: 1 }) is the newborn's breaking croak.
 import {
   clamp, lerp, mtof, glide, setAt, rampAt, expAt, cancelFrom, holdAt, disconnect, stopAt, startAt,
   finite, smoothstep, driveCurve,
 } from './util.js';
 import { snapToScale, snapToChord, stepChord, stepScale } from './theory.js';
 import { getWaves } from './instruments.js';
+import { songSpace } from './SongSpace.js';
 
 // [F1, F2] for a mother-sized throat; scaled by profile.formant
 const VOW = { oo: [300, 700], oh: [430, 820], ah: [650, 1080], ee: [330, 1900], eh: [520, 1500] };
+// third formant (the ring that makes a sung vowel shine)
+const F3 = { oo: 2250, oh: 2400, ah: 2600, ee: 2950, eh: 2700 };
 
 let driveCache = null;
 
@@ -41,6 +50,19 @@ export class WhaleVoice {
     this.glideTc = this.calf ? 0.035 : lerp(0.07, 0.15, this.size);
     this.verbBase = lerp(0.38, 0.85, this.size);
     this.echoBase = lerp(0.13, 0.3, this.size);
+    this.hallBase = lerp(0.3, 0.62, this.size);
+    // the instrument's character by size: a calf bright, breathy and quick to vibrate; an
+    // elder dark, slow and growling, with the most real whale in it
+    const z = this.size;
+    this.tone = {
+      vibRate: this.calf ? 6.1 : lerp(5.3, 4.3, z),
+      vibDepth: this.calf ? 30 : lerp(24, 16, z),
+      bloom: this.calf ? 0.55 : lerp(0.9, 1.4, z),
+      bright: this.calf ? 1.1 : lerp(0.9, 0.6, z),
+      sub: smoothstep(0.25, 1, z) * 0.6,
+      sample: this.calf ? 0.5 : lerp(0.75, 1.0, z),
+      shimmer: this.calf ? 0.11 : lerp(0.08, 0.05, z),
+    };
     this.x = 0;
     this.y = 0;
     this.z = 0;
@@ -73,73 +95,176 @@ export class WhaleVoice {
     } catch (e) { /* ignore */ }
   }
 
-  /** Sing `midi` (snapped to the key). Without a duration it sustains until release(). */
+  /**
+   * Sing `midi` (snapped to the key). Without a duration it sustains until release().
+   * opts: gain (0..2), glideFrom (midi to slide in from), snap (false: no key snap), prio,
+   * vibrato (cents), vowel ('oo' | 'oh' | 'ah' | 'ee' | 'eh': where the note opens to),
+   * intensity (0..1: growl, brightness, shimmer; default from gain), crack (0..1: the newborn's
+   * cracked croak; a short calf note slid into is taken as one when not given).
+   */
   hum(midi, duration, opts = {}) {
     try {
       const sys = this.sys;
       if (!sys.ready || this.disposed) return;
       opts = opts || {};
       const now = sys.ctx.currentTime;
-      const t = now + 0.012;
+      const t = now + 0.008;
       let m = finite(midi, this.p.base);
       const key = sys._keyNow();
       if (opts.snap !== false) m = snapToScale(m, key.root, key.scale);
       // the game hums the player and the mother at gain 1, everyone else softer
-      this.prio = finite(opts.prio, clamp(finite(opts.gain, 1), 0, 2));
+      const g0 = clamp(finite(opts.gain, 1), 0, 2);
+      this.prio = finite(opts.prio, g0);
       const e = this._engine(t);
       if (!e) return;
+      const T = this.tone;
       const k = this.p.formant;
       const f = mtof(m);
-      const gain = clamp(finite(opts.gain, 1), 0, 2) * this.trim;
-      const vib = clamp(finite(opts.vibrato, lerp(30, 18, this.size)), 0, 120);
+      const gain = g0 * this.trim;
+      const I = clamp(finite(opts.intensity, 0.35 + 0.55 * Math.min(1, g0)));
+      const dur = duration != null && Number.isFinite(+duration) ? Math.max(0.08, +duration) : null;
+      const crack = clamp(finite(opts.crack, this.calf && dur !== null && dur < 0.4 && opts.glideFrom != null ? 1 : 0));
+      const vib = clamp(finite(opts.vibrato, T.vibDepth), 0, 120) * (1 - crack);
       const legato = this.humming && now < this.humEnd;
       // the previous note's release tail is still audible: slide out of it, don't jump
       const tail = !legato && now - this.humEnd < 0.6;
-      for (const p of [e.amp.gain, e.pitch.offset, e.f1.frequency, e.f2.frequency, e.vibG.gain, e.ng.gain, e.nbp.frequency]) cancelFrom(p, t);
+      this._cancel(e, t);
+      // ---- pitch: scoop in, portamento between notes (with a little overshoot on leaps)
+      const from = this.curMidi;
       if (opts.glideFrom != null && Number.isFinite(+opts.glideFrom)) {
         setAt(e.pitch.offset, mtof(+opts.glideFrom), t);
-        glide(e.pitch.offset, f, t, this.glideTc * 1.4);
+        glide(e.pitch.offset, f, t, this.glideTc * (crack ? 0.6 : 1.4));
       } else if (legato) {
-        glide(e.pitch.offset, f, t, this.glideTc);
+        const leap = m - from;
+        if (Math.abs(leap) >= 3) {
+          glide(e.pitch.offset, mtof(m + Math.sign(leap) * 0.35), t, this.glideTc);
+          glide(e.pitch.offset, f, t + this.glideTc * 2.4, 0.07);
+        } else glide(e.pitch.offset, f, t, this.glideTc);
       } else if (tail) {
         glide(e.pitch.offset, f, t, 0.03);
       } else {
-        setAt(e.pitch.offset, f * Math.pow(2, -0.8 / 12), t); // a natural scoop into the note
-        glide(e.pitch.offset, f, t, 0.045);
+        setAt(e.pitch.offset, f * Math.pow(2, -0.9 / 12), t); // a natural scoop into the note
+        glide(e.pitch.offset, f, t, 0.05);
       }
-      const att = this.calf ? 0.05 : lerp(0.1, 0.22, this.size);
+      // ---- level: a breathy start, then the note swells as it is held
+      const att = this.calf ? 0.045 : lerp(0.08, 0.18, this.size);
       if (legato) {
-        glide(e.amp.gain, gain * 0.85, t, 0.03);
+        glide(e.amp.gain, gain * 0.86, t, 0.03);
         glide(e.amp.gain, gain, t + 0.08, att / 2);
-      } else glide(e.amp.gain, gain, t, att / 2.5);
-      const V0 = legato ? VOW.oh : VOW.oo;
-      if (!legato && !tail) {
-        setAt(e.f1.frequency, V0[0] * k, t);
-        setAt(e.f2.frequency, V0[1] * k, t);
       } else {
-        glide(e.f1.frequency, V0[0] * k, t, 0.04);
-        glide(e.f2.frequency, V0[1] * k, t, 0.04);
+        glide(e.amp.gain, gain * 0.72, t, att / 3);
+        glide(e.amp.gain, gain, t + att, 0.35);
       }
-      const open = this.calf ? VOW.eh : VOW.ah;
-      glide(e.f1.frequency, open[0] * k, t + 0.06, 0.16);
-      glide(e.f2.frequency, open[1] * k, t + 0.06, 0.2);
+      // ---- vowel: oo -> oh -> the open vowel, drifting on long notes
+      const V = VOW[opts.vowel] || (this.calf ? VOW.eh : VOW.ah);
+      const V3 = F3[opts.vowel] || (this.calf ? F3.eh : F3.ah);
+      const S0 = legato ? VOW.oh : VOW.oo;
+      const mv = !legato && !tail ? (p, v) => setAt(p, v, t) : (p, v) => glide(p, v, t, 0.04);
+      mv(e.f1.frequency, S0[0] * k);
+      mv(e.f2.frequency, S0[1] * k);
+      mv(e.f3.frequency, F3.oo * k);
+      glide(e.f1.frequency, lerp(S0[0], V[0], 0.6) * k, t + 0.04, 0.07);
+      glide(e.f2.frequency, lerp(S0[1], V[1], 0.6) * k, t + 0.04, 0.08);
+      glide(e.f1.frequency, V[0] * k, t + 0.16, 0.3);
+      glide(e.f2.frequency, V[1] * k, t + 0.16, 0.34);
+      glide(e.f3.frequency, V3 * k, t + 0.1, 0.3);
+      if (dur === null || dur > 1.4) {
+        // a long note keeps moving: the mouth slowly rounds toward "oh"
+        glide(e.f1.frequency, lerp(V[0], VOW.oh[0], 0.55) * k, t + 1.3, 1.6);
+        glide(e.f2.frequency, lerp(V[1], VOW.oh[1], 0.55) * k, t + 1.3, 1.8);
+      }
+      glide(e.g3.gain, (0.25 + 0.55 * I) * T.bright, t, 0.2);
+      // ---- breath: a puff on the onset, a thread of air under the tone
       const br = this.p.breath * gain;
-      glide(e.ng.gain, br * 1.2, t, 0.01);
-      glide(e.ng.gain, br * 0.3, t + 0.09, 0.12);
-      glide(e.nbp.frequency, open[1] * k, t, 0.2);
+      glide(e.ng.gain, br * (legato ? 0.7 : 1.7), t, 0.008);
+      glide(e.ng.gain, br * (0.25 + 0.9 * crack), t + 0.09, 0.12);
+      glide(e.nbp.frequency, V[1] * k, t, 0.2);
+      // ---- vibrato blooms on a held note (deeper and a little faster as it opens)
       glide(e.vibG.gain, 0, t, 0.03);
-      glide(e.vibG.gain, vib, t + (this.calf ? 0.18 : 0.32), 0.3);
+      glide(e.vibG.gain, vib * 0.3, t + 0.16, 0.18);
+      glide(e.vibG.gain, vib, t + 0.5, T.bloom);
+      setAt(e.vib.frequency, T.vibRate * 0.78, t);
+      glide(e.vib.frequency, T.vibRate, t + 0.3, T.bloom);
+      // ---- growl under loud adult notes
+      if (e.subG) {
+        const gr = T.sub * smoothstep(0.45, 1, I);
+        glide(e.subG.gain, gr, t, 0.15);
+        glide(e.growlD.gain, gr * 0.7, t, 0.15);
+      }
+      // ---- the real humpback moan, brighter as the note opens; the overtone shimmer blooms late
+      if (e.hg) {
+        glide(e.hg.gain, T.sample * (0.65 + 0.35 * I), t, 0.05);
+        glide(e.hpk.frequency, V[1] * k, t + 0.1, 0.3);
+        glide(e.hlp.frequency, (this.calf ? 2200 : 1300) * k * (0.7 + 0.8 * I), t, 0.2);
+      }
+      glide(e.shG.gain, 0, t, 0.05);
+      glide(e.shG.gain, T.shimmer * (0.4 + 0.6 * I), t + 0.35, 0.9);
+      // ---- the newborn's croak: the pitch wobbles and breaks, then gives out
+      glide(e.crG.gain, crack * 85, t, 0.02);
+      if (crack > 0 && dur !== null) {
+        glide(e.pitch.offset, f * Math.pow(2, -5 * crack / 12), t + dur * 0.7, dur * 0.12);
+        glide(e.crG.gain, crack * 160, t + dur * 0.6, 0.04);
+      }
       this.humming = true;
       this.curMidi = m;
       this.lastActive = now;
-      if (duration != null && Number.isFinite(+duration)) {
-        const end = t + Math.max(0.08, +duration);
+      if (dur !== null) {
+        const end = t + dur;
         this.humEnd = end;
         this._releaseAt(end, this.calf ? 0.25 : 0.5);
       } else this.humEnd = Infinity;
     } catch (err) {
       this.sys._warn(err);
     }
+  }
+
+  /**
+   * The same, with named options (for scenes and QTEs):
+   *   voice.sing(midi, { dur, vowel, intensity, gain, glideFrom, vibrato, snap, crack })
+   */
+  sing(midi, o = {}) {
+    o = o || {};
+    this.hum(midi, o.dur, o);
+  }
+
+  /**
+   * Slide a held note to `midi` without a new attack (follow a steering input while humming).
+   * Snapped to the key unless o.snap === false. Returns false when nothing is being sung.
+   */
+  bend(midi, o = {}) {
+    try {
+      const sys = this.sys;
+      const e = this.eng;
+      if (!sys.ready || !e || !this.humming) return false;
+      const now = sys.ctx.currentTime;
+      if (now > this.humEnd) return false;
+      let m = finite(midi, this.curMidi);
+      if (!o || o.snap !== false) {
+        const key = sys._keyNow();
+        m = snapToScale(m, key.root, key.scale);
+      }
+      if (m === this.curMidi) return true;
+      const t = now + 0.008;
+      const leap = m - this.curMidi;
+      cancelFrom(e.pitch.offset, t);
+      glide(e.pitch.offset, mtof(m + Math.sign(leap) * Math.min(0.35, Math.abs(leap) * 0.1)), t, this.glideTc);
+      glide(e.pitch.offset, mtof(m), t + this.glideTc * 2.4, 0.07);
+      // the mouth flexes a little with the move, and the vibrato settles in again
+      cancelFrom(e.vibG.gain, t);
+      glide(e.vibG.gain, this.tone.vibDepth * 0.4, t, 0.05);
+      glide(e.vibG.gain, this.tone.vibDepth, t + 0.3, this.tone.bloom * 0.7);
+      this.curMidi = m;
+      this.lastActive = now;
+      return true;
+    } catch (err) {
+      this.sys._warn(err);
+      return false;
+    }
+  }
+
+  /** True while a hum is sounding (held, or before its duration ends). */
+  get singing() {
+    return !!(this.humming && this.sys.ctx && this.sys.ctx.currentTime < this.humEnd);
   }
 
   release(fadeSec = 0.4) {
@@ -151,8 +276,7 @@ export class WhaleVoice {
       }
       const now = this.sys.ctx.currentTime;
       const t = now + 0.01;
-      const e = this.eng;
-      for (const p of [e.amp.gain, e.pitch.offset, e.f1.frequency, e.f2.frequency, e.vibG.gain, e.ng.gain]) cancelFrom(p, t);
+      this._cancel(this.eng, t);
       this._releaseAt(t, clamp(finite(fadeSec, 0.4), 0.02, 10));
       this.humEnd = t;
       this.humming = false;
@@ -229,7 +353,7 @@ export class WhaleVoice {
       const now = this.sys.ctx ? this.sys.ctx.currentTime : 0;
       this._killEngine(now);
       this._killCharge(now);
-      if (this.io) disconnect(this.io.air, this.io.pan, this.io.verb, this.io.echo);
+      if (this.io) disconnect(this.io.air, this.io.pan, this.io.verb, this.io.echo, this.io.hall);
       this.io = null;
     } catch (e) { /* ignore */ }
     this.disposed = true;
@@ -263,7 +387,12 @@ export class WhaleVoice {
     echo.gain.value = this.echoBase;
     air.connect(echo);
     echo.connect(sys.bus.echo);
-    this.io = { air, pan, verb, echo, lastD: -1, px: NaN, py: NaN, pz: NaN };
+    // the song space: the long ringing hall every whale shares
+    const hall = ctx.createGain();
+    hall.gain.value = this.hallBase;
+    air.connect(hall);
+    hall.connect(songSpace(sys).input);
+    this.io = { air, pan, verb, echo, hall, lastD: -1, px: NaN, py: NaN, pz: NaN };
     this._place(ctx.currentTime, true);
     return this.io;
   }
@@ -296,6 +425,8 @@ export class WhaleVoice {
       const dry = ref / Math.max(ref, d);
       move(io.verb.gain, this.verbBase * Math.sqrt(dry), now, 0.1, force);
       move(io.echo.gain, this.echoBase * Math.sqrt(dry), now, 0.1, force);
+      // the hall falls off slower than the dry voice: a far whale is mostly its space
+      move(io.hall.gain, this.hallBase * Math.pow(dry, 0.3), now, 0.1, force);
     }
   }
 
@@ -304,6 +435,12 @@ export class WhaleVoice {
     return !!(this.eng || this.charge || now < this._callEnd);
   }
 
+  /**
+   * The singing instrument, built on the first hum and kept while in use:
+   *   pitch (Hz) drives a vocal tone (three formants + a chesty low pass), a sub-octave growl
+   *   (adults), a looped real humpback moan resampled to the pitch, and an octave + twelfth
+   *   overtone shimmer; vibrato, a slow drift and the croak's wobble move them all together.
+   */
   _engine(t) {
     if (this.eng) return this.eng;
     const io = this._io();
@@ -315,10 +452,18 @@ export class WhaleVoice {
     const ctx = sys.ctx;
     const W = getWaves(ctx);
     const k = this.p.formant;
+    const T = this.tone;
     const G = (v) => {
       const g = ctx.createGain();
       g.gain.value = v;
       return g;
+    };
+    const BQ = (type, f, q) => {
+      const b = ctx.createBiquadFilter();
+      b.type = type;
+      b.frequency.value = f;
+      b.Q.value = q;
+      return b;
     };
     const pitch = ctx.createConstantSource();
     pitch.offset.value = mtof(this.p.base);
@@ -326,44 +471,48 @@ export class WhaleVoice {
     osc.setPeriodicWave(this.calf ? W.calf : W.whale);
     osc.frequency.value = 0;
     pitch.connect(osc.frequency);
+    // pitch movement shared by every layer (cents): vibrato, a slow drift, the croak's wobble
+    const det = G(1);
     const vib = ctx.createOscillator();
-    vib.frequency.value = lerp(6.2, 4.2, this.size) * (0.95 + Math.random() * 0.1);
+    vib.frequency.value = T.vibRate * (0.95 + Math.random() * 0.1);
     const vibG = G(0);
-    vib.connect(vibG);
-    vibG.connect(osc.detune);
+    vib.connect(vibG); vibG.connect(det);
+    const drift = ctx.createOscillator();
+    drift.frequency.value = 0.17 + Math.random() * 0.12;
+    const driftG = G(this.calf ? 7 : 5);
+    drift.connect(driftG); driftG.connect(det);
+    const cr = ctx.createOscillator();
+    cr.type = 'sawtooth';
+    cr.frequency.value = 13 + Math.random() * 4;
+    const crG = G(0);
+    cr.connect(crG); crG.connect(det);
+    det.connect(osc.detune);
     const mix = G(1);
-    const f1 = ctx.createBiquadFilter();
-    f1.type = 'bandpass';
-    f1.Q.value = 4.5;
-    f1.frequency.value = VOW.oo[0] * k;
-    const f2 = ctx.createBiquadFilter();
-    f2.type = 'bandpass';
-    f2.Q.value = 6;
-    f2.frequency.value = VOW.oo[1] * k;
-    const dry = ctx.createBiquadFilter();
-    dry.type = 'lowpass';
-    dry.frequency.value = 520 * k;
-    dry.Q.value = 0.6;
+    const f1 = BQ('bandpass', VOW.oo[0] * k, 4.5);
+    const f2 = BQ('bandpass', VOW.oo[1] * k, 6);
+    const f3 = BQ('bandpass', F3.oo * k, 8);
+    const dry = BQ('lowpass', 520 * k, 0.6);
     const g1 = G(2.2);
     const g2 = G(1.4);
+    const g3 = G(0.4);
     const gd = G(this.calf ? 0.7 : 0.45);
     osc.connect(f1); f1.connect(g1); g1.connect(mix);
     osc.connect(f2); f2.connect(g2); g2.connect(mix);
+    osc.connect(f3); f3.connect(g3); g3.connect(mix);
     osc.connect(dry); dry.connect(gd); gd.connect(mix);
     let sub = null, subG = null, half = null, growl = null, growlD = null;
-    const growlAmt = smoothstep(0.3, 1, this.size) * 0.5;
-    if (growlAmt > 0.02) {
+    if (T.sub > 0.02) {
       sub = ctx.createOscillator();
       sub.type = 'triangle';
       sub.frequency.value = 0;
       half = G(0.5);
       pitch.connect(half);
       half.connect(sub.frequency);
-      vibG.connect(sub.detune);
-      subG = G(growlAmt);
+      det.connect(sub.detune);
+      subG = G(0);
       growl = ctx.createOscillator();
       growl.frequency.value = 24 + Math.random() * 9;
-      growlD = G(growlAmt * 0.7);
+      growlD = G(0);
       growl.connect(growlD);
       growlD.connect(subG.gain);
       sub.connect(subG);
@@ -372,14 +521,11 @@ export class WhaleVoice {
     const nsrc = ctx.createBufferSource();
     nsrc.buffer = sys.bank.noise.pink;
     nsrc.loop = true;
-    const nbp = ctx.createBiquadFilter();
-    nbp.type = 'bandpass';
-    nbp.frequency.value = VOW.ah[1] * k;
-    nbp.Q.value = 1.3;
+    const nbp = BQ('bandpass', VOW.ah[1] * k, 1.3);
     const ng = G(0);
     nsrc.connect(nbp); nbp.connect(ng); ng.connect(mix);
     // a real humpback moan looped under the tone, its rate driven by the sung pitch (Hz / f0)
-    let hsrc = null, hscale = null, hlp = null, hg = null;
+    let hsrc = null, hscale = null, hpk = null, hlp = null, hg = null;
     const hum = sys.samples && sys.samples.pick('wHum');
     if (hum && hum.f0) {
       hsrc = ctx.createBufferSource();
@@ -389,21 +535,51 @@ export class WhaleVoice {
       hscale = G(1 / hum.f0);
       pitch.connect(hscale);
       hscale.connect(hsrc.playbackRate);
-      hlp = ctx.createBiquadFilter();
-      hlp.type = 'lowpass';
-      hlp.frequency.value = (this.calf ? 2600 : 1700) * k;
-      hg = G(this.calf ? 0.5 : 0.9);
-      hsrc.connect(hlp); hlp.connect(hg); hg.connect(mix);
+      det.connect(hsrc.detune);
+      hpk = BQ('peaking', VOW.ah[1] * k, 1.2);
+      hpk.gain.value = 7;
+      hlp = BQ('lowpass', (this.calf ? 2600 : 1700) * k, 0.6);
+      hg = G(0);
+      hsrc.connect(hpk); hpk.connect(hlp); hlp.connect(hg); hg.connect(mix);
     }
+    // shimmer: the octave and the twelfth, detuned a few cents apart so they beat slowly
+    const sh1 = ctx.createOscillator();
+    const sh2 = ctx.createOscillator();
+    const x2 = G(2);
+    const x3 = G(3);
+    sh1.frequency.value = 0;
+    sh2.frequency.value = 0;
+    pitch.connect(x2); x2.connect(sh1.frequency);
+    pitch.connect(x3); x3.connect(sh2.frequency);
+    det.connect(sh1.detune); det.connect(sh2.detune);
+    sh1.detune.value = 4;
+    sh2.detune.value = -6;
+    const sh2g = G(0.55);
+    const shG = G(0);
+    const shTrem = G(1);
+    sh1.connect(shG); sh2.connect(sh2g); sh2g.connect(shG); shG.connect(shTrem); shTrem.connect(mix);
+    const shMod = G(0.35);
+    drift.connect(shMod); shMod.connect(shTrem.gain); // the same slow drift swells the shimmer
     const amp = G(0);
     mix.connect(amp);
     amp.connect(io.air);
-    startAt(pitch, t); startAt(osc, t); startAt(vib, t);
+    for (const n of [pitch, osc, vib, drift, cr, sh1, sh2]) startAt(n, t);
     if (sub) { startAt(sub, t); startAt(growl, t); }
     try { nsrc.start(t, Math.random() * (nsrc.buffer.duration - 0.1)); } catch (e) { /* ignore */ }
     if (hsrc) try { hsrc.start(t, Math.random() * hsrc.buffer.duration); } catch (e) { /* ignore */ }
-    this.eng = { pitch, osc, vib, vibG, mix, f1, f2, dry, g1, g2, gd, sub, subG, half, growl, growlD, nsrc, nbp, ng, amp, hsrc, hscale, hlp, hg };
+    this.eng = {
+      pitch, osc, det, vib, vibG, drift, driftG, cr, crG, mix, f1, f2, f3, dry, g1, g2, g3, gd,
+      sub, subG, half, growl, growlD, nsrc, nbp, ng, hsrc, hscale, hpk, hlp, hg,
+      sh1, sh2, x2, x3, sh2g, shG, shTrem, shMod, amp,
+    };
     return this.eng;
+  }
+
+  /** Cancel the scheduled automation of every expressive param from t on. */
+  _cancel(e, t) {
+    for (const p of [e.amp.gain, e.pitch.offset, e.f1.frequency, e.f2.frequency, e.f3.frequency, e.g3.gain, e.vibG.gain, e.vib.frequency, e.ng.gain, e.nbp.frequency, e.shG.gain, e.crG.gain]) cancelFrom(p, t);
+    if (e.subG) { cancelFrom(e.subG.gain, t); cancelFrom(e.growlD.gain, t); }
+    if (e.hg) { cancelFrom(e.hg.gain, t); cancelFrom(e.hpk.frequency, t); cancelFrom(e.hlp.frequency, t); }
   }
 
   _releaseAt(t, fade) {
@@ -416,6 +592,8 @@ export class WhaleVoice {
     glide(e.f2.frequency, VOW.oo[1] * k, t, fade / 2);
     glide(e.ng.gain, 0, t, fade / 3);
     glide(e.vibG.gain, 0, t, fade);
+    glide(e.shG.gain, 0, t, fade / 4);
+    glide(e.crG.gain, 0, t, fade / 4);
   }
 
   /** Tear the tone engine down; with `fade` it is first faded out (voice stealing). */
@@ -424,14 +602,15 @@ export class WhaleVoice {
     if (!e) return;
     this.eng = null;
     this.humming = false;
-    const nodes = [e.pitch, e.osc, e.vib, e.vibG, e.mix, e.f1, e.f2, e.dry, e.g1, e.g2, e.gd, e.sub, e.subG, e.half, e.growl, e.growlD, e.nsrc, e.nbp, e.ng, e.amp, e.hsrc, e.hscale, e.hlp, e.hg].filter(Boolean);
+    const nodes = Object.values(e).filter(Boolean);
+    const srcs = [e.pitch, e.osc, e.vib, e.drift, e.cr, e.sh1, e.sh2, e.sub, e.growl, e.nsrc, e.hsrc].filter(Boolean);
     if (fade > 0) {
       holdAt(e.amp.gain, now);
       rampAt(e.amp.gain, 0, now + fade);
-      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc, e.hsrc]) if (n) stopAt(n, now + fade + 0.02);
+      for (const n of srcs) stopAt(n, now + fade + 0.02);
       e.osc.onended = () => disconnect(...nodes);
     } else {
-      for (const n of [e.pitch, e.osc, e.vib, e.sub, e.growl, e.nsrc, e.hsrc]) if (n) stopAt(n, now);
+      for (const n of srcs) stopAt(n, now);
       disconnect(...nodes);
     }
     this.sys._releaseVoiceEngine(this);

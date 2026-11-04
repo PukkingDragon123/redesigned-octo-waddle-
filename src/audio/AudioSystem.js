@@ -24,6 +24,7 @@ import { SampleLib } from './SampleLib.js';
 import { Soundtrack } from './Soundtrack.js';
 import { loadBank, preloadBank, IR_SPLIT } from './SampleBank.js';
 import { MOODS, MOOD_NAMES } from './moods.js';
+import { SONGS } from './songs.js';
 import { parseChord, SCALES, bassNote, chordTones } from './theory.js';
 import { clamp, glide, setAt, holdAt, finite, softClipCurve, yieldNow } from './util.js';
 
@@ -535,6 +536,16 @@ export class AudioSystem {
 
   // ---- score -------------------------------------------------------------------------
 
+  /**
+   * Cue one of the authored songs by name (songs.js: lullaby, skyward, wonder, tempest, duet,
+   * guardian, elegy), or 'theme' for the jam's track played whole. Same options as setMood.
+   */
+  playSong(name, opts = {}) {
+    if (name === 'theme') return this.setMood(this._mood ? this._mood.name : 'dawn', { ...opts, track: true });
+    const mood = SONGS[name] || (MOODS[name] ? name : null);
+    if (mood) this.setMood(mood, opts);
+  }
+
   setMood(name, opts = {}) {
     try {
       name = String(name);
@@ -653,6 +664,10 @@ export class AudioSystem {
     if (this._warned.has(msg) || this._warned.size > 20) return;
     this._warned.add(msg);
     console.warn('[skysong audio]', e);
+  }
+
+  static get songs() {
+    return [...Object.keys(SONGS), 'theme'];
   }
 
   static get moods() {

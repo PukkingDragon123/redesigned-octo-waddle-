@@ -260,6 +260,8 @@ export class Abilities {
       const name = this.pendingScene;
       this.pendingScene = null;
       if (name === 'mouth' || name === 'bonds') { if (S.bonds) S.script.run(S.bonds.danger({ force: true }), 'bondsScene'); return; }
+      // the singing scenes of ACT I (src/game/life/Songs.js)
+      if (name === 'herd' || name === 'plankton') { if (S.songs) S.script.run(name === 'herd' ? S.songs.herdSong() : S.songs.planktonSong(), 'songScene'); return; }
       for (const k of ALIAS[name] || [name]) this.set.delete(k);
       S.script.run(this.scene(name), 'abilityScene');
     }

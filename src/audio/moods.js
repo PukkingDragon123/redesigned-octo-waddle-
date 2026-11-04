@@ -13,12 +13,11 @@
 // kick (beat 1, the 'a' of 1, beat 3, the 'a' of 3) and off-beat shaker. Side keys stay close:
 // F dorian for the forest, F phrygian for danger, D-flat (the theme's VI) for the courtship.
 import { THEME, THEME_CHORDS, THEME_DARK_CHORDS, CADENCE_MELODY, CADENCE_CHORDS, SCALES } from './theory.js';
+import { SONG_MOODS } from './songs.js';
 
 const F = 65;
 const HOME = { root: F, scale: SCALES.minor }; // F aeolian = A-flat major's notes
-const F_DORIAN = { root: F, scale: SCALES.dorian };
 const F_PHRYGIAN = { root: F, scale: SCALES.phrygian };
-const DB_MAJOR = { root: 61, scale: SCALES.major };
 
 const theme = (extra) => ({ bars: THEME_CHORDS, melody: THEME, ...extra });
 
@@ -33,6 +32,9 @@ const groove = (on, vel = 0.5, shakeOn = null) => [
 ];
 
 export const MOODS = {
+  // the authored songs (songs.js): dawn, flight, forest, storm, courtship, birth, rest
+  ...SONG_MOODS,
+
   title: {
     level: 1.33,
     bpm: 60,
@@ -54,54 +56,6 @@ export const MOODS = {
     ],
   },
 
-  dawn: {
-    level: 1.33,
-    bpm: 60,
-    key: HOME,
-    sections: {
-      a: { bars: ['Abadd9', 'Db/Ab', 'Abadd9', 'Ebsus4/Ab:2 Eb/Ab:2'] },
-      frag: theme(),
-      b: { bars: ['Bbm7', 'Dbmaj7', 'Fm7', 'Ebsus4:2 Eb:2'] },
-    },
-    form: ['a', 'frag', 'a', 'b'],
-    layers: [
-      { p: 'pad', target: 'strings', n: 4, lo: 57, hi: 79, gain: 0.28 },
-      { p: 'bass', target: 'low', gain: 0.16, single: true, on: [0.15, 0.5] },
-      { p: 'melody', inst: 'piano', vel: 0.5, prob: 0.55, keepFirst: true, human: 0.04, secs: ['frag'], melodic: true },
-      { p: 'gen', inst: 'piano', lo: 66, hi: 81, vel: 0.4, secs: ['a', 'b'], phrase: 1, restProb: 0.7, cells: [[3, 1], [2, 2], [4]], melodic: true },
-      { p: 'bells', inst: 'bell', every: 2, lo: 74, hi: 93, vel: 0.48, pair: true },
-      { p: 'arp', inst: 'harp', rate: 1, shape: 'up', lo: 50, hi: 74, vel: 0.34, on: [0.3, 0.6] },
-      { p: 'gen', target: 'flute', lo: 69, hi: 86, vel: 0.55, phrase: 2, melodic: true, on: [0.55, 0.85] },
-      { p: 'sparkle', inst: 'celesta', lo: 81, hi: 98, prob: 0.05, vel: 0.3, on: [0.4, 0.8] },
-    ],
-  },
-
-  flight: {
-    level: 1.26,
-    bpm: 60,
-    key: HOME,
-    sections: {
-      a: { bars: ['Db', 'Fm', 'Db', 'Eb'] },
-      b: { bars: ['Bbm7', 'Fm/Ab', 'Db', 'Ebsus4:2 Eb:2'] },
-      theme: theme(),
-      c: { bars: ['Fm', 'Db', 'Ab', 'Eb'] },
-    },
-    form: ['a', 'b', 'theme', 'c', 'b', 'theme'],
-    layers: [
-      { p: 'arp', inst: 'harp', rate: 4, shape: 'updown', lo: 50, hi: 81, vel: 0.4, dens: [0.7, 1] },
-      { p: 'pad', target: 'strings', n: 4, lo: 54, hi: 76, gain: 0.32 },
-      { p: 'bass', target: 'low', gain: 0.22 },
-      { p: 'melody', inst: 'piano', vel: 0.56, vary: 0.45, human: 0.02, secs: ['theme'], melodic: true, off: [0.75, 1] },
-      { p: 'gen', inst: 'piano', lo: 66, hi: 83, vel: 0.44, secs: ['a', 'b', 'c'], melodic: true, off: [0.65, 0.95] },
-      { p: 'melody', target: 'lead', vel: 0.6, secs: ['theme'], melodic: true, on: [0.55, 0.85] },
-      { p: 'counter', target: 'lead', lo: 74, hi: 88, vel: 0.55, secs: ['a', 'b', 'c'], melodic: true, on: [0.4, 0.75] },
-      { p: 'pad', target: 'choir', n: 4, lo: 57, hi: 79, vowel: 'ah', gain: 0.28, on: [0.6, 0.95] },
-      { p: 'bells', inst: 'bell', every: 4, lo: 78, hi: 93, vel: 0.3, on: [0.7, 1] },
-      { p: 'swell', inst: 'swell', every: 4, vel: 0.6, on: [0.8, 1] },
-      ...groove([0.45, 0.75], 0.5),
-    ],
-  },
-
   krill: {
     level: 1.9,
     bpm: 80,
@@ -120,26 +74,6 @@ export const MOODS = {
       { p: 'rhythm', inst: 'marimba', pat: 'x.xx.x.x', lo: 62, hi: 79, vel: 0.52, on: [0.35, 0.6] },
       { p: 'gen', target: 'flute', lo: 71, hi: 88, vel: 0.5, phrase: 2, restProb: 0.5, cells: [[0.5, 0.5, 1, 2], [1, 0.5, 0.5, 2], [1, 1, 2]], melodic: true, on: [0.6, 0.9] },
       { p: 'drums', inst: 'shaker', midi: 60, vel: 0.42, pats: [{ at: 0, p: SHAKE }, { at: 0.7, p: SHAKE_FULL }], on: [0.4, 0.7] },
-    ],
-  },
-
-  forest: {
-    level: 1.26,
-    bpm: 60,
-    key: F_DORIAN,
-    sections: {
-      a: { bars: ['Fm9', 'Bb/F', 'Fm9', 'Abmaj7:2 Bb:2'] },
-      b: { bars: ['Cm7', 'Abmaj7', 'Fm7', 'Gm7'] },
-    },
-    form: ['a', 'a', 'b', 'a'],
-    layers: [
-      { p: 'drone', target: 'drone', lo: 40, notes: [0, 7], gain: 0.28 },
-      { p: 'pad', target: 'strings', n: 4, lo: 55, hi: 74, gain: 0.2 },
-      { p: 'gen', target: 'flute', lo: 71, hi: 88, vel: 0.46, phrase: 2, restProb: 0.5, cells: [[2, 1, 1], [3, 1], [1.5, 0.5, 2], [4], [1, 1, 2]], melodic: true },
-      { p: 'rhythm', inst: 'marimba', pat: 'x.x..x.x', lo: 59, hi: 76, vel: 0.62, prob: 0.85 },
-      { p: 'sparkle', inst: 'harp', lo: 76, hi: 91, prob: 0.08, vel: 0.45 },
-      { p: 'pad', target: 'choir', n: 3, lo: 59, hi: 74, vowel: 'oo', gain: 0.11, on: [0.3, 0.7] },
-      { p: 'bounce', inst: 'pizz', lo: 40, mid: [59, 71], vel: 0.38, prob: 0.4, on: [0.55, 0.85] },
     ],
   },
 
@@ -189,29 +123,6 @@ export const MOODS = {
       { p: 'gen', inst: 'piano', lo: 62, hi: 78, vel: 0.34, phrase: 1, restProb: 0.75, cells: [[2, 2], [4], [3, 1]], melodic: true, on: [0.2, 0.5] },
       { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 79, vowel: 'oo', gain: 0.14, on: [0.5, 0.85] },
       { p: 'bells', inst: 'bell', every: 4, lo: 81, hi: 93, vel: 0.22 },
-    ],
-  },
-
-  storm: {
-    level: 1.6,
-    bpm: 66,
-    key: HOME,
-    sections: {
-      a: { bars: ['Fm', 'Fm', 'Db', 'Csus4:2 C:2'] },
-      b: { bars: ['Bbm', 'Db', 'Fm/C', 'C'] },
-      c: { bars: ['Fm', 'Eb', 'Db', 'C'] },
-    },
-    form: ['a', 'b', 'a', 'c'],
-    layers: [
-      { p: 'bass', target: 'trem', lo: 38, hi: 50, fifth: true, gain: 0.42 },
-      { p: 'ostinato', inst: 'stac', rate: 2, fastAt: 0.6, cells: [0, 0, 2, 0, 3, 0, 2, 1], accent: [0, 4], lo: 38, vel: 0.5, on: [0.12, 0.4] },
-      { p: 'pad', target: 'strings', n: 4, lo: 55, hi: 74, gain: 0.24 },
-      { p: 'drums', inst: 'timpani', pitch: 'root', lo: 38, hi: 45, vel: 0.5, pats: [{ at: 0.3, p: 'X.......x.......' }, { at: 0.6, p: 'X.......X...r...' }, { at: 0.85, p: 'X..x..x.X...rrrr' }], on: [0.25, 0.5] },
-      { p: 'pad', target: 'brass', n: 3, lo: 50, hi: 65, gain: 0.42, on: [0.5, 0.8] },
-      { p: 'swell', target: 'brass', every: 2, on: [0.5, 0.8] },
-      { p: 'pad', target: 'choir', n: 4, lo: 57, hi: 76, vowel: 'ah', gain: 0.24, on: [0.75, 1] },
-      { p: 'drums', inst: 'taiko', midi: 36, vel: 0.8, pats: [{ at: 0.85, p: 'X.......x.......' }], on: [0.85, 1] },
-      { p: 'swell', inst: 'swell', every: 4, vel: 0.5, on: [0.6, 0.9] },
     ],
   },
 
@@ -360,73 +271,6 @@ export const MOODS = {
     ],
   },
 
-  // ---- the life cycle (src/game/life) -------------------------------------------------------
-  // Act II: the courtship duet and spiral dance at golden hour (warm, lilting, a little waltz).
-  courtship: {
-    level: 1.2,
-    bpm: 66,
-    key: DB_MAJOR,
-    sections: {
-      a: { bars: ['Db', 'Gb/Db', 'Bbm7', 'Absus4:2 Ab:2'] },
-      b: { bars: ['Gbmaj7', 'Ebm7', 'Fm7', 'Absus4:2 Ab:2'] },
-      c: { bars: ['Bbm', 'Gbmaj7', 'Db/Ab', 'Ab'] },
-    },
-    form: ['a', 'b', 'a', 'c'],
-    layers: [
-      { p: 'pad', target: 'strings', n: 4, lo: 56, hi: 78, gain: 0.28 },
-      { p: 'arp', inst: 'harp', rate: 2, shape: 'updown', lo: 52, hi: 81, vel: 0.32 },
-      { p: 'gen', target: 'flute', lo: 71, hi: 88, vel: 0.5, phrase: 2, cells: [[3, 1], [2, 2], [4]], melodic: true, on: [0.3, 0.6] },
-      { p: 'bass', target: 'low', gain: 0.2, on: [0.2, 0.5] },
-      { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 79, vowel: (e) => (e > 0.6 ? 'ah' : 'oo'), gain: 0.18, on: [0.45, 0.8] },
-      { p: 'bells', inst: 'bell', every: 2, lo: 76, hi: 93, vel: 0.3, on: [0.55, 0.85] },
-      { p: 'sparkle', inst: 'celesta', lo: 81, hi: 98, prob: 0.07, vel: 0.3, on: [0.6, 0.9] },
-      { p: 'swell', inst: 'swell', every: 4, vel: 0.4, on: [0.8, 1] },
-    ],
-  },
-
-  // Act III: new life in the lagoon at dawn (hushed, a lullaby on celesta and harp over strings).
-  birth: {
-    level: 1.3,
-    bpm: 56,
-    key: HOME,
-    sections: {
-      a: { bars: ['Dbmaj7', 'Fm9', 'Bbm9', 'Ebsus4:2 Eb:2'] },
-      frag: theme(),
-      b: { bars: ['Dbmaj7', 'Ab/C', 'Bbm9', 'Ebsus4:2 Eb:2'] },
-    },
-    form: ['a', 'a', 'frag', 'b'],
-    layers: [
-      { p: 'pad', target: 'strings', n: 4, lo: 55, hi: 76, gain: 0.26 },
-      { p: 'drone', target: 'drone', lo: 38, notes: [0, 12], gain: 0.14 },
-      { p: 'melody', inst: 'celesta', vel: 0.42, prob: 0.7, keepFirst: true, human: 0.04, secs: ['frag'], melodic: true },
-      { p: 'gen', inst: 'celesta', lo: 74, hi: 91, vel: 0.36, secs: ['a', 'b'], phrase: 1, restProb: 0.6, cells: [[2, 2], [4], [3, 1]], melodic: true },
-      { p: 'arp', inst: 'harp', rate: 1, shape: 'up', lo: 50, hi: 74, vel: 0.3, on: [0.3, 0.6] },
-      { p: 'pad', target: 'choir', n: 3, lo: 62, hi: 79, vowel: 'oo', gain: 0.16, on: [0.5, 0.85] },
-      { p: 'bells', inst: 'bell', every: 4, lo: 79, hi: 93, vel: 0.26, on: [0.6, 0.9] },
-    ],
-  },
-
-  // Act IV: the elder's rest (slow, deep and luminous; the theme once more, very far away).
-  rest: {
-    level: 1.33,
-    bpm: 50,
-    key: HOME,
-    sections: {
-      a: { bars: ['Fm/C', 'Dbmaj7/C', 'Bbm7/C', 'Csus4:2 C:2'] },
-      theme: theme({ energy: 0.3 }),
-      b: { bars: ['Dbmaj7', 'Bbm9', 'Cm7', 'Csus4'] },
-    },
-    form: ['a', 'theme', 'b', 'a'],
-    layers: [
-      { p: 'drone', target: 'drone', pc: 0, lo: 33, notes: [0, 7, 12], gain: 0.22 },
-      { p: 'pad', target: 'strings', n: 4, lo: 50, hi: 72, gain: 0.26 },
-      { p: 'pad', target: 'choir', n: 4, lo: 55, hi: 76, vowel: 'oo', gain: 0.2 },
-      { p: 'melody', target: 'lead', octs: [-1], vel: 0.45, secs: ['theme'], melodic: true, on: [0.3, 0.6] },
-      { p: 'sparkle', inst: 'celesta', lo: 79, hi: 98, prob: 0.06, vel: 0.28 },
-      { p: 'bells', inst: 'bell', every: 4, lo: 74, hi: 91, vel: 0.22 },
-      { p: 'swell', inst: 'swell', every: 4, vel: 0.32, on: [0.5, 0.9] },
-    ],
-  },
 };
 
 export const MOOD_NAMES = [...Object.keys(MOODS), 'silence'];

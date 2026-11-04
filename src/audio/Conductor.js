@@ -55,17 +55,39 @@ class MoodInstance {
     return t > this.outT0 + this.fadeOut + 0.05;
   }
 
-  nextSection() {
+  /**
+   * Move on in the form. A section may branch on the game's intensity:
+   * `branch: { at: 0.7, to: 'climax' }` (or `below: 0.3`) plays that section next, once,
+   * before the form carries on from where it was.
+   */
+  nextSection(intensity = 0.5) {
     const def = this.def;
+    const br = this.sec && this.sec.branch;
+    if (br && !this.branched && def.sections[br.to] && (br.at != null ? intensity >= br.at : intensity < (br.below ?? -1))) {
+      this.branched = true;
+      this._enter(br.to);
+      return;
+    }
+    this.branched = false;
     this.formIdx++;
     if (this.formIdx >= def.form.length) this.formIdx = Math.min(def.loopFrom ?? 0, def.form.length - 1);
-    this.secName = def.form[this.formIdx];
-    this.sec = def.sections[this.secName];
-    this.secBar = 0;
-    const n = this.secCounts[this.secName] || 0;
-    this.secCount = n;
-    this.secCounts[this.secName] = n + 1;
+    this._enter(def.form[this.formIdx]);
   }
+
+  _enter(name) {
+    this.secName = name;
+    this.sec = this.def.sections[name];
+    this.secBar = 0;
+    const n = this.secCounts[name] || 0;
+    this.secCount = n;
+    this.secCounts[name] = n + 1;
+  }
+}
+
+/** The bar of a section's written part (authored songs), or null. */
+function partBar(sec, bar, name) {
+  const p = sec.parts && sec.parts[name];
+  return p && p.length ? p[bar % p.length] : null;
 }
 
 /** The note of pitch class pc inside [lo, hi]. */
@@ -244,6 +266,7 @@ export class Conductor {
       c.chords = chords;
       c.chordAt = () => chords[0].ch;
       c.melody = sec.melody ? sec.melody[0] : null;
+      c.part = (name) => partBar(sec, 0, name);
       c.key = def.key;
       c.secBar = 0;
       c.secLen = sec.bars.length;
@@ -310,7 +333,8 @@ export class Conductor {
   _energy(inst, drv) {
     const sec = inst === drv ? inst.sec : null;
     let e = this.intensity;
-    if (sec && sec.energy != null) e = inst.def.sectionEnergy ? clamp(sec.energy + (this.intensity - 0.5) * 0.2) : Math.max(e, sec.energy);
+    // authored songs: each section sets the dynamics, the game's intensity leans on them (`react`)
+    if (sec && sec.energy != null) e = inst.def.sectionEnergy ? clamp(sec.energy + (this.intensity - 0.5) * (inst.def.react ?? 0.2)) : Math.max(e, sec.energy);
     return e;
   }
 
@@ -344,6 +368,8 @@ export class Conductor {
       return ch;
     };
     c.melody = sec.melody ? sec.melody[drv.secBar % sec.melody.length] : null;
+    const sb = drv.secBar;
+    c.part = (name) => partBar(sec, sb, name);
     c.key = drv.def.key;
     c.secBar = drv.secBar;
     c.secLen = sec.bars.length;
@@ -388,7 +414,7 @@ export class Conductor {
       inst.bar++;
     }
     drv.secBar++;
-    if (drv.secBar >= sec.bars.length) drv.nextSection();
+    if (drv.secBar >= sec.bars.length) drv.nextSection(this.intensity);
     // keep the pending part of the queue sorted
     const pend = this.queue.splice(this.qi);
     pend.sort((a, b) => a.t - b.t);

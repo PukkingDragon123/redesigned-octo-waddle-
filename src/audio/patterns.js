@@ -91,11 +91,34 @@ export const PATTERNS = {
     const bar = vary(c.melody, c, L);
     let at = 0;
     for (let i = 0; i < bar.length; i++) {
-      const [m, d, accent = 1] = bar[i];
+      const [m, d, accent = 1, gate] = bar[i];
       if (m != null && (L.prob == null || c.rng() < L.prob || (i === 0 && L.keepFirst))) {
         const vel = (L.vel ?? 0.6) * accent * (at === 0 ? 1 : 0.9) * (1 + (c.rng() - 0.5) * 0.12);
-        out.push(emit(L, at + (L.human ? human(c.rng, L.human) : 0), m + oct, vel, d * (L.legato ?? 0.96)));
+        out.push(emit(L, at + (L.human ? human(c.rng, L.human) : 0), m + oct, vel, d * (gate ?? L.legato ?? 0.96)));
         if (L.double) out.push(emit({ inst: L.inst }, at, m + oct + L.double, vel * 0.5, d * 0.9));
+      }
+      at += d;
+    }
+    return out;
+  },
+
+  /**
+   * A written line of an authored song: the section's `parts[L.part]` (theory.score notation),
+   * bar by bar, on a sampler (inst) or a solo line (target). `oct` shifts it, `swell` makes
+   * the velocity follow the energy (so the adaptive layer still shapes a written part).
+   */
+  part(c, L) {
+    const bar = c.part ? c.part(L.part) : null;
+    if (!bar) return [];
+    const out = [];
+    const oct = 12 * (L.oct || 0);
+    const dyn = L.swell ? lerp(1 - L.swell, 1, c.energy) : 1;
+    let at = 0;
+    for (const [m, d, accent = 1, gate] of bar) {
+      if (m != null) {
+        const vel = (L.vel ?? 0.6) * accent * dyn * (1 + (c.rng() - 0.5) * 0.1);
+        out.push(emit(L, at + (L.human ? human(c.rng, L.human) : 0), m + oct, vel, d * (gate ?? L.legato ?? 0.96)));
+        if (L.double) out.push(emit({ inst: L.inst, target: L.target }, at, m + oct + L.double, vel * 0.5, d * 0.9));
       }
       at += d;
     }

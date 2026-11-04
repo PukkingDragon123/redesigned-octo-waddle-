@@ -97,6 +97,23 @@ export class Songs {
     };
   }
 
+  /** Over `near`'s shoulder toward `far`'s head (a long lens compresses the distance between them). */
+  overShoulder(near, far, { back = 8, side = 3, up = 2.2, fov = 30 } = {}) {
+    const R = (v, k) => (Array.isArray(v) ? lerp(v[0], v[1], k) : v);
+    const d = new Vector3(), r = new Vector3(), h = new Vector3();
+    return (k, t, s) => {
+      this.head(far, h);
+      d.copy(near.pos).sub(h);
+      if (d.lengthSq() < 1) d.copy(near.fwd).negate();
+      d.normalize();
+      r.crossVectors(d, UP).normalize();
+      s.pos.copy(near.pos).addScaledVector(d, R(back, k)).addScaledVector(r, R(side, k)).addScaledVector(UP, R(up, k));
+      s.look.copy(h).lerp(near.pos, 0.12);
+      s.fov = R(fov, k);
+      s.roll = 0;
+    };
+  }
+
   /** The singer's phrase (a coroutine): inhale, crest, each note on the beat. onNote(i, midi, dur). */
   *phrase(w, phrase, octave = -1, opts = {}) {
     const S = this.story, beat = this.key().beat;
@@ -226,7 +243,11 @@ export class Songs {
       // the caller sings to the calf (close on its face, the crest flaring)
       C.setFocus(caller);
       const side = this.sideToward(caller, calf);
-      yield* this._with(this.phrase(caller, PH[pi], -1), faceShot(caller, { side, dist: [1.25, 1.05], around: [0.45, 0.7], up: 0.12, fov: [36, 33] }));
+      // the mother, close by: her face; the elder, far across the ring: over the calf's shoulder, long lens
+      const callShot = caller === mom || caller.pos.distanceTo(calf.pos) < caller.L * 1.6
+        ? faceShot(caller, { side, dist: [1.25, 1.05], around: [0.45, 0.7], up: 0.12, fov: [36, 33] })
+        : this.overShoulder(calf, caller, { back: [9, 7], fov: [30, 24] });
+      yield* this._with(this.phrase(caller, PH[pi], -1), callShot);
       // its turn: the calf with the caller beyond, over its shoulder
       C.setFocus(calf);
       const shot = (k, t, s) => {
@@ -235,7 +256,8 @@ export class Songs {
         _v.normalize();
         _v2.crossVectors(_v, UP).normalize();
         s.pos.copy(calf.pos).addScaledVector(_v, lerp(9, 7, k)).addScaledVector(_v2, 3.5).addScaledVector(UP, 2.2);
-        s.look.copy(calf.pos).lerp(caller.pos, 0.35);
+        // the calf large in the foreground, the caller beyond (however far across the ring)
+        s.look.copy(calf.pos).addScaledVector(_v, -Math.min(7, calf.pos.distanceTo(caller.pos) * 0.3));
         s.fov = lerp(42, 38, k);
         s.roll = 0;
       };
@@ -271,7 +293,7 @@ export class Songs {
     this._ripple(center, 2);
     S.audio.stinger?.('harmony');
     yield* this._with(this.answer(calf, [[0, 6]], 1, { vowel: 'ah', intensity: 1, onHold: (i, k) => { G.uSongAmp.value = 1 + k; } }),
-      C.orbit({ center: calf, radius: [16, 60], height: [3, 34], angle: [calf.yaw + 2.2, calf.yaw + 1.6], fov: [40, 50], look: center }));
+      C.orbit({ center: calf, radius: [24, 64], height: [7, 36], angle: [calf.yaw + 2.2, calf.yaw + 1.6], fov: [42, 50], look: calf }));
     yield* this._play(C.orbit({ center: calf, radius: [60, 150], height: [34, 90], angle: [calf.yaw + 1.6, calf.yaw + 1.2], fov: [50, 54], look: center }), 4);
     calf.drive.happy = mom.drive.happy = 1;
     this._end();
@@ -513,7 +535,8 @@ export class Songs {
       };
       S.audio.setIntensity?.(Math.min(1, 0.4 + pi * 0.2));
       C.setFocus(center);
-      yield* this._with(answerGen(this), C.orbit({ center, radius: [90, 120], height: [14, 26], angle: [me.yaw + 1.2 + pi * 0.5, me.yaw + 1.5 + pi * 0.5], fov: [46, 44], look: center }));
+      // high and wide over the gathering: the answer rolling through the herd under the galaxy
+      yield* this._with(answerGen(this), C.drone({ center, radius: [150, 165], height: [60, 72], angle: [me.yaw + 2.4 + pi * 0.5, me.yaw + 2.7 + pi * 0.5], fov: [48, 46], tilt: -10 }));
     }
     // the last note, held under the galaxy, everyone with it, the camera rising to the stars
     const beat = this.key().beat;

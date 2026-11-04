@@ -29,7 +29,7 @@ const LULLABY_TUNE = S('Eb5:2 C5 Ab4 | F5:2 Eb5_ Db5 | C5:3 Ab4_ | Bb4:3 r | Ab4
 const LULLABY_COUNTER = S('Ab4:4 | Ab4:4 | Ab4:2 Bb4:2 | Bb4:4 | C5:4 | Db5:2 C5:2 | Bb4:2 Db5:2 | Eb5:4');
 
 const lullaby = {
-  level: 1.3,
+  level: 1.55,
   bpm: 56,
   key: HOME,
   sectionEnergy: true,
@@ -157,7 +157,7 @@ const wonder = {
 // is the leitmotif darkened, with brass, taiko and choir; a two-bar hush lets the wind through
 // before the storm comes round again.
 const tempest = {
-  level: 1.55,
+  level: 1.2,
   bpm: 72,
   key: HOME,
   sectionEnergy: true,

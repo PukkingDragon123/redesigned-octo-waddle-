@@ -56,7 +56,7 @@ and string bed; a long, bright reverb (the tail decays about 60 dB in 6 s).
 |---|---|
 | Title menu | **The theme track, whole**, from the top (2.5 s fade-in). If the player starts during it, it carries on under the calm opening (the hatching at dawn) to its own ending; 7.5 s before the end the score fades back in under the track's tail (the same key and tempo, so it is one crossfade). An idle title hears the score, then the track again after 150 s. |
 | The ending (the last egg at dawn, Year 32) | **The theme track, whole** (`setMood('dawn', { track: true })` in LifeCycle.dawnAgain), running on through the closing dissolve into the title card. |
-| Everything else | The adaptive score below. Any non-calm mood (chase, storm, danger, song...) fades the track out over up to 4 s and brings the score back. |
+| Everything else | The seven authored songs (section 3) at their story moments, and the adaptive score below between them. Any non-calm mood (chase, storm, danger, song...) fades the track out over up to 4 s and brings the score back. |
 
 The track is only ever started from 0, faded, ducked and set in level, as the jam's rules require
 (the recording may not be remixed, sampled or rearranged; covers and original music are fine). It
@@ -65,15 +65,59 @@ While it plays the Conductor keeps time silently underneath, so the score return
 Implementation: `src/audio/Soundtrack.js` (`TRACK_MOODS`, `CARRY_MOODS`), `AudioSystem.setMood(name,
 { fade, track })`, `AudioSystem.update` → `soundtrack.update`.
 
-## 3. The score, re-voiced to the theme
+## 3. The songbook: seven authored pieces
+
+Over ~15 minutes one adaptive loop would wear thin, so the story's main moments each have their
+own written song (`src/audio/songs.js`): its own tune, chords, counter-lines, form (sections
+with their own dynamics that build, peak and resolve) and orchestration, all in the theme's world
+(F minor family, a 60 BPM feel, the recorded VSCO instruments), echoing its contour (arpeggios
+climbing to the sixth degree, the 5 / flat-6 lean, the D-flat - F minor loop) without quoting it.
+
+| Song (`playSong` name) | Mood the story sets | Where it plays | Form and character |
+|---|---|---|---|
+| **First Light** (`lullaby`) | `dawn` | The hatching and Dawn Lagoon (ch. 0), the first hug and feeding, the calm after the lagoon rescue; under the title track's tail when the player starts early | A rocking music-box tune on the upright piano over harp (A-flat - D-flat/A-flat - ... - E-flat); the second verse adds a flute counter-line, the middle strain climbs the leitmotif's sequence, the last verse floats an octave up on strings and glockenspiel, a coda rocks to sleep. 56 BPM, ~2.5 min per pass. |
+| **Skyward** (`skyward`) | `flight` | Open flight: The Spiral Reach (ch. 1) | Harp sixteenths (the theme's pulse) under a long-breathed tune on solo strings leaping in sixths; the B strain climbs D-flat - E-flat - C minor - F minor with flute and piano on top and a low string counter; the climax is the full leitmotif with the theme's kick and shaker, choir, brass and timpani. Intense flying jumps to the climax early. |
+| **Coil Wonder** (`wonder`) | `forest` | The Coil Forest (ch. 3): exploring, discoveries | F dorian (the theme's own D-natural colour): marimba and glockenspiel glitter over i - IV, the flute asks a question, a warm B strain (A-flat major seventh), and a bloom (E-flat - B-flat/D) with choir and bells; excitement branches to the bloom. |
+| **Tempest** (`tempest`) | `storm` | The Storm (ch. 6) | Spiccato sixteenths and timpani under a minor string tune (F - A-flat - C, the flat-6 lean down); the B strain rises to the raised dominant (C major); the climax is the leitmotif darkened with brass, taiko and choir; a two-bar hush lets the wind through. 72 BPM. |
+| **Two Voices** (`duet`) | `courtship` | Act II, the courtship at golden hour | D-flat major (the theme's VI). He (solo strings, low) sings four bars, she (flute, high) answers; then they sing together in thirds and sixths; the spiral-dance strain (harp sixteenths, bells, shaker) with both voices high; a short coda. Intense dancing repeats the dance. |
+| **The Guardian** (`guardian`) | `birth` | Act III, the egg watch in the maelstrom's eye (and after the predator) | The lullaby a generation on: first low and slow on solo strings over F minor harmony (the parent's voice), then high on the glockenspiel as the egg glows, then a rising strain (D-flat - E-flat - F minor - C) with horns and a soft drum: the guard standing up. |
+| **Elegy** (`elegy`) | `rest` | Act IV, the elder's rest | A slow lament on solo strings over a C pedal, answered by choir; the leitmotif once more, very far away (glockenspiel and flute); a farewell strain on the theme's own opening chords (B-flat minor 7 - D-flat - F minor) that stops open on E-flat, so the theme track at the last dawn sounds like its continuation. 50 BPM. |
+
+The other moods (title, krill, song, night, danger, chase, relief, cloudwall, oasis, finale) are
+the adaptive score of section 4; the finale (end of Act I) carries the leitmotif and its cadence.
+
+**The official track at a third moment?** Considered for the first hug, but that comes within the
+first minutes, right after the title track has played (it often still carries under the
+hatching), so a third whole play would be too close. It stays at the two bookends.
+`audio.playSong('theme')` plays it whole on demand if a later peak wants it.
+
+How a song is written and played:
+
+- Notation: `theory.score('Ab4:2 C5 Db5> | C5:3 r')` (bars split by `|`, `:beats`, `r` rest,
+  marks `>` accent, `_` soft, `.` staccato, `~` legato) gives `[midi, beats, accent, gate]` bars.
+- A section has `bars` (chords), `melody`, optional `parts` (counter-lines, the duet's two
+  voices, low lines) played by the `part` pattern on a sampler or solo line, and `energy` (its
+  written dynamic level). `sectionEnergy` + `react` (0.3-0.45) let the game's intensity lean
+  on the written dynamics, so layers still come and go with play.
+- `branch: { at: 0.8, to: 'climax' }` (or `below`) on a section plays another section next
+  once when the game is that intense (or calm); the form then carries on. `loopFrom` loops.
+- Changing mood crossfades as before (the old song's accompaniment fades over the new harmony,
+  its melody stops at once), and the songs share the score's key and tempo family, so every
+  hand-over is in tune.
+- API: `audio.setMood('dawn')` as the story does, or `audio.playSong('lullaby' | 'skyward' |
+  'wonder' | 'tempest' | 'duet' | 'guardian' | 'elegy' | 'theme', { fade })`;
+  `AudioSystem.songs` lists them. `getKey()` and the beat grid are unchanged.
+
+## 4. The score, re-voiced to the theme
 
 - **Key.** Home is the theme's F minor (aeolian, the notes of A-flat major) for every story mood;
   side keys stay inside its family: F dorian (the forest: the theme's D-natural lift), F phrygian
   (danger), D-flat major (the courtship: the theme's VI). `getKey()` reports root F (65), so the
   whale voices and the player's humming snap to the same notes.
-- **Tempo.** 60 BPM for the title, dawn, flight, song, relief, oasis and finale (the theme's
-  tempo, with harp and piano sixteenths as its pulse); 56 / 50 for night, birth and rest; 66
-  storm, 80 danger and krill, and 120 for the chase (exactly double).
+- **Tempo.** 60 BPM for the title, flight, song, relief, oasis and finale (the theme's
+  tempo, with harp and piano sixteenths as its pulse); 56 for the lullaby, night and the
+  guardian, 50 for the elegy; 66 the duet, 72 the tempest, 80 danger and krill, and 120 for
+  the chase (exactly double).
 - **Harmony.** The theme's loop `D-flat | F m` drives flight, the title interlude and the
   leitmotif; its opening `B-flat m7 | D-flat (maj7) | F m` opens the title; its dorian close
   (`B-flat/D` → `F m9`) ends the finale and colours the coda; the resolve stinger is the aeolian
@@ -91,7 +135,7 @@ Implementation: `src/audio/Soundtrack.js` (`TRACK_MOODS`, `CARRY_MOODS`), `Audio
   bass drum and a shaker. The choir, brass, drone, solo lines (lead strings, flute), bells,
   timpani and taiko remain synthesized. If a sample set fails to load the synthesis plays instead.
 
-## 4. Samples: pipeline and budget
+## 5. Samples: pipeline and budget
 
 - 107 notes, 2.2 MB of Ogg Vorbis (q4, mono, 32 kHz) in `public/audio/music/<instrument>/<midi>.ogg`,
   mapped in `src/audio/musicSamples.js` (midi, file, measured tuning in cents, loop points).
@@ -106,10 +150,12 @@ Implementation: `src/audio/Soundtrack.js` (`TRACK_MOODS`, `CARRY_MOODS`), `Audio
   page load (no user gesture needed), 6 at a time. `loadBank` waits up to 2.5 s for them; later
   arrivals are swapped in (`Conductor.useSamples`).
 
-## 5. Checking the mix without ears
+## 6. Checking the mix without ears
 
 - `PORT=5241 node tools/audio-check.mjs --skip-sfx --wav --only=title,flight,chase` renders moods
   through an OfflineAudioContext into `tools/out/*.wav`; then
   `ffmpeg -i tools/out/audio-mood-flight.wav -lavfi showspectrumpic=s=1400x500:scale=log:fscale=log out.png`.
-- The score renders at about -21 to -28 dBFS RMS by mood; the track, at its level of 0.85 through
+- `node <script>` with `theory.score` + a bar-sum / key / chord-tone check validates the songs'
+  notation (every bar 4 beats, every note in the key; non-chord tones on strong beats listed).
+- The score renders at about -20 to -28 dBFS RMS by mood (the songs -20 to -26); the track, at its level of 0.85 through
   the same chain, lands at about -26 dBFS RMS, so the hand-overs do not jump in level.

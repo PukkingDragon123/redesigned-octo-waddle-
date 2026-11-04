@@ -128,6 +128,8 @@ export class Songs {
       const [deg, beats] = phrase[i];
       const dur = beats * beat, midi = this.midi(deg, octave);
       const wait = next - g.time - 0.12;
+      // a long gap: the last note dies away; a short one, it carries on and glides into this one
+      if (wait > 0.35 && v?.singing) v.release?.(0.3);
       if (wait > 0) yield wait;
       const h = Q.hold({ at: opts.at || (() => this.head(singer)), time: Math.max(0.45, dur * 0.62), grace: Math.max(0.7, beat * 1.1), size: opts.size });
       let singing = false, prev = 0, tt = 0;
@@ -138,21 +140,29 @@ export class Songs {
         prev = h.progress;
         if (rising && !singing) {
           singing = true;
-          v?.hum?.(midi, undefined, { gain: 1, glideFrom: midi - 2 });
+          // still sounding from the last note: slide up or down into this one, no new attack
+          if (!(i > 0 && v?.singing && v.bend?.(midi))) {
+            if (v?.sing) v.sing(midi, { vowel: opts.vowel || 'ah', intensity: opts.intensity ?? 0.8, glideFrom: midi - 2 });
+            else v?.hum?.(midi, undefined, { gain: 1, glideFrom: midi - 2 });
+          }
           singer.drive.hum = 1;
           S.humTimers.set(singer, 99);
         }
         singer.drive.sing = singing ? 1 : 0.4;
         opts.onHold?.(i, h.progress);
       }
-      if (!singing) v?.hum?.(midi, undefined, { gain: h.ok ? 0.9 : 0.45, glideFrom: midi - 3 });
+      if (!singing) {
+        // a miss: a thin note slips out (from a calf, its cracked little croak)
+        if (v?.sing) v.sing(midi, { dur: 0.5, vowel: 'oo', intensity: 0.3, crack: singer.isCalf ? 1 : 0 });
+        else v?.hum?.(midi, undefined, { gain: 0.45, glideFrom: midi - 3 });
+      }
       singer.drive.hum = 1;
       S.humTimers.set(singer, 99);
       if (h.ok) this._hits++;
       opts.onNote?.(i, h.ok, midi, dur);
       yield Math.min(0.45, dur * 0.35);
-      v?.release?.(0.3);
-      S.humTimers.set(singer, 0.05);
+      if (i === phrase.length - 1 || !singing) v?.release?.(i === phrase.length - 1 ? 0.6 : 0.3);
+      S.humTimers.set(singer, i === phrase.length - 1 ? 0.05 : 0.6);
       singer.drive.sing = 0.3;
       next = Math.max(g.time + beat * 0.25, next + dur);
     }
@@ -260,7 +270,7 @@ export class Songs {
     });
     this._ripple(center, 2);
     S.audio.stinger?.('harmony');
-    yield* this._with(this.answer(calf, [[0, 6]], 1, { onHold: (i, k) => { G.uSongAmp.value = 1 + k; } }),
+    yield* this._with(this.answer(calf, [[0, 6]], 1, { vowel: 'ah', intensity: 1, onHold: (i, k) => { G.uSongAmp.value = 1 + k; } }),
       C.orbit({ center: calf, radius: [16, 60], height: [3, 34], angle: [calf.yaw + 2.2, calf.yaw + 1.6], fov: [40, 50], look: center }));
     yield* this._play(C.orbit({ center: calf, radius: [60, 150], height: [34, 90], angle: [calf.yaw + 1.6, calf.yaw + 1.2], fov: [50, 54], look: center }), 4);
     calf.drive.happy = mom.drive.happy = 1;
@@ -329,6 +339,7 @@ export class Songs {
         s.roll = 0;
       };
       yield* this._with(this.answer(calf, PH[pi], 1, {
+        vowel: 'oh', intensity: 0.6 + pi * 0.25,
         onNote: (i, ok, midi, dur) => {
           const p = calf.pos.clone();
           p.y = seaHeight(g, p.x, p.z);
@@ -360,6 +371,8 @@ export class Songs {
   *duet(mate, opts = {}) {
     const S = this.story, g = this.game, herd = this.herd, me = herd.calf, C = S.cine;
     this._begin('duet');
+    // the authored 'Two Voices' (in Db: the notes come from getKey())
+    if (S.audio.playSong) S.audio.playSong('duet', { fade: 3 }); else S.audio.setMood?.('courtship', { fade: 3 });
     C.begin({ focus: mate, rate: 0.45, lead: mate });
     const PH = [[[0, 1], [2, 1], [4, 2]], [[4, 1], [5, 1], [4, 1], [2, 1]], [[7, 2], [5, 1], [4, 1], [2, 2]]];
     let wins = 0;
@@ -398,6 +411,7 @@ export class Songs {
       s.roll = 0.03 * Math.sin(t * 0.6);
     };
     yield* this._with(this.answer(me, [[0, 6]], 0, {
+      vowel: 'ah', intensity: 1,
       onHold: (i, k) => {
         G.uSongAmp.value = 0.8 + k;
         if (Math.random() < 0.3) S.life?.motes?.(_v.copy(me.pos).lerp(mate.pos, Math.random()), 1, 5, GOLD, { rise: 0.4, life: 2.5 });
@@ -418,7 +432,8 @@ export class Songs {
   *lullaby(egg, eggP, opts = {}) {
     const S = this.story, g = this.game, herd = this.herd, me = herd.calf, C = S.cine;
     this._begin('lullaby');
-    S.audio.setMood?.('birth', { fade: 4 });
+    // the egg watch: the authored 'guardian'
+    if (S.audio.playSong) S.audio.playSong('guardian', { fade: 4 }); else S.audio.setMood?.('birth', { fade: 4 });
     S.audio.setIntensity?.(0.2);
     // he settles above the eye, close over the egg
     const post = { pos: eggP.clone().add(_v.set(0, 6, 0)), right: opts.right || new Vector3(1, 0, 0), fwd: opts.fwd || new Vector3(0, 0, 1), L: 1 };
@@ -443,7 +458,7 @@ export class Songs {
       yield* this._with(pulses(), macro);
       // he sings it back: each held note bathes it in warm light, and it settles
       yield* this._with(this.answer(me, PH[pi], 0, {
-        at: () => eggP,
+        at: () => eggP, vowel: 'oo', intensity: 0.45,
         onHold: (i, k) => { egg?.setGlow?.(0.8 + 0.8 * k, 0.3); },
         onNote: (i, ok) => {
           if (ok) {
@@ -474,7 +489,8 @@ export class Songs {
   *lastSong(me, mate, center) {
     const S = this.story, g = this.game, herd = this.herd, C = S.cine;
     this._begin('lastSong');
-    S.audio.setMood?.('song', { fade: 4 });
+    // the authored elegy (src/audio: playSong), or the song mood
+    if (S.audio.playSong) S.audio.playSong('elegy', { fade: 4 }); else S.audio.setMood?.('song', { fade: 4 });
     C.begin({ focus: me, rate: 0.35, lead: mate?.group?.visible ? mate : null });
     const choir = herd.whales.filter((w) => w !== me && w.group.visible).concat(mate?.group?.visible ? [mate] : []);
     const PH = [[[0, 2], [4, 2]], [[2, 1], [4, 1], [5, 2]], [[7, 2], [4, 1], [2, 1], [0, 3]]];
@@ -505,7 +521,7 @@ export class Songs {
     this._ripple(center, 2);
     S.audio.setIntensity?.(1);
     S.audio.stinger?.('harmony');
-    yield* this._with(this.answer(me, [[0, 7]], -1, { onHold: (i, k) => { G.uSongAmp.value = 1 + k; } }),
+    yield* this._with(this.answer(me, [[0, 7]], -1, { vowel: 'ah', intensity: 1, onHold: (i, k) => { G.uSongAmp.value = 1 + k; } }),
       C.orbit({ center: me, radius: [40, 110], height: [6, 80], angle: [me.yaw + 1.2, me.yaw + 1.8], fov: [44, 52], lookUp: [0, 90] }));
     yield* this._play(C.orbit({ center: me, radius: [110, 150], height: [80, 120], angle: [me.yaw + 1.8, me.yaw + 2.1], fov: [52, 54], lookUp: [90, 140] }), 3.5);
     this._end();

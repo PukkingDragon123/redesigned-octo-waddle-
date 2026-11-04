@@ -291,6 +291,18 @@ sparkle thing."*
   spark bursts when eating, catching bugs, hatching or racing. Glow, where a creature has one, is steady and
   soft.
 
+### 0.14 More songs, a whale voice worth playing, singing scenes, painted key art (newest)
+User: *"Make the game use more songs, make the whale singing instrument really cool, more singing QTEs,
+and a better thumbnail with cool transitions in a really cool painted style."*
+- **Songs:** seven authored songs play on the story's moods: First Light, Skyward, Coil Wonder, Tempest,
+  Two Voices, The Guardian and Elegy. The official jam track plays at the title and the ending.
+- **Voice:** a layered, expressive whale singing voice made of a real humpback moan, a formant voice, glides,
+  vibrato, growl, shimmer and a long hall. The calf, adult and elder voices each sound different.
+- **Singing scenes:** five call-and-answer singing QTE scenes span the life: the herd song, the plankton
+  song, the duet, the lullaby to the egg, and the elder's last song.
+- **Key art:** the itch.io cover and banner are painted. The cover is three scenes joined by brush-stroke
+  wipes.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

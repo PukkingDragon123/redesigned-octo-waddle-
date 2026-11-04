@@ -98,7 +98,13 @@ menu is the only place text ever appears.
 - Chase the glowing moths, gnat spirals and sea-skimming skitterflies and eat them; when a
   playmate spins and chirps at you, race it through the rings of moths.
 - Dive deep, then race up to breach in a slow-motion leap; roll in the air for a spin.
-- When the herd sings, watch your mother breathe in before each note, and answer her.
+- When the herd sings, watch your mother breathe in before each note, and answer her. Hold each
+  note as its ring fills: every note you hold brings another voice into the chorus.
+- At night over the black sea, sing back to your mother: each held note sends a wave of plankton
+  light racing across the water.
+- Later in life: sing a duet with your mate, a lullaby to your own egg, and, as the elder, the
+  last song that the whole herd answers.
+- Hum freely and tilt your nose up or down: your voice glides through the scale.
 - In the storm, fly in your mother's lee: her body breaks the wind.
 - When the falcon comes, get between the adults.
 

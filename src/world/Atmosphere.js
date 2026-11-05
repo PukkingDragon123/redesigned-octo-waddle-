@@ -140,7 +140,7 @@ export const PRESETS = {
     cloudLit: C('#6a7896', 0.48), cloudShadow: C('#1a2132', 0.85),
     bankLit: C('#5c6a8c'), bankShadow: C('#1a2234'),
     fogDist: 0.00004, fogHeight: 0.00016,
-    night: 1, stars: 1, planet: 1, cirrus: 0.4, bank: 0.1,
+    night: 1, stars: 1, planet: 1, cirrus: 0.18, bank: 0.1,
     moonElev: 38, moonAz: 150, moon: C('#bccbe8', 0.62), exposure: 1.28,
     moon2: 1, moon2Elev: 24, moon2Az: 70, galaxy: 1,
     lift: V(0.004, 0.007, 0.014), wb: V(0.97, 1.0, 1.05), sat: 0.76, contrast: 1.12,

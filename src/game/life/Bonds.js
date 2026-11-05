@@ -374,7 +374,8 @@ export class Bonds {
     C.begin({ focus: calf, rate: 1.4, lead: mom });
     C.slowmo(0.5);
     S.audio.stinger?.('strike');
-    const hugG = mom.anim.gesture?.('hug', { dur: 4.6 });
+    // (gesture() returns true; the live gesture object is anim.gest)
+    const hugG = mom.anim.gesture?.('hug', { dur: 4.6 }) && mom.anim.gest?.name === 'hug' ? mom.anim.gest : null;
     herd.motherScript = (m) => ({ target: _v2.copy(calf.pos).addScaledVector(calf.up, m.radius * 0.9 + calf.radius + 0.6).addScaledVector(m.fwd, -m.L * 0.08), speed: 9, arrive: 4, minSpeed: 1, lookAt: calf.pos });
     calf.vel.multiplyScalar(0.4);
     // low beneath them: her body closing over the calf against the sky

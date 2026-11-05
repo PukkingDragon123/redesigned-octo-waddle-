@@ -183,7 +183,7 @@ vec3 skyColor(vec3 rd, float env) {
   vec2 shz = normalize(uSunDir.xz + vec2(1e-4));
   vec2 rhz = normalize(rd.xz + vec2(1e-4));
   float azc = dot(rhz, shz);
-  col += uSunScatter * pow(azc * 0.5 + 0.5, 2.5) * exp(-yc * 8.0) * lowSun * 0.3;
+  col += uSunScatter * pow(azc * 0.5 + 0.5, 3.0) * exp(-yc * 14.0) * lowSun * 0.12;
   // the anti-twilight arch: opposite a low sun, a rose band (the Belt of Venus) over the planet's
   // blue-grey shadow rising from the sea
   float twi = smoothstep(0.2, 0.02, uSunDir.y) * smoothstep(-0.16, -0.02, uSunDir.y) * (1.0 - uStorm);
@@ -298,7 +298,7 @@ vec3 skyColor(vec3 rd, float env) {
     float fade = smoothstep(0.0, 0.25, y);
     vec3 cc = mix(uCloudLit, uSunScatter, pow(sd, 2.0) * 0.6);
     // at a low sun the cirrus burns pink-gold from below
-    cc = mix(cc, uSunScatter * 1.25, lowSun * 0.55);
+    cc = mix(cc, uSunScatter * 0.95, lowSun * 0.45);
     col = mix(col, cc, c * fade * uCirrus * 0.55);
   }
 
@@ -359,7 +359,7 @@ vec3 skyColor(vec3 rd, float env) {
   col += uSunColor * pow(sd, 120.0) * 0.06 * (1.0 - storm);
   // the corona: a soft bright halo hugging the disk, then a wider warm bloom of the low sun
   col += uSunColor * (pow(sd, 2200.0) * 0.7 + pow(sd, 420.0) * 0.14) * (1.0 - storm) * (1.0 - env * 0.8);
-  col += uSunScatter * pow(sd, 28.0) * lowSun * 0.22 * (1.0 - storm);
+  col += uSunScatter * pow(sd, 48.0) * lowSun * 0.07 * (1.0 - storm);
   float disk = smoothstep(0.99955, 0.99975, sd);
   col += uSunColor * disk * 7.0 * (1.0 - storm) * smoothstep(-0.03, 0.01, y) * (1.0 - env);
 

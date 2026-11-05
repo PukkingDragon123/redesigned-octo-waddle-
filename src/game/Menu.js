@@ -5,7 +5,7 @@ import {
   Quaternion, SRGBColorSpace,
 } from 'three';
 import { damp, clamp, lerp, smoothstep } from '../core/math.js';
-import { CONTROL_LINES } from '../core/Input.js';
+import { CONTROL_LINES, CONTROL_LINES_P2 } from '../core/Input.js';
 
 // Lettering: hand-lettered Almendra SC, widely spaced, for the SKYSONG logo and the menu lines;
 // Cormorant Garamond italic for the subtitles (all loaded in index.html; Story.init waits).
@@ -217,7 +217,10 @@ export class Menu {
     } else if (page === 'controls' && navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches) {
       entries = [...CONTROL_LINES.touch.map((l) => [l, null]), ['Back', 'back']];
     } else if (page === 'controls') {
-      entries = [...(this.game.input.usingGamepad ? CONTROL_LINES.gamepad : CONTROL_LINES.keyboard).map((l) => [l, null]), ['Back', 'back']];
+      // player one's controls, then how a friend joins (a second gamepad, or the keyboard's right half)
+      const p1 = this.game.input.usingGamepad ? CONTROL_LINES.gamepad : CONTROL_LINES.keyboard;
+      const p2 = this.game.input.usingGamepad ? CONTROL_LINES_P2.gamepad : CONTROL_LINES_P2.keyboard;
+      entries = [...p1.map((l) => [l, null]), ['A friend:', null], ...p2.map((l) => [l, null]), ['Back', 'back']];
     }
     const small = page === 'controls';
     const h = small ? 1.85 : page === 'settings' ? 2.7 : 3.5;

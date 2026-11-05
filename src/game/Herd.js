@@ -368,6 +368,7 @@ export class Herd {
     for (const w of this.whales) {
       if (w.role === 'player') continue;
       this.game.wind.sample(w.pos, w.wind).multiplyScalar(w.isCalf ? 0.6 : 0.25);
+      if (w.carry) w.wind.add(w.carry); // player two's calf rides the herd's flow like player one's (Friends.js)
       w.step(dt);
       // never pass through rock
       if (this.world) {

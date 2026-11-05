@@ -75,6 +75,32 @@ tap or the A button. A miss never fails the scene; it only changes how it plays 
 Controls are also listed under **Settings → Controls** in the floating title menu. That
 menu is the only place text ever appears.
 
+### Play with a friend
+
+A friend on the same machine can drop in at any time during the migration as one of your
+playmate calves (the one nearest you): press **Start** or **A** on a second gamepad, or press
+any key of the keyboard's right half. Player one keeps WASD and the mouse (or the first
+gamepad). The friend's calf flies, rolls, does every move, hums with its own voice, gathers a
+sonic boom and bites, and joins in the friends' games. There is no split screen: the camera
+pulls back and leans to keep both calves in frame. The story waits for neither of you; if the
+friend roams too far from you, the herd's current draws them gently back. During the short
+camera moments the herd looks after the friend's calf for a beat.
+
+| Friend | Keyboard (right half) | Second gamepad |
+|---|---|---|
+| Join | any key below | Start or A |
+| Swim / slow down | I / K | RT / LT |
+| Turn | J / L | Left stick |
+| Rise / dive | U / O | Left stick (A rises) |
+| Look | — | Right stick |
+| Surge | ; | L3 |
+| Barrel roll | M (rolls the way you last turned) | LB / RB |
+| Hum (hold to sing; nose up for higher) | Y | X |
+| Sonic boom | — | Y |
+| Tail slap / spout / loop | , / . / / | D-pad down / up / left |
+| Bite | N | B |
+| Leave (the calf goes back to the herd) | Backspace | Back |
+
 ### Things to try
 
 - Kick yourself free of the egg, then nuzzle back when your mother wraps her flippers around you.
@@ -94,6 +120,12 @@ menu is the only place text ever appears.
   itself. Come up for air before your breath runs out; you spout when you surface.
 - Skim the waves, breach, carve tunnels through clouds, roll through waterfall spray.
 - Bump into your playmates: they bump back or start a chase. Bump your mother softly.
+- Your friends remember you: at the start of each part of the journey they swim up to greet
+  you, the more boisterously the more you have played together.
+- When a friend wiggles and taps you, it is tag among the sea stacks: catch one and it turns
+  to chase you. When a friend spins and darts ahead, follow its path: flying through its wake
+  rings soft chimes. When two friends dive and leap, it is a breach contest: leap higher and
+  the whole herd cheers.
 - Fly low over the islands: the anemones curl shut as you pass.
 - Chase the glowing moths, gnat spirals and sea-skimming skitterflies and eat them; when a
   playmate spins and chirps at you, race it through the rings of moths.
@@ -199,6 +231,8 @@ Add `?debug` to the URL, then optionally:
   jump to a chapter (0-9, skipping the hatching), `&act=2|3|4` for the courtship, new life and
   elder parts (or `&chapter=10|11|12`), `&intro` to play the opening from the menu.
 - `&auto` for an autopilot that follows the mother; `&dt=0.05&warp=30` to simulate ahead.
+- `&coop` to drop in a second player on a scripted input (it weaves around you, hums, bites,
+  rolls and slaps, and plays the friends' games).
 - `&test=fly|whale|islands|world|ocean|flora|painterly|herd|ecosystem` (dev scenes in
   `src/dev/`; add `&ocean` to give a dev scene the real ocean), `&time=dawn|morning|…`.
 - `&quality=high|medium|low`, `&nobloom`, `&norays`, `&noshadow`, `&nosea`.

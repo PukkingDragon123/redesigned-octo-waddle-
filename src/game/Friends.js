@@ -129,6 +129,7 @@ export class Friends {
       if (w.play && w.play.mode === 'p2') w.play = null;
       if (P.humming) this._hum(false);
       P.pc.enabled = false;
+      w.carry = null;
       return;
     }
     if (!w.play || w.play.mode !== 'p2') {
@@ -154,6 +155,17 @@ export class Friends {
     }
     this._bite(dt);
     this._leash(dt);
+    // eyes on the other calf when they fly close together
+    w.drive.lookAt = w.pos.distanceTo(herd.calf.pos) < 30 ? herd.calf.pos : null;
+    // the air moves with the herd for player two as for player one (Story.updateCalf), so both keep
+    // pace at migration speed
+    const fr = herd.frame;
+    if (!w.carry) w.carry = new Vector3();
+    w.carry.set(0, 0, 0);
+    if (fr && (herd.mode === 'travel' || herd.mode === 'shield') && herd.speed > 4) {
+      const near = 1 - smoothstep(120, 320, w.pos.distanceTo(herd.mother.pos));
+      w.carry.addScaledVector(fr.fwd, herd.speed * 0.5 * near);
+    }
   }
 
   /** Player two takes the playmate calf nearest player one. */
@@ -204,6 +216,7 @@ export class Friends {
     P.pc.moves.reset?.();
     if (w.play && w.play.mode === 'p2') w.play = null;
     if (w.beh) w.beh.copyT = -1;
+    w.carry = null;
     if (g.input?.p2) g.input.p2.padIndex = -1;
     S.voiceCall(w, 'coo');
     this.stats.leaves++;
@@ -471,15 +484,43 @@ export class Friends {
     for (const c of fs) this._claim(c);
     this.cur = G;
     this.stats[kind]++;
+    if (kind === 'tag' || kind === 'follow') this._autoP1(true);
     this.script.run(gen, kind);
     this.note(`start ${kind} with ${fs.map((c) => c.name).join(' ')}`);
     return true;
+  }
+
+  /**
+   * Headless testing (?auto): player one's autopilot plays along (chases a friend in tag, flies the
+   * leader's wake) while `_p1Goal` is set, else flies as before.
+   */
+  _autoP1(on) {
+    const S = this.story, P = S.player;
+    if (!S.autoplay || !P) return;
+    if (on && !this._p1Auto) {
+      const prev = P.autopilot;
+      this._p1Auto = { prev };
+      this._p1Goal = null;
+      P.autopilot = (dt, pc) => {
+        const goal = this._p1Goal;
+        if (!goal) return prev ? prev(dt, pc) : {};
+        const calf = this.herd.calf;
+        _v.copy(goal).sub(calf.pos);
+        const d = _v.length();
+        return { swim: 1, yaw: Math.atan2(_v.x, _v.z), pitch: Math.asin(clamp(_v.y / Math.max(d, 1), -1, 1)) * 0.9, surge: d > 20 };
+      };
+    } else if (!on && this._p1Auto) {
+      if (P.autopilot !== this._p1Auto.prev) P.autopilot = this._p1Auto.prev;
+      this._p1Auto = null;
+      this._p1Goal = null;
+    }
   }
 
   stop(why = 'done') {
     const G = this.cur;
     if (!G) return;
     this.cur = null;
+    this._autoP1(false);
     this.script.cancel();
     this._releaseAll();
     this._p2Goal = null;
@@ -656,6 +697,7 @@ export class Friends {
         it.drive.lookAt = tgt.pos;
         it.drive.excite = 1;
         if (this.p2Live && tgt === this.p2.w) this._p2Goal = null;
+        if (this._p1Auto) this._p1Goal = null;
         if (grace <= 0 && this._touching(it, tgt)) {
           S.voiceCall(it, 'play');
           it.barrelRoll(Math.random() < 0.5 ? 1 : -1);
@@ -669,6 +711,9 @@ export class Friends {
           this.stats.tags++;
           this.note('tag: a player is it');
         }
+      } else if (it === calf && this._p1Auto) {
+        let bd = Infinity;
+        for (const c of fs) { const d = c.pos.distanceTo(calf.pos); if (d < bd) { bd = d; this._p1Goal = this._p1GoalV || (this._p1GoalV = new Vector3()); this._p1Goal.copy(c.pos); } }
       } else if (this.p2Live && it === this.p2.w) {
         // the scripted player two chases the nearest friend
         let bd = Infinity;
@@ -748,6 +793,7 @@ export class Friends {
           }
         }
       }
+      if (this._p1Auto && crumbs.length > 4) { this._p1Goal = this._p1GoalV || (this._p1GoalV = new Vector3()); this._p1Goal.copy(crumbs[crumbs.length - 4].p); }
       if (this.p2Live) { const pc = crumbs.length > 3 ? crumbs[crumbs.length - 3].p : L.pos; this._p2Goal = this._p2GoalV || (this._p2GoalV = new Vector3()); this._p2Goal.copy(pc); }
     }
     this._p2Goal = null;
@@ -779,31 +825,25 @@ export class Friends {
     this.act?.schedule?.(fs[1], 0.5, 'chirp');
     // the spot: just ahead of player one, on the sea
     const spot = new Vector3().copy(calf.pos).addScaledVector(calf.fwd, 30);
+    // they dive together and leap one after the other, a beat apart
     let best = 0;
-    for (let i = 0; i < fs.length; i++) {
-      const c = fs[i];
-      const side = i === 0 ? 1 : -1;
-      // down under the sea...
-      let t = 0, ph = 0, apex = 0;
-      while (t < 22 && ph < 3) {
-        const dt = yield 0;
-        t += dt;
+    const L = fs.map((c, i) => ({ c, side: i === 0 ? 1 : -1, ph: 0, apex: 0, wait: i * 2.5 }));
+    let t = 0;
+    while (t < 24 && L.some((q) => q.ph < 3)) {
+      const dt = yield 0;
+      t += dt;
+      for (const q of L) {
+        const c = q.c;
         const sea = seaHeight(g, c.pos.x, c.pos.z);
         const depth = sea - c.pos.y;
-        // the other friend floats at the surface watching
-        const o = fs[1 - i];
-        _v.copy(spot).addScaledVector(calf.right, -side * 16);
-        _v.y = seaHeight(g, _v.x, _v.z) - o.radius * 0.4;
-        this._steer(o, _v, 6, dt, 6);
-        if (o.pos.y < _v.y + 2) herd.behaviors?.ballast?.(o, _v.y, dt, 0.7);
-        o.drive.lookAt = c.pos;
-        if (ph === 0) {
-          _v.copy(spot).addScaledVector(calf.right, side * 8);
+        if (q.ph === 0) {
+          // down under the sea beside the spot, and hold there for its turn
+          _v.copy(spot).addScaledVector(calf.right, q.side * 9);
           _v.y = seaHeight(g, _v.x, _v.z) - 8;
-          this._steer(c, _v, 10, dt, 3, 4);
+          this._steer(c, _v, 10, dt, 3, 3);
           if (depth > 0.5) herd.behaviors?.ballast?.(c, _v.y, dt, 0.8);
-          if (depth > 5.5 || t > 12) ph = 1;
-        } else if (ph === 1) {
+          if (depth > 5.5 || t > 12) { q.wait -= dt; if (q.wait <= 0) q.ph = 1; }
+        } else if (q.ph === 1) {
           // ...and up, fast
           _v.copy(c.pos).addScaledVector(c.fwd, 3);
           _v.y = sea + 10;
@@ -811,27 +851,33 @@ export class Friends {
           if (depth > 0) c.vel.y += 10 * dt;
           c.drive.effort = 1;
           if (depth < -c.radius * 0.3 && c.vel.y > 1.5) {
-            ph = 2;
+            q.ph = 2;
             c.anim.gesture?.('breachArch');
             S.voiceCall(c, 'play');
           }
-          if (t > 20) ph = 3;
-        } else {
+          if (t > 22) q.ph = 3;
+        } else if (q.ph === 2) {
           // airborne: the arc, then the splash
           c.ctl.thrust = 0;
           c.ctl.targetPitch = -0.4;
           c.vel.y -= 8 * dt;
-          apex = Math.max(apex, -depth);
-          if (depth > c.radius * 0.2 && apex > 0.5) ph = 3;
+          q.apex = Math.max(q.apex, -depth);
+          if (depth > c.radius * 0.2 && q.apex > 0.5) { q.ph = 3; best = Math.max(best, q.apex); this.note(`breach: ${c.name} ${q.apex.toFixed(1)} m`); }
+        } else {
+          // back at the surface, watching the other
+          _v.copy(spot).addScaledVector(calf.right, q.side * 16);
+          _v.y = sea - c.radius * 0.4;
+          this._steer(c, _v, 5, dt, 6);
+          if (c.pos.y < _v.y + 2) herd.behaviors?.ballast?.(c, _v.y, dt, 0.7);
+          c.drive.lookAt = calf.pos;
         }
       }
-      best = Math.max(best, apex);
-      this.note(`breach: ${c.name} ${apex.toFixed(1)} m`);
     }
     // your turn: they float at the surface, facing you, calling
     G.turn = true;
     G.best = Math.max(best, 2);
-    let t = 0, callT = 0, cheered = false, tries = 0;
+    t = 0;
+    let callT = 0, cheered = false, tries = 0;
     while (t < 30 && !cheered && tries < 3) {
       const dt = yield 0;
       t += dt;

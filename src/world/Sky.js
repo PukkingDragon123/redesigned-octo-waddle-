@@ -251,7 +251,7 @@ vec3 skyColor(vec3 rd, float env) {
       float ang2 = atan(sp.y, sp.x) + sr * 22.0;
       float bandsIn = lat * 18.0 + fbm2(vec2(lat * 9.0, lon * 2.0)) * 2.8 + swirl * sin(ang2 * 2.0) * 1.6;
       float bands = sin(bandsIn);
-      vec3 pc = mix(vec3(0.82, 0.86, 0.95), vec3(0.95, 0.86, 0.76), bands * 0.5 + 0.5);
+      vec3 pc = mix(vec3(0.74, 0.8, 0.94), vec3(0.96, 0.82, 0.68), bands * 0.5 + 0.5);
       pc = mix(pc, vec3(0.98, 0.72, 0.58), swirl * 0.6);
       pc = mix(pc, vec3(0.72, 0.76, 0.92), smoothstep(0.6, 0.9, abs(lat)));
       float sun = smoothstep(-0.15, 0.35, dot(n, uSunDir));
@@ -261,7 +261,7 @@ vec3 skyColor(vec3 rd, float env) {
       vec3 lit = pc * mix(vec3(0.14, 0.18, 0.32), vec3(1.0), sun * rshadow);
       // the atmospheric limb glows where the sun reaches it, a cooler thin line elsewhere
       float limbSun = smoothstep(-0.35, 0.4, dot(n, uSunDir));
-      lit += mix(vec3(0.35, 0.45, 0.7), vec3(0.7, 0.85, 1.0), limbSun) * rimA * (0.25 + 0.6 * limbSun);
+      lit += mix(vec3(0.35, 0.45, 0.7), vec3(0.7, 0.85, 1.0), limbSun) * rimA * (0.2 + 0.35 * limbSun);
       float edgeA = smoothstep(1.0, 0.97, r);
       float veil = mix(0.46, 0.34, uNight) * (1.0 - smoothstep(0.0, 0.25, yc) * 0.35);
       lit *= mix(1.0, 0.55, uNight);
@@ -277,15 +277,15 @@ vec3 skyColor(vec3 rd, float env) {
     float ringVis = ringMask * ringOp * (1.0 - gap * 0.7) * (r < 1.0 ? step(0.0, q.y * 3.6 + q.x * 0.55) : 1.0) * step(0.5, pd);
     vec3 ringCol = mix(vec3(0.85, 0.82, 0.78), vec3(1.0, 0.95, 0.88), ringBands) * mix(0.7, 1.0, sd);
     // the planet's shadow falls across the rings on its night side
+    // (close beside the disc, on the side away from the sun)
     vec2 sq = vec2(dot(uSunDir, pu), dot(uSunDir, pv));
     sq = length(sq) > 1e-4 ? normalize(sq) : vec2(1.0, 0.0);
-    float across = abs(q.x * sq.y - q.y * sq.x);
-    float pshadow = smoothstep(1.02, 0.9, across) * smoothstep(0.1, -0.3, dot(q, sq));
-    ringCol *= 1.0 - 0.6 * pshadow;
-    // ice catches the low sun warm
-    ringCol = mix(ringCol, ringCol * normalize(uSunScatter + 1e-3) * 1.6, lowSun * 0.35);
+    float pshadow = smoothstep(1.55, 1.15, length(q)) * smoothstep(0.0, -0.45, dot(normalize(q + 1e-4), sq)) * step(1.0, r);
+    ringCol *= 1.0 - 0.55 * pshadow;
+    // the ice catches the light: brighter than the sky behind it, warm at a low sun
+    ringCol = mix(ringCol, ringCol * vec3(1.15, 1.0, 0.84), lowSun * 0.5) * 1.18;
     ringCol *= mix(1.0, 0.5, uNight);
-    col = mix(col, mix(ringCol, col, mix(0.6, 0.4, uNight)), ringVis * 0.75 * uPlanetVis);
+    col = mix(col, mix(ringCol, col, mix(0.5, 0.4, uNight)), ringVis * 0.82 * uPlanetVis);
   }
 
   // --- High cirrus -----------------------------------------------------------------------------

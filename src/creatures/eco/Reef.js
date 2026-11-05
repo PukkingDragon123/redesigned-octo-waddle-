@@ -7,7 +7,9 @@
 //   corals retract and glow, fans bend away.
 // Fauna (small recycled pools simulated on the CPU around the camera):
 //   jellies (drifting blooms of three species: ribbed lanterns, lobed crowns and spired nested bells, with
-//   rim lens-eyes and barbed, hooked hunting tentacles; they pulse, flare and flee), rays (horned, many-eyed
+//   rim lens-eyes and barbed, hooked hunting tentacles; they hunt fish schools and a calf that swims close,
+//   snare fish, sting a calf that brushes them, and rise from the deep in blooms (bloom()); they pulse, flare
+//   and flee), rays (horned, many-eyed
 //   devil rays with bone-strutted wings, twin barbed tails and a fanged under-maw; they glide over the reef and
 //   curious ones swim alongside the calf), armoured lantern puffers with mandibles (inflate into spiky balls
 //   when startled) and armoured ribbon eels with hinged, needle-toothed jaws in the kelp.
@@ -744,8 +746,9 @@ export class ReefLife {
   /** The calf brushed a hunting jelly's tentacles: a sting (a flinch, a little energy, never more). */
   _sting(i, calf, x, y, z) {
     const J = this.jellies, k = i * 3;
-    J.t2[i] = 9;
-    this._stingCool = 4;
+    J.t2[i] = 12;
+    // stings stay rare: a calf idling in a bloom is stung now and then, not over and over
+    this._stingCool = 7;
     J.c[i] = 1e-3; // the tentacles lash and curl
     J.a[i] = 1;
     this.stats.stings = (this.stats.stings || 0) + 1;

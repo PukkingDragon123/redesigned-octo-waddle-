@@ -65,6 +65,19 @@ vec3 puff(vec3 p, float inf) {
 // lobes, 2 a spired bell with a second bell nested inside), the contraction that ripples round the
 // margin from a pacemaker, and the drift of the tentacles
 float jSp, jPul, jSeed, jVy;
+// the hunt: the reach toward prey (unit, in the jelly's yawed frame) and its strength, and the phase
+// of a catch (0 none .. 1: the tentacles lash and curl, a glow runs up them to the bell)
+vec3 jReach;
+float jStr, jCatch;
+void jUnpack(float w, float fc) {
+  float q = floor(w + 1e-4);
+  jStr = clamp(w - q, 0.0, 1.0);
+  float el = mod(q, 32.0);
+  float az = floor(q / 32.0 + 1e-4);
+  float A = az / 1023.0 * 6.2831853, E = (el / 31.0 - 0.5) * 3.14159265;
+  jReach = vec3(cos(E) * sin(A), sin(E), cos(E) * cos(A));
+  jCatch = floor(fc + 1e-4) / 100.0;
+}
 float jC(float az) {
   float az0 = jSeed * 6.2831853 + uTime * 0.17;
   float lag = 0.85 * (1.0 - cos(az - az0));
@@ -235,6 +248,7 @@ void main() {
   jPul = iB.z;
   jVy = iC.z;
   jSp = floor(fract(seed * 7.31) * 3.0);
+  jUnpack(iC.w, iB.w);
   vec3 p = pos;
   float H = jH();
   float cHere = jC(atan(pos.z, pos.x));
@@ -271,8 +285,16 @@ void main() {
     vec3 local = pos - restRoot;
     vec3 root = jBell(1.0, a2 / 6.2831853, 0.0) * vec3(0.93, 1.0, 0.93);
     float c = jC(a2);
-    local.y *= jLen() * (1.0 - 0.15 * c * t) * (1.0 - 0.2 * hunt * smoothstep(0.55, 1.0, t));
-    p = root + local + jTentOff(t, a2, hunt);
+    float along = -local.y * jLen() * (1.0 - 0.15 * c * t) * (1.0 - 0.2 * hunt * smoothstep(0.55, 1.0, t));
+    // hunting: the tentacles fan out into a net and the long ones swing toward the prey; a catch
+    // makes them lash, shorten and curl round it
+    float lash = sin(3.14159 * jCatch) * (0.4 + 0.6 * hunt);
+    along *= 1.0 - 0.35 * lash * smoothstep(0.2, 1.0, t);
+    vec3 dirT = normalize(mix(vec3(0.0, -1.0, 0.0), jReach, jStr * (0.2 + 0.65 * hunt)));
+    p = root + vec3(local.x, 0.0, local.z) + dirT * along + jTentOff(t, a2, hunt) * (1.0 - 0.5 * jStr * hunt);
+    p.xz += vec2(cos(a2), sin(a2)) * jStr * along * 0.22;
+    float w2 = t * 18.0 + a2 * 2.0 + uTime * 0.8;
+    p += vec3(cos(w2), 0.0, sin(w2)) * 0.15 * lash * t * hunt;
     if (part > 27.5) p += aQ.xyz * (1.0 + 0.3 * step(1.5, jSp));
   } else if (part < 24.5) {
     // lens-eyes ride on the margin
@@ -1034,7 +1056,12 @@ void main() {
   float fres = pow(1.0 - abs(dot(N, V)), 2.0);
   float sp = vI.y;
   float pulse = vI.w;
-  float flare = vI.z;
+  float cq = floor(vI.z + 1e-4);
+  float flare = vI.z - cq;
+  float jcat = cq / 100.0;
+  // a catch: a soft glow runs up the tentacles from the prey to the bell, which brightens as it
+  // arrives (once, steady; never a flicker)
+  float arrive = jcat > 0.0 ? sin(3.14159 * clamp((jcat - 0.72) / 0.28, 0.0, 1.0)) : 0.0;
   vec3 cA, cB, cR;
   if (sp < 0.5) { cA = vec3(1.0, 0.28, 0.42); cB = vec3(0.32, 0.5, 0.95); cR = vec3(0.4, 1.0, 0.88); }
   else if (sp < 1.5) { cA = vec3(1.0, 0.52, 0.14); cB = vec3(0.8, 0.3, 0.55); cR = vec3(0.32, 0.82, 1.0); }
@@ -1061,6 +1088,7 @@ void main() {
     float oc = smoothstep(0.3, 0.14, length(pf - pj * 0.4)) * step(0.45, hash12(pc + 2.0)) * smoothstep(0.62, 0.7, v) * smoothstep(0.84, 0.76, v);
     float glow = 0.05 + 0.42 * fres + canal * 0.45 + ringC * 0.3 + smoothstep(0.92, 1.0, v) * 0.18;
     if (layer > 0.5) glow = 0.04 + (sp > 1.5 ? 0.5 : 0.25) * fres;
+    glow += arrive * 0.12 * (1.0 - v);
     col = grad * glow;
     float dark = max(blot * 0.55, oc * 0.85) * (1.0 - layer);
     col = col * (1.0 - dark) + vec3(0.16, 0.04, 0.08) * dark * lit * 0.25;
@@ -1068,7 +1096,7 @@ void main() {
     col += uSunColor * 0.05 * max(dot(N, uSunDir), 0.0) * sunK;
   } else if (part < 21.5) {
     // the gastric organ (deep wine, veined) and the gonads that hold the light
-    if (vP.w > 0.5) { col = cA * (0.55 + 0.25 * pulse) * (0.7 + 0.3 * sin(vP.y * 9.0 + hs * 4.0)); alpha = 0.45; }
+    if (vP.w > 0.5) { col = cA * (0.55 + 0.25 * pulse + 0.9 * arrive) * (0.7 + 0.3 * sin(vP.y * 9.0 + hs * 4.0)); alpha = 0.45; }
     else {
       float vein = smoothstep(0.75, 0.95, abs(sin(vLoc.y * 70.0 + vnoise(vLoc.xz * 30.0) * 4.0)));
       col = mix(cA * 0.18, cA * 0.6, fres) + cA * vein * 0.2;
@@ -1086,6 +1114,9 @@ void main() {
     float t = vP.y, hunt = vP.w;
     col = mix(cR, cA, t) * (0.26 - 0.12 * t);
     alpha = 0.22 * (1.0 - 0.55 * t);
+    float rip = jcat > 0.0 ? exp(-pow((t - (1.0 - jcat * 1.05)) / 0.07, 2.0)) * (1.0 - smoothstep(0.85, 1.0, jcat)) : 0.0;
+    col += mix(cA, cR, 0.3) * rip * (0.5 + 0.5 * hunt);
+    alpha += rip * 0.15;
     float band = smoothstep(0.35, 0.9, sin(t * 55.0 + vnoise(vec2(t * 12.0, vP.z * 3.0)) * 5.0)) * hunt * smoothstep(0.2, 0.4, t) * (0.5 + 0.5 * vnoise(vec2(t * 9.0, vP.z)));
     col = col * (1.0 - band * 0.5) + vec3(0.2, 0.03, 0.06) * band * lit * 0.4;
     alpha += band * 0.3 + hunt * 0.2;

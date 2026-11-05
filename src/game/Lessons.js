@@ -90,7 +90,7 @@ export class Lessons {
     if (!herd || S.state !== 'play' || S.act !== 1 || S.cine?.active) return false;
     if (herd.mode !== 'travel' || herd.motherScript || herd.songCenter || herd.protectCenter || herd.behaviors?.net) return false;
     if (herd.care && herd.care.mode !== 'lead') return false;
-    if (A?.race || herd.calves.some((c) => c.play && c.play.mode)) return false;
+    if (A?.race || herd.calves.some((c) => c.play && c.play.mode && c.play.mode !== 'p2')) return false; // (a friend's game; player two's calf is no game)
     if (S.song?.active || S.song?.listening || S.player?.humming || S.player?.charging || S.feastInvite) return false;
     if ((g.timeScaleTarget ?? 1) !== 1 || (S.weather?.level ?? 0) > 0.3) return false;
     // busy eating: a swarm in reach, a mouthful just taken, a lunge

@@ -21,6 +21,7 @@ import { SkyBugs, BUG_SPECIES } from '../creatures/bugs/SkyBugs.js';
 import { seaHeight } from './Swim.js';
 import { Hunt } from './Hunt.js';
 import { Lessons } from './Lessons.js';
+import { Friends } from './Friends.js';
 
 // ambient swarms per chapter: [moth, gnat, skitter]
 const DENSITY = {
@@ -70,6 +71,8 @@ export class Activities {
     this.hunt = new Hunt(game, story, this);
     // the mother's lessons: copy me, tag, discoveries, the bubble-net hunting lesson (Lessons.js)
     this.lessons = new Lessons(game, story, this);
+    // the playmate calves' games and a friend dropping in as one of them (Friends.js)
+    this.friends = new Friends(game, story, this);
   }
 
   rand() { return Math.random(); }
@@ -89,6 +92,7 @@ export class Activities {
     this.moves?.reset?.();
     this.hunt.reset();
     this.lessons.reset();
+    this.friends.reset();
   }
 
   // ---- per frame ----------------------------------------------------------------------------
@@ -117,6 +121,7 @@ export class Activities {
     }
     this.hunt.update(dt, playing);
     this.lessons.update(dt);
+    this.friends.update(dt);
     this._eating(dt, calf);
     // joy decays; it lights the calf up
     this.joy = Math.max(0, this.joy - dt * 0.05 * (1 + this.joy));
@@ -357,6 +362,7 @@ export class Activities {
       R.splice(i, 1);
       const w = r.w;
       if (!w || (w.beh && w.beh.netI >= 0)) continue;
+      if (w.play && w.play.mode === 'p2' && r.kind === 'roll') continue; // player two rolls by itself
       switch (r.kind) {
         case 'tailSlap': case 'finSlap': case 'breachArch':
           w.anim?.gesture?.(r.kind, { speed: w.isCalf ? 1.4 : 1 });

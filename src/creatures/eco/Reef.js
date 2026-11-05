@@ -36,6 +36,20 @@ function vnoise(x, z) {
   const a = hash2(ix, iz), b = hash2(ix + 1, iz), c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
   return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz;
 }
+/** Closest distance between segments (a0, a1) and (b0, b1). */
+function segDist(ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) {
+  const ux = bx - ax, uy = by - ay, uz = bz - az, vx = dx - cx, vy = dy - cy, vz = dz - cz;
+  const wx = ax - cx, wy = ay - cy, wz = az - cz;
+  const a = ux * ux + uy * uy + uz * uz, b = ux * vx + uy * vy + uz * vz, c = vx * vx + vy * vy + vz * vz;
+  const d = ux * wx + uy * wy + uz * wz, e = vx * wx + vy * wy + vz * wz;
+  const D = a * c - b * b;
+  let sN = D > 1e-9 ? (b * e - c * d) / D : 0;
+  sN = Math.max(0, Math.min(1, sN));
+  let tN = c > 1e-9 ? (b * sN + e) / c : 0;
+  if (tN < 0) { tN = 0; sN = a > 1e-9 ? Math.max(0, Math.min(1, -d / a)) : 0; } else if (tN > 1) { tN = 1; sN = a > 1e-9 ? Math.max(0, Math.min(1, (b - d) / a)) : 0; }
+  const px = wx + ux * sN - vx * tN, py = wy + uy * sN - vy * tN, pz = wz + uz * sN - vz * tN;
+  return Math.sqrt(px * px + py * py + pz * pz);
+}
 /** Kelp forest density 0..1 (patchy forests a few hundred metres across). */
 export function kelpDensity(x, z) { return vnoise(x / 70 + 13.1, z / 70 - 7.7) * 0.7 + vnoise(x / 19, z / 19) * 0.3; }
 /** Reef garden density 0..1. */
@@ -110,6 +124,8 @@ class Pool {
     this.t2 = new Float32Array(n);
     this.floor = new Float32Array(n);
     this.wait = new Float32Array(n); // respawn back-off after a failed placement (open sea)
+    this.e = new Float32Array(n); // more state slots (jellies: snare timer, bloom rise depth)
+    this.f = new Float32Array(n);
   }
   /** A slot that is free (or left behind) may try to respawn now. */
   ready(i, dt) {
@@ -120,7 +136,8 @@ class Pool {
   }
 }
 
-export const REEF_FOOD = { puffer: 0.6, jelly: 0.4, eel: 0.8 };
+// a hunting jelly is a meal for the calf's bite, as an eel is
+export const REEF_FOOD = { puffer: 0.6, jelly: 0.8, eel: 0.8 };
 
 export class ReefLife {
   constructor(eco, opts = {}) {
@@ -168,6 +185,9 @@ export class ReefLife {
     this._rayT = -1e9;
     this._underT = 0;
     this._scatterCool = 0;
+    this._snareOpts = { max: 2, sparkles: 0, quiet: true };
+    this._stingCool = 0;
+    this._warnT = -1e9;
     this.visible = true;
   }
 
@@ -265,6 +285,8 @@ export class ReefLife {
       J.ph[i] = Math.random() * TAU;
       J.yaw[i] = Math.random() * TAU;
       J.a[i] = 0; // flare
+      // hunting state: intensity, catch phase, retarget timer, snare timer, rise depth, dart and sting timers, prey kind
+      J.b[i] = 0; J.c[i] = 0; J.d[i] = Math.random() * 0.5; J.e[i] = 1 + Math.random() * 2; J.f[i] = 0; J.t[i] = 0; J.t2[i] = 0; J.vr[i] = 0;
       return true;
     }
     J.alive[i] = 0;
@@ -530,45 +552,211 @@ export class ReefLife {
     }
   }
 
+  // ---- hunting jellies ------------------------------------------------------------------------
+  // Every jelly hunts. A few times a second it looks for prey: the calf when it swims close, else
+  // the nearest fish school. It pulses toward it (faster beats, a hard contraction to dart when in
+  // reach), its long hunting tentacles fan out into a net and reach toward the prey (reefMat.js,
+  // packed in iC.w), and a catch makes them lash and curl while a glow runs up them to the bell
+  // (iB.w). Fish are snared (Fish.eatAt, quiet: no sparkles); the calf brushing the tentacles is
+  // stung (eco.onHit: a flinch and a little energy, never more), and its mother warns it off first.
+
+  /** The calf (the player's whale) if it is under water, else null (dev: the actor). */
+  _calfUnder() {
+    const c = this.game.story?.herd?.calf || this.actor;
+    if (!c || !c.pos) return null;
+    return c.pos.y < G.uSeaLevel.value - 0.6 ? c : null;
+  }
+
+  /** Jelly species, as reefMat.js picks it (0 lantern, 1 crown, 2 spire), and its tentacle reach (m). */
+  _jellySp(i) { const s = this.jellies.seed[i] * 7.31; return Math.floor((s - Math.floor(s)) * 3); }
+  _jellyReach(i) {
+    const sp = this._jellySp(i);
+    return this.jellies.s[i] * (sp === 0 ? 4.6 : sp === 1 ? 2.2 : 3.5);
+  }
+
+  /** A bloom of hunting jellies rising from the deep around `center` (the herd threads through it). */
+  bloom(center, opts = {}) {
+    if (!center) return 0;
+    const J = this.jellies, sea = G.uSeaLevel.value;
+    const count = Math.min(J.max - 4, opts.count ?? 36);
+    const R = opts.radius ?? 24;
+    let n = 0;
+    for (let i = 0; i < J.max && n < count; i++) {
+      // keep the jellies the camera already sees close by
+      if (J.alive[i] && Math.hypot(J.P[i * 3] - this.focus.x, J.P[i * 3 + 2] - this.focus.z) < 12) continue;
+      const a = Math.random() * TAU, r = R * Math.sqrt(Math.random());
+      const x = center.x + Math.cos(a) * r, z = center.z + Math.sin(a) * r;
+      const fl = this.floorAt(x, z);
+      const depth = sea - fl;
+      if (depth < 8) continue;
+      const k = i * 3;
+      J.alive[i] = 1; J.wait[i] = 0;
+      J.P[k] = x; J.P[k + 2] = z;
+      J.P[k + 1] = Math.max(fl + 2.5, sea - Math.min(depth - 2.5, (opts.depth ?? 16) + Math.random() * 12));
+      J.V[k] = 0; J.V[k + 1] = 0.3; J.V[k + 2] = 0;
+      J.floor[i] = fl;
+      // mostly the long-tentacled hunters (lanterns and spires), larger than the reef's drifters
+      let sd = Math.random();
+      if (Math.random() < 0.75) { const sp = Math.random() < 0.5 ? 0 : 2; for (let tr = 0; tr < 40 && this._spOf(sd) !== sp; tr++) sd = Math.random(); }
+      J.seed[i] = sd;
+      J.s[i] = 1.0 + Math.random() * 1.5;
+      J.ph[i] = Math.random() * TAU;
+      J.yaw[i] = Math.random() * TAU;
+      J.a[i] = 0; J.b[i] = 0.6; J.c[i] = 0; J.d[i] = Math.random() * 0.5; J.t[i] = 0; J.t2[i] = 0; J.e[i] = 1 + Math.random() * 2;
+      // rising to feed near the surface
+      J.f[i] = 2.5 + Math.random() * 8; // depth it rises to
+      J.vr[i] = 0;
+      n++;
+    }
+    this.stats.bloom = n;
+    return n;
+  }
+  _spOf(seed) { const s = seed * 7.31; return Math.floor((s - Math.floor(s)) * 3); }
+
   _jellies(dt, t) {
     const J = this.jellies, I = this.inst.jelly;
     const sea = G.uSeaLevel.value;
     const R = this.radius;
-    let n = 0;
+    const calf = this._calfUnder();
+    const fish = this.eco.fish;
+    const st = this.game.story;
+    const playing = !st || st.state === 'play';
+    this._stingCool = Math.max(0, (this._stingCool || 0) - dt);
+    // one snare attempt per frame at most (Fish.eatAt walks a school), round-robin
+    let snareSlot = true;
+    let warnD = Infinity, warnI = -1;
+    let n = 0, hunting = 0;
     for (let i = 0; i < J.max; i++) {
       if (!J.alive[i] || this._far(J.P[i * 3], J.P[i * 3 + 2])) {
         if (!J.ready(i, dt) || !this._spawnJelly(i, R * 0.75, R)) continue;
       }
       const k = i * 3;
+      const s = J.s[i];
+      const reach = this._jellyReach(i);
       const d = this._threat(J.P[k], J.P[k + 1], J.P[k + 2]);
-      // flare and flee from a whale close by
-      if (d < 4 + J.s[i]) {
+      // ---- choose prey a few times a second
+      J.d[i] -= dt;
+      if (J.d[i] <= 0) {
+        J.d[i] = 0.45 + Math.random() * 0.35;
+        J.vr[i] = 0;
+        if (calf) {
+          const dc = Math.hypot(calf.pos.x - J.P[k], calf.pos.y - J.P[k + 1], calf.pos.z - J.P[k + 2]) - (calf.L || 8) * 0.3;
+          if (dc < reach * 1.6 + 6) { J.vr[i] = 2; J.H[k] = calf.pos.x; J.H[k + 1] = calf.pos.y; J.H[k + 2] = calf.pos.z; }
+        }
+        if (!J.vr[i] && fish) {
+          const f = fish.nearest(_v.set(J.P[k], J.P[k + 1], J.P[k + 2]), 'glintfin') || fish.nearest(_v);
+          if (f && f.dist < 14 + reach * 2) {
+            // aim at the near edge of the school
+            const dx = f.pos.x - J.P[k], dy = f.pos.y - J.P[k + 1], dz = f.pos.z - J.P[k + 2];
+            const dl = Math.hypot(dx, dy, dz) || 1, edge = Math.max(0, dl - f.radius * 0.6) / dl;
+            J.vr[i] = 1; J.H[k] = J.P[k] + dx * edge; J.H[k + 1] = J.P[k + 1] + dy * edge; J.H[k + 2] = J.P[k + 2] + dz * edge;
+          }
+        }
+      }
+      const kind = J.vr[i];
+      if (kind === 2 && calf) { J.H[k] = calf.pos.x; J.H[k + 1] = calf.pos.y; J.H[k + 2] = calf.pos.z; }
+      J.b[i] = kind ? Math.min(1, J.b[i] + dt * 0.7) : Math.max(0, J.b[i] - dt * 0.25);
+      const hb = J.b[i];
+      if (hb > 0.3) hunting++;
+      // prey: below the bell is where the tentacles are, so aim the bell a little above it
+      let tx = J.H[k] - J.P[k], ty = J.H[k + 1] + reach * 0.35 - J.P[k + 1], tz = J.H[k + 2] - J.P[k + 2];
+      const td = Math.hypot(tx, ty, tz) || 1;
+      tx /= td; ty /= td; tz /= td;
+      // flare and flee from a whale close by (a calf that hunts it is still a whale)
+      if (d < 4 + s && kind !== 2) {
         J.a[i] = Math.min(1, J.a[i] + dt * 5);
         J.V[k] += _v2.x * dt * 1.2; J.V[k + 1] += _v2.y * dt * 1.2; J.V[k + 2] += _v2.z * dt * 1.2;
       } else J.a[i] = Math.max(0, J.a[i] - dt * 0.6);
-      const prev = J.ph[i];
-      J.ph[i] += dt * (1.5 + J.a[i] * 3.5) / Math.sqrt(J.s[i]);
-      // thrust on each contraction, a slow sink between
+      // the beat quickens when hunting; a hard contraction darts it at prey in reach
+      J.t[i] = Math.max(0, J.t[i] - dt);
+      const inReach = kind && td < reach * 1.3 + 1.5;
+      if (inReach && J.t[i] <= 0 && hb > 0.5) { J.t[i] = 2.2 + Math.random(); J.V[k] += tx * 1.4 * hb; J.V[k + 1] += ty * 1.4 * hb; J.V[k + 2] += tz * 1.4 * hb; }
+      const dart = J.t[i] > 1.4 ? 1 : 0;
+      J.ph[i] += dt * (1.5 + J.a[i] * 3.5 + hb * 1.8 + dart * 3) / Math.sqrt(s);
+      // thrust on each contraction (toward prey when hunting), a slow sink between
       const c = Math.max(Math.sin(J.ph[i]), 0);
-      const tilt = J.pitch[i];
-      J.V[k + 1] += (c * c * 1.1 - 0.16) * dt;
-      J.V[k] += Math.sin(tilt) * c * 0.3 * dt + 0.06 * dt;
+      const thr = c * c * dt;
+      J.V[k + 1] += thr * 1.1 * (1 - hb * 0.6) - 0.16 * dt;
+      J.V[k] += Math.sin(J.pitch[i]) * thr * 0.3 + 0.06 * dt;
       J.V[k + 2] += 0.03 * dt;
+      if (hb > 0.01) { const g2 = thr * 1.5 * hb; J.V[k] += tx * g2; J.V[k + 1] += ty * g2; J.V[k + 2] += tz * g2; }
+      // a bloom rises from the deep to feed
+      if (J.f[i] > 0) { if (J.P[k + 1] < sea - J.f[i]) J.V[k + 1] += thr * 1.4 + 0.12 * dt; else J.f[i] = 0; }
       const drag = Math.exp(-dt * 1.4);
       J.V[k] *= drag; J.V[k + 1] *= drag; J.V[k + 2] *= drag;
       J.P[k] += J.V[k] * dt; J.P[k + 1] += J.V[k + 1] * dt; J.P[k + 2] += J.V[k + 2] * dt;
       // stay in the water column
-      const top = sea - 1.2 - J.s[i] * 0.5, bot = J.floor[i] + 2;
+      const top = sea - 1.2 - s * 0.5, bot = J.floor[i] + 2;
       if (J.P[k + 1] > top) { J.P[k + 1] = top; J.V[k + 1] = Math.min(J.V[k + 1], -0.05); }
       if (J.P[k + 1] < bot) { J.P[k + 1] = bot; J.V[k + 1] = Math.max(J.V[k + 1], 0.1); }
+      // ---- the catch: snare a fish, or sting the calf that brushes the tentacles
+      J.e[i] -= dt;
+      if (J.c[i] > 0) { J.c[i] += dt / 1.3; if (J.c[i] >= 1) J.c[i] = 0; }
+      // where the tentacles are: from under the bell down and out toward the prey
+      const str = hb * (1 - Math.min(1, Math.max(0, (td - reach) / (reach * 2.5))));
+      const rx = tx * str * 0.6, ry = -1 + (ty + 1) * str * 0.6, rz = tz * str * 0.6;
+      const rl = Math.hypot(rx, ry, rz) || 1;
+      const ax = J.P[k] + rx / rl * reach * 0.55, ay = J.P[k + 1] + ry / rl * reach * 0.55, az = J.P[k + 2] + rz / rl * reach * 0.55;
+      if (kind === 1 && snareSlot && J.e[i] <= 0 && td < reach * 1.4 + 1) {
+        snareSlot = false;
+        J.e[i] = 1.6 + Math.random() * 2.4;
+        const got = fish.eatAt(_v.set(ax, ay, az), null, reach * 0.55 + 0.4, this._snareOpts);
+        if (got > 0) { J.c[i] = 1e-3; this.stats.snared = (this.stats.snared || 0) + fish.lastCount; J.e[i] += 2; }
+      }
+      if (calf && playing) {
+        // the calf's body as a segment, the tentacles as another
+        const L = calf.L || 8, fw = calf.fwd;
+        const fx = fw ? fw.x : 0, fy = fw ? fw.y : 0, fz = fw ? fw.z : 1;
+        const dTent = segDist(calf.pos.x - fx * L * 0.35, calf.pos.y - fy * L * 0.35, calf.pos.z - fz * L * 0.35, calf.pos.x + fx * L * 0.4, calf.pos.y + fy * L * 0.4, calf.pos.z + fz * L * 0.4,
+          J.P[k], J.P[k + 1] - s * 0.2, J.P[k + 2], J.P[k] + rx / rl * reach, J.P[k + 1] + ry / rl * reach, J.P[k + 2] + rz / rl * reach);
+        const touch = L * 0.11 + 0.3 * s + 0.3;
+        if (dTent < touch && this._stingCool <= 0 && J.t2[i] <= 0) {
+          this._sting(i, calf, ax, ay, az);
+        } else if (dTent < touch + 5 + s && dTent < warnD) { warnD = dTent; warnI = i; }
+      }
+      J.t2[i] = Math.max(0, J.t2[i] - dt);
+      // tilt with the swim, a slow wobble
       J.pitch[i] = Math.sin(t * 0.3 + J.seed[i] * 20) * 0.25;
       J.roll[i] = Math.cos(t * 0.27 + J.seed[i] * 13) * 0.2;
-      // iC.z: the rise speed (the tentacles stream straight behind a rising jelly, billow as it sinks)
-      I.set(n++, J.P[k], J.P[k + 1], J.P[k + 2], J.yaw[i], J.s[i], J.seed[i], J.ph[i], J.a[i], J.pitch[i], J.roll[i], J.V[k + 1], 0);
-      void prev;
+      // the reach for the shader, in the jelly's own (yawed) frame: azimuth, elevation and strength
+      // packed in one float (reefMat.js jUnpack); the catch phase rides on the flare (iB.w)
+      let pack = 0;
+      if (str > 0.02) {
+        const cy = Math.cos(J.yaw[i]), sy = Math.sin(J.yaw[i]);
+        const lx = cy * tx - sy * tz, lz = sy * tx + cy * tz;
+        const azq = Math.round(((Math.atan2(lx, lz) / TAU) + 1) % 1 * 1023);
+        const elq = Math.round((Math.asin(Math.max(-1, Math.min(1, ty))) / Math.PI + 0.5) * 31);
+        pack = azq * 32 + elq + Math.min(0.999, str);
+      }
+      const flareC = Math.min(0.99, J.a[i]) + Math.round(J.c[i] * 100);
+      I.set(n++, J.P[k], J.P[k + 1], J.P[k + 2], J.yaw[i], s, J.seed[i], J.ph[i], flareC, J.pitch[i], J.roll[i], J.V[k + 1], pack);
     }
     I.commit(n);
     this.stats.jellies = n;
+    this.stats.jellyHunting = hunting;
+    // the mother warns a calf drifting into the tentacles (once in a while)
+    if (warnI >= 0 && st && playing && t - (this._warnT ?? -1e9) > 22) {
+      const mom = st.herd?.mother;
+      if (mom && mom.pos.distanceTo(calf.pos) < 160) { this._warnT = t; st.voiceCall?.(mom, 'warn'); }
+    }
+  }
+
+  /** The calf brushed a hunting jelly's tentacles: a sting (a flinch, a little energy, never more). */
+  _sting(i, calf, x, y, z) {
+    const J = this.jellies, k = i * 3;
+    J.t2[i] = 9;
+    this._stingCool = 4;
+    J.c[i] = 1e-3; // the tentacles lash and curl
+    J.a[i] = 1;
+    this.stats.stings = (this.stats.stings || 0) + 1;
+    const p = _v.set(x, y, z).lerp(calf.pos, 0.5);
+    this.game.story?.audio?.sfx?.('tailSlap', { position: p, gain: 0.5, pitch: 1.9 });
+    this.eco._hit?.('jelly', p, 0.35);
+    // the jelly is thrown back from the whale
+    const dx = J.P[k] - calf.pos.x, dy = J.P[k + 1] - calf.pos.y, dz = J.P[k + 2] - calf.pos.z;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    J.V[k] += dx / dl * 1.5; J.V[k + 1] += dy / dl * 1.5; J.V[k + 2] += dz / dl * 1.5;
+    J.vr[i] = 0; J.b[i] *= 0.4; J.d[i] = 3;
   }
 
   _rays(dt, t) {

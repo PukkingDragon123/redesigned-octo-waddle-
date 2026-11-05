@@ -128,13 +128,41 @@ vec3 starField(vec3 rd, float scale, float thresh, float env) {
   vec3 f = fract(p) - 0.5 - jit * 0.6;
   float size = mix(0.05, 0.11, hash11(h * 91.0));
   float star = smoothstep(size, 0.0, length(f)) * step(thresh, h);
-  float tw = 0.65 + 0.35 * sin(uTime * (1.3 + h * 3.0) + h * 40.0);
+  // steady points of light: no twinkling (the sky is calm; nothing sparkles or flashes)
+  float tw = 0.8 + 0.2 * hash11(h * 29.0);
   // stellar colours: blue-white to warm
   float temp = hash11(h * 17.0);
   vec3 sc = mix(vec3(1.0, 0.82, 0.62), vec3(0.75, 0.85, 1.0), temp);
   float bright = pow(hash11(h * 53.0), 3.0) * 2.5 + 0.35;
   // in the reflection map points would alias: keep only their average glow
   return mix(sc * star * tw * bright, sc * (1.0 - thresh) * 0.8, env);
+}
+
+// Faint aurora curtains low over the polar sky: a soft lower edge that wanders slowly along the
+// horizon, fine vertical rays combed up from it, green-teal at the foot fading to violet above.
+// They fold and drift over minutes; nothing flickers.
+vec3 aurora(vec3 rd) {
+  float el = asin(clamp(rd.y, -1.0, 1.0));
+  if (el < 0.0 || el > 0.9) return vec3(0.0);
+  float az = atan(rd.x, rd.z);
+  float t = uTime * 0.02;
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 2; i++) {
+    float fi = float(i);
+    // the curtain's foot: a slow, wandering fold (whole-number azimuth frequencies: no seam)
+    float e0 = 0.1 + fi * 0.07 + 0.045 * sin(2.0 * az + t * 1.3 + fi * 2.1) + 0.025 * sin(5.0 * az - t * 2.1 + fi);
+    float d = el - e0;
+    float foot = smoothstep(-0.012, 0.01, d);
+    float body = foot * exp(-max(d, 0.0) * (9.0 - fi * 2.5));
+    // rays: fine striations that lean and drift with the fold (never ruled lines)
+    float ph = 47.0 * az + 3.0 * sin(7.0 * az + t * 2.0 + fi * 3.0) + t * 4.0;
+    float rays = 0.45 + 0.55 * pow(0.5 + 0.5 * sin(ph), 2.0) * (0.6 + 0.4 * sin(13.0 * az - t * 1.7 + fi));
+    // only part of the sky: the curtains hang over one side of the planet
+    float side = smoothstep(-0.1, 0.65, sin(az + 2.4 + 0.3 * sin(t)) * (1.0 - fi * 0.3));
+    vec3 c = mix(vec3(0.12, 0.95, 0.62), vec3(0.55, 0.32, 0.95), smoothstep(0.0, 0.22, d));
+    acc += c * body * rays * side * (1.0 - fi * 0.35);
+  }
+  return acc;
 }
 
 // env: 1 when rendering the reflection map (no sun disk: the sea adds its own glitter).
@@ -146,7 +174,25 @@ vec3 skyColor(vec3 rd, float env) {
   // --- Base gradient --------------------------------------------------------------------------
   float hz = pow(1.0 - yc, 3.6);
   vec3 col = mix(uSkyZenith, uSkyHorizon, hz);
+  // a painted middle register between the zenith blue and the horizon glow (layered, not one ramp)
+  vec3 midC = mix(uSkyZenith, uSkyHorizon, 0.5) * vec3(1.03, 0.97, 1.05);
+  col = mix(col, midC, smoothstep(0.7, 0.22, yc) * smoothstep(0.02, 0.2, yc) * 0.3);
   col = mix(col, uSunScatter, pow(sd, 3.0) * hz * 0.55);
+  // low sun: light floods along the horizon toward the sun's side of the sky
+  float lowSun = smoothstep(0.42, 0.02, uSunDir.y) * smoothstep(-0.2, -0.03, uSunDir.y);
+  vec2 shz = normalize(uSunDir.xz + vec2(1e-4));
+  vec2 rhz = normalize(rd.xz + vec2(1e-4));
+  float azc = dot(rhz, shz);
+  col += uSunScatter * pow(azc * 0.5 + 0.5, 2.5) * exp(-yc * 8.0) * lowSun * 0.3;
+  // the anti-twilight arch: opposite a low sun, a rose band (the Belt of Venus) over the planet's
+  // blue-grey shadow rising from the sea
+  float twi = smoothstep(0.2, 0.02, uSunDir.y) * smoothstep(-0.16, -0.02, uSunDir.y) * (1.0 - uStorm);
+  float away = smoothstep(-0.1, -0.85, azc) * twi;
+  float beltW = smoothstep(0.035, 0.08, yc + 0.012 * sin(atan(rd.x, rd.z) * 3.0)) * smoothstep(0.26, 0.1, yc);
+  vec3 rose = vec3(1.0, 0.66, 0.74) * max(dot(uSkyHorizon, vec3(0.2126, 0.7152, 0.0722)), 0.05) * 1.1;
+  col = mix(col, rose, beltW * away * 0.45);
+  vec3 earthShadow = mix(uSkyZenith, uSkyHorizon, 0.3) * vec3(0.78, 0.82, 1.0);
+  col = mix(col, earthShadow, smoothstep(0.05, 0.0, yc) * away * 0.4);
   // a slightly deeper band high up (the zenith of an ocean world is a saturated blue)
   col *= mix(1.0, 0.9, smoothstep(0.35, 0.95, yc) * (1.0 - uNight));
 
@@ -158,10 +204,15 @@ vec3 skyColor(vec3 rd, float env) {
     float azs = atan(rd.x, rd.z);
     vec2 ring = vec2(cos(azs), sin(azs));
     float dust = fbm2(ring * 4.0 + rd.y * 6.0) * band;
-    sky += vec3(0.22, 0.25, 0.42) * dust * 0.4;
+    // the milky band, brushed: a warm-cool body broken by dark dust lanes
+    float lane = smoothstep(0.5, 0.72, fbm2(ring * 9.0 + rd.y * 14.0 + 3.7));
+    vec3 bandC = mix(vec3(0.2, 0.24, 0.45), vec3(0.42, 0.3, 0.5), fbm2(ring * 2.5 + rd.y * 3.0 + 9.0));
+    sky += bandC * dust * 0.5 * (1.0 - lane * 0.7);
     sky += starField(rd, 230.0, 0.982, env) * 1.5;
     sky += starField(rd, 520.0, 0.965 - band * 0.05, env) * 0.7;
+    sky += starField(rd, 980.0, 0.955 - band * 0.08, env) * 0.3;
     if (uGalaxy > 0.001) sky += galaxy(rd) * uGalaxy;
+    sky += aurora(rd) * 0.085 * smoothstep(0.5, 1.0, uNight) * (1.0 - env * 0.5);
     col += sky * uStars * above;
   }
   float mc1 = 0.0, mc2 = 0.0;
@@ -208,17 +259,31 @@ vec3 skyColor(vec3 rd, float env) {
       float rshadow = 1.0 - 0.35 * smoothstep(0.08, 0.0, abs(q.y * 3.6 + q.x * 0.55 - 0.35)) * step(0.0, uSunDir.y);
       float rimA = pow(1.0 - z, 3.0);
       vec3 lit = pc * mix(vec3(0.14, 0.18, 0.32), vec3(1.0), sun * rshadow);
-      lit += vec3(0.6, 0.75, 1.0) * rimA * 0.6;
+      // the atmospheric limb glows where the sun reaches it, a cooler thin line elsewhere
+      float limbSun = smoothstep(-0.35, 0.4, dot(n, uSunDir));
+      lit += mix(vec3(0.35, 0.45, 0.7), vec3(0.7, 0.85, 1.0), limbSun) * rimA * (0.25 + 0.6 * limbSun);
       float edgeA = smoothstep(1.0, 0.97, r);
-      float veil = mix(0.6, 0.38, uNight) * (1.0 - smoothstep(0.0, 0.25, yc) * 0.35);
+      float veil = mix(0.46, 0.34, uNight) * (1.0 - smoothstep(0.0, 0.25, yc) * 0.35);
       lit *= mix(1.0, 0.55, uNight);
       vec3 pcol = mix(lit, col, veil);
       col = mix(col, pcol, edgeA * uPlanetVis);
       pcov = edgeA;
     }
     // (only on the planet's side of the sky: the projection would mirror the rings at the antipode)
-    float ringVis = ringMask * (1.0 - gap * 0.7) * (r < 1.0 ? step(0.0, q.y * 3.6 + q.x * 0.55) : 1.0) * step(0.5, pd);
+    // a thin haze of atmosphere just outside the disc
+    col += mix(vec3(0.35, 0.45, 0.7), vec3(0.75, 0.85, 1.0), 0.5 + 0.5 * uSunDir.y) * smoothstep(1.07, 1.0, r) * step(1.0, r) * 0.06 * uPlanetVis * (1.0 - uNight * 0.6);
+    // ringlets of different density: a faint inner ring, a bright broad one, the dark division
+    float ringOp = mix(0.45, 1.0, smoothstep(1.4, 1.55, rr)) * (1.0 - 0.35 * smoothstep(0.02, 0.0, abs(rr - 1.62)));
+    float ringVis = ringMask * ringOp * (1.0 - gap * 0.7) * (r < 1.0 ? step(0.0, q.y * 3.6 + q.x * 0.55) : 1.0) * step(0.5, pd);
     vec3 ringCol = mix(vec3(0.85, 0.82, 0.78), vec3(1.0, 0.95, 0.88), ringBands) * mix(0.7, 1.0, sd);
+    // the planet's shadow falls across the rings on its night side
+    vec2 sq = vec2(dot(uSunDir, pu), dot(uSunDir, pv));
+    sq = length(sq) > 1e-4 ? normalize(sq) : vec2(1.0, 0.0);
+    float across = abs(q.x * sq.y - q.y * sq.x);
+    float pshadow = smoothstep(1.02, 0.9, across) * smoothstep(0.1, -0.3, dot(q, sq));
+    ringCol *= 1.0 - 0.6 * pshadow;
+    // ice catches the low sun warm
+    ringCol = mix(ringCol, ringCol * normalize(uSunScatter + 1e-3) * 1.6, lowSun * 0.35);
     ringCol *= mix(1.0, 0.5, uNight);
     col = mix(col, mix(ringCol, col, mix(0.6, 0.4, uNight)), ringVis * 0.75 * uPlanetVis);
   }
@@ -232,7 +297,30 @@ vec3 skyColor(vec3 rd, float env) {
     c = smoothstep(0.52, 0.85, c) * fbm2(p * 0.7 - 3.0);
     float fade = smoothstep(0.0, 0.25, y);
     vec3 cc = mix(uCloudLit, uSunScatter, pow(sd, 2.0) * 0.6);
+    // at a low sun the cirrus burns pink-gold from below
+    cc = mix(cc, uSunScatter * 1.25, lowSun * 0.55);
     col = mix(col, cc, c * fade * uCirrus * 0.55);
+  }
+
+  // --- Altocumulus: drifting fields of small rippled cloudlets high up (a mackerel sky) -----------
+  if (y > 0.0 && uCirrus > 0.0) {
+    vec2 p = rd.xz / (y + 0.06);
+    vec2 w = normalize(uWind.xz + vec2(1e-3));
+    vec2 pw = vec2(dot(p, w), dot(p, vec2(-w.y, w.x)));
+    float field = smoothstep(0.52, 0.76, fbm2(p * 0.32 + 7.3 + uTime * 0.0012));
+    if (field > 0.001) {
+      // rows of cells that wander and break (never ruled ripples)
+      vec2 qa = vec2(pw.x * 2.4, pw.y * 4.4) + vec2(sin(pw.y * 1.3) * 0.7, sin(pw.x * 0.9) * 0.5) + uTime * 0.004;
+      float cell = 1.0 - worley2(qa);
+      float lets = smoothstep(0.42, 0.78, cell + (fbm2(qa * 0.6) - 0.5) * 0.55) * field;
+      float fadeA = smoothstep(0.03, 0.22, y);
+      vec3 lit = mix(uCloudLit, uSunScatter * 1.2, lowSun * 0.75);
+      vec3 shade = mix(uCloudShadow, uSkyZenith, 0.35);
+      vec3 ac = mix(shade, lit, smoothstep(0.5, 0.95, cell));
+      ac += (uSunScatter * 0.7 + uSunColor * 0.15) * pow(sd, 6.0) * (1.0 - smoothstep(0.6, 0.9, cell));
+      ac += uMoonColor * 0.35 * uNight;
+      col = mix(col, ac, lets * fadeA * uCirrus * 0.5);
+    }
   }
 
   // --- Luminous sea haze at the horizon ---------------------------------------------------------
@@ -269,6 +357,9 @@ vec3 skyColor(vec3 rd, float env) {
   float storm = uStorm;
   col += uSunScatter * pow(sd, 10.0) * 0.18 * (1.0 - storm);
   col += uSunColor * pow(sd, 120.0) * 0.06 * (1.0 - storm);
+  // the corona: a soft bright halo hugging the disk, then a wider warm bloom of the low sun
+  col += uSunColor * (pow(sd, 2200.0) * 0.7 + pow(sd, 420.0) * 0.14) * (1.0 - storm) * (1.0 - env * 0.8);
+  col += uSunScatter * pow(sd, 28.0) * lowSun * 0.22 * (1.0 - storm);
   float disk = smoothstep(0.99955, 0.99975, sd);
   col += uSunColor * disk * 7.0 * (1.0 - storm) * smoothstep(-0.03, 0.01, y) * (1.0 - env);
 

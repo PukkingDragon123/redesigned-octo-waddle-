@@ -114,7 +114,9 @@ import { getNoiseTexture } from './NoiseTex.js';
 import { TERRAIN_VERT, TERRAIN_FRAG } from '../world/shaders/terrain.js';
 
 export const TERRAIN_PALETTE = {
-  grassDark: '#3f6a3a', grassLight: '#8cb35e', grassDry: '#c2b072', grassTeal: '#3f8a76',
+  // the Vur Sok meadow: deep blue-green turf, teal-turquoise sward, periwinkle drifts and lilac
+  // flowering tips (grassDry: the lilac that also leans the turf violet toward the sand)
+  grassDark: '#1d5257', grassLight: '#55aa9c', grassDry: '#b39dd0', grassTeal: '#6f8fc4',
   moss: '#5c7d3a', sandLight: '#d6c8aa', sandBlack: '#2b2a2d', lava: '#ff5a1c',
 };
 

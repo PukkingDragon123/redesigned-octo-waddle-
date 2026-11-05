@@ -276,6 +276,8 @@ void main() {
   col += (uSunScatter * 0.9 + uSunColor * 0.35) * fwd * thin * (1.0 - vDark * 0.6) * 1.6;
   col += uSunScatter * fwd * 0.12;
   col += uMoonColor * smoothstep(0.0, 0.8, dot(N, uMoonDir)) * uNight * 0.38;
+  // moonlight silvers the thin edges of clouds drifting near the moon
+  col += uMoonColor * pow(max(dot(rd, uMoonDir), 0.0), 5.0) * thin * uNight * 1.5;
   // storm clouds are heavier and darker
   col *= 1.0 - vDark * 0.45 * (1.0 - sunT * 0.5);
   col += vec3(0.75, 0.8, 1.0) * vFlash * (0.6 + 0.6 * (1.0 - edge));

@@ -110,20 +110,24 @@ void main() {
   // the meadow's mid-scale life (as the terrain): warm yellowing swells and cool lush patches
   float mv = texture2D(uNoise, wp / 7.5 + 0.13).g;
   g *= 0.9 + 0.2 * mv;
-  g = mix(g, g * vec3(1.07, 1.01, 0.82), smoothstep(0.55, 0.85, mv) * 0.55);
-  g = mix(g, g * vec3(0.84, 1.0, 1.04), smoothstep(0.45, 0.15, mv) * 0.45);
+  g = mix(g, g * vec3(1.12, 0.98, 0.86), smoothstep(0.55, 0.85, mv) * 0.55);
+  g = mix(g, g * vec3(0.8, 0.94, 1.06), smoothstep(0.45, 0.15, mv) * 0.45);
   // and every clump a little its own: value, and a few gone sun-bleached at the tips
   float cj = fract(vSeed * 91.7);
   g *= 0.9 + 0.2 * cj;
   // painted value per blade, dark roots, lighter warm tips
   vec3 col = g * (0.66 + 0.5 * t.r);
-  col *= mix(0.62, 1.0, smoothstep(0.0, 0.55, t.g));
-  col = mix(col, col * vec3(1.16, 1.14, 0.86) + vec3(0.035, 0.035, 0.0), smoothstep(0.55, 1.0, t.g) * 0.75);
-  col = mix(col, col * vec3(1.12, 1.06, 0.78) + vec3(0.03, 0.025, 0.0), smoothstep(0.6, 1.0, t.g) * step(0.72, fract(vSeed * 37.1)) * 0.6);
+  // deep blue-green at the roots, the teal-turquoise blade, soft lilac-violet toward the tips
+  col *= mix(0.6, 1.0, smoothstep(0.0, 0.55, t.g));
+  col = mix(col * vec3(0.78, 0.92, 1.05), col, smoothstep(0.0, 0.4, t.g));
+  col = mix(col, col * vec3(1.18, 0.92, 1.32) + vec3(0.04, 0.02, 0.06), smoothstep(0.5, 1.0, t.g) * 0.8);
+  // and at the very tips, where the sun reaches them, a warm peach-gold catch
+  float sunTip = smoothstep(0.78, 1.0, t.g) * smoothstep(-0.02, 0.2, uSunDir.y) * (0.5 + 0.5 * step(0.55, fract(vSeed * 37.1)));
+  col = mix(col, vec3(1.0, 0.74, 0.52) * (0.55 + 0.35 * t.r), sunTip * 0.5);
   // flower heads on some clumps: violet, cream, coral
   if (vFlower > 0.5 && t.b > 0.5) {
     float h = fract(vSeed * 13.7);
-    vec3 fc = h < 0.4 ? vec3(0.62, 0.42, 0.85) : h < 0.75 ? vec3(1.0, 0.93, 0.78) : vec3(1.0, 0.55, 0.42);
+    vec3 fc = h < 0.4 ? vec3(1.0, 0.76, 0.36) : h < 0.75 ? vec3(1.0, 0.93, 0.78) : vec3(1.0, 0.55, 0.42);
     col = mix(col, fc * 0.8, smoothstep(0.5, 0.9, t.b));
   }
   // the wind crest catches the light

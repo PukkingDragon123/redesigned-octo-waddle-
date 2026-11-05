@@ -63,6 +63,34 @@ export const CONTROL_LINES = {
   ],
 };
 
+// A friend on the same keyboard (local co-op, src/game/Friends.js): the right half. These keys are
+// not P1's: they never count as P1's presses (cinematic skips, QTE presses).
+const KEYMAP2 = {
+  swim: ['KeyI'],
+  brake: ['KeyK'],
+  left: ['KeyJ'],
+  right: ['KeyL'],
+  up: ['KeyU'],
+  down: ['KeyO'],
+  surge: ['Semicolon'],
+  roll: ['KeyM'],
+  hum: ['KeyY'],
+  bite: ['KeyN'],
+  slap: ['Comma'],
+  spout: ['Period'],
+  loop: ['Slash'],
+};
+const P2_CODES = new Set(Object.values(KEYMAP2).flat());
+/** The friend's controls (README "Play with a friend"; Settings -> Controls could list them). */
+export const CONTROL_LINES_P2 = {
+  keyboard: [
+    'I — swim      K — slow      J  L — turn      U  O — rise and dive      ; — surge',
+    'M — barrel roll      , — tail slap      . — spout      / — loop',
+    'Y — hum  (hold to sing)      N — bite      Backspace — leave',
+  ],
+  gamepad: ['A second gamepad: Start or A to join, Back to leave; the same buttons as player one'],
+};
+
 // keys that steer the calf (a steer cue reads them; they never count as an act press)
 const STEER_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyC',
   'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE', 'Escape', 'KeyP', 'Tab', 'AltLeft', 'AltRight', 'ControlLeft', 'ControlRight', 'MetaLeft', 'MetaRight']);
@@ -99,8 +127,14 @@ export class Input {
 
     this.lastTap = {};
     this.dashTap = false;
+    // the friend's half of the keyboard, kept apart from P1's keys
+    this.keys2 = new Set();
+    this.keysPressed2 = new Set();
+    this.padIndex = -1; // P1's gamepad
+    this.p2 = new SecondInput(this);
     const kd = (e) => {
       if (e.repeat) { if (this.capturesKey(e.code)) e.preventDefault(); return; }
+      if (P2_CODES.has(e.code)) { this.keys2.add(e.code); this.keysPressed2.add(e.code); if (e.code === 'Slash' || e.code === 'Semicolon') e.preventDefault(); return; }
       // double-tap Shift dashes
       const now0 = performance.now();
       const tapKey = e.code === 'ShiftLeft' || e.code === 'ShiftRight' ? 'Shift' : null;
@@ -115,6 +149,7 @@ export class Input {
       if (this.capturesKey(e.code)) e.preventDefault();
     };
     const ku = (e) => {
+      this.keys2.delete(e.code);
       this.keys.delete(e.code);
       this.keysReleased.add(e.code);
     };
@@ -123,6 +158,7 @@ export class Input {
     window.addEventListener('blur', () => {
       for (const k of this.keys) this.keysReleased.add(k);
       this.keys.clear();
+      this.keys2.clear();
       this.mouseButtons = 0;
     });
 
@@ -297,7 +333,10 @@ export class Input {
       try { pads = navigator.getGamepads ? (navigator.getGamepads() || []) : []; } catch (e) { this.gamepadBlocked = true; }
     }
     let pad = null;
-    for (const p of pads) if (p && p.connected) { pad = p; break; }
+    // P1 plays on the first gamepad; one a friend has taken (index p2.padIndex) is theirs
+    for (const p of pads) if (p && p.connected && p.index !== this.p2.padIndex) { pad = p; break; }
+    this.padIndex = pad ? pad.index : -1;
+    this.p2.update(pads);
     for (let i = 0; i < this.gpButtons.length; i++) this.gpPrev[i] = this.gpButtons[i];
     if (pad) {
       for (let i = 0; i < this.gpButtons.length; i++) {
@@ -335,6 +374,8 @@ export class Input {
 
   endFrame() {
     this.keysPressed.clear();
+    this.keysPressed2.clear();
+    this.p2.endFrame();
     this.keysReleased.clear();
     this.mousePressed = 0;
     this.mouseReleased = 0;
@@ -458,4 +499,87 @@ export class Input {
     this._edge[dir] = now;
     return true;
   }
+}
+
+/**
+ * The second player's input (local co-op, src/game/Friends.js): a second gamepad (Start or A to
+ * join, Back to leave) or the right half of the keyboard (any of its keys joins, Backspace leaves).
+ * It offers the getters PlayerController and Moves read, so a second controller can take it as is.
+ */
+export class SecondInput {
+  constructor(main) {
+    this.main = main;
+    this.enabled = true;
+    this.padIndex = -1; // the gamepad it has taken (-1: none)
+    this.btn = new Array(17).fill(0);
+    this.prev = new Array(17).fill(0);
+    this.axes = [0, 0, 0, 0];
+    this._edge = new Map(); // other pads: last Start / A state (join presses)
+    this.joinPad = -1; // a free pad pressed Start or A this frame
+    this.lastRollDir = 1;
+  }
+
+  update(pads) {
+    const M = this.main;
+    for (let i = 0; i < 17; i++) this.prev[i] = this.btn[i];
+    this.joinPad = -1;
+    let pad = null;
+    for (const p of pads) {
+      if (!p || !p.connected) continue;
+      if (p.index === this.padIndex) { pad = p; continue; }
+      // a pad other than P1's pressing Start or A: a friend wants in
+      const down = (p.buttons[9]?.value ?? p.buttons[9] ?? 0) > 0.5 || (p.buttons[0]?.value ?? p.buttons[0] ?? 0) > 0.5;
+      const was = this._edge.get(p.index) || false;
+      this._edge.set(p.index, down);
+      if (down && !was && p.index !== M.padIndex && this.padIndex < 0) this.joinPad = p.index;
+    }
+    if (this.padIndex >= 0 && !pad) this.padIndex = -1; // unplugged
+    if (pad) {
+      for (let i = 0; i < 17; i++) { const b = pad.buttons[i]; this.btn[i] = b ? (typeof b === 'object' ? b.value : b) : 0; }
+      const dz = (v) => (Math.abs(v) < 0.14 ? 0 : (v - Math.sign(v) * 0.14) / 0.86);
+      for (let i = 0; i < 4; i++) this.axes[i] = dz(pad.axes[i] || 0);
+    } else {
+      this.btn.fill(0);
+      this.axes.fill(0);
+    }
+  }
+
+  endFrame() {}
+
+  // keyboard half
+  _k(a) { return KEYMAP2[a].some((c) => this.main.keys2.has(c)); }
+  _kp(a) { return KEYMAP2[a].some((c) => this.main.keysPressed2.has(c)); }
+  get keysUsed() { return this.main.keysPressed2.size > 0; }
+  get leavePressed() { return this.main.keysPressed.has('Backspace') || (this.btn[GP.BACK] > 0.5 && this.prev[GP.BACK] <= 0.5); }
+  gp(i) { return this.btn[i] > 0.5; }
+  gpPressed(i) { return this.btn[i] > 0.5 && this.prev[i] <= 0.5; }
+
+  get swim() { return this.enabled ? Math.max(this._k('swim') ? 1 : 0, this.btn[GP.RT]) : 0; }
+  get brake() { return this.enabled ? Math.max(this._k('brake') ? 1 : 0, this.btn[GP.LT]) : 0; }
+  get surge() { return this.enabled && (this._k('surge') || this.gp(GP.L3)); }
+  get turn() {
+    if (!this.enabled) return 0;
+    const t = (this._k('right') ? 1 : 0) - (this._k('left') ? 1 : 0) + this.axes[0];
+    if (Math.abs(t) > 0.3) this.lastRollDir = t > 0 ? -1 : 1;
+    return t;
+  }
+  get climb() {
+    if (!this.enabled) return 0;
+    const v = (this._k('up') ? 1 : 0) - (this._k('down') ? 1 : 0) + (this.gp(GP.A) ? 1 : 0) - this.axes[1];
+    return Math.max(-1, Math.min(1, v));
+  }
+  get lookX() { return 0; }
+  get lookY() { return 0; }
+  get stickLookX() { return this.enabled ? this.axes[2] : 0; }
+  get stickLookY() { return this.enabled ? this.axes[3] : 0; }
+  get rollLeftPressed() { return this.enabled && (this.gpPressed(GP.LB) || (this._kp('roll') && this.lastRollDir > 0)); }
+  get rollRightPressed() { return this.enabled && (this.gpPressed(GP.RB) || (this._kp('roll') && this.lastRollDir < 0)); }
+  get rollHeld() { return this.enabled && (this._k('roll') || this.gp(GP.LB) || this.gp(GP.RB)); }
+  get hum() { return this.enabled && (this._k('hum') || this.gp(GP.X)); }
+  get boom() { return this.enabled && this.gp(GP.Y); }
+  get slapPressed() { return this.enabled && (this._kp('slap') || this.gpPressed(GP.DOWN)); }
+  get spoutPressed() { return this.enabled && (this._kp('spout') || this.gpPressed(GP.UP)); }
+  get loopPressed() { return this.enabled && (this._kp('loop') || this.gpPressed(GP.LEFT) || this.gpPressed(GP.R3)); }
+  get dashPressed() { return this.enabled && this.gpPressed(GP.RIGHT); }
+  get bitePressed() { return this.enabled && (this._kp('bite') || this.gpPressed(GP.B)); }
 }

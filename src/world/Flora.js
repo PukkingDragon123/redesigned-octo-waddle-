@@ -185,10 +185,11 @@ export const FLORA_PAL = {
   fanCoral: { stem: C('#7a5050'), leaf: C('#c98a84'), acc: C('#f0d8c8') },
   puff: { stem: C('#6b6a4a'), leaf: C('#d9cfa8'), acc: C('#f1b36a') },
   puffBlue: { stem: C('#4a5a6a'), leaf: C('#a9c4d9'), acc: C('#f7f2c4') },
-  grass: { stem: C('#3f6633'), leaf: C('#6f9a46'), acc: C('#d4c46a') },
-  grassGold: { stem: C('#7a6a36'), leaf: C('#b3994a'), acc: C('#f0d58a') },
-  grassTeal: { stem: C('#2f5a4c'), leaf: C('#4f8c74'), acc: C('#c0e0a0') },
-  flowers: { stem: C('#3f6633'), leaf: C('#6f9a46'), acc: C('#c58ad6') },
+  // Vur Sok grass: deep blue-green roots, teal-turquoise blades, lilac-violet tips with a peach catch
+  grass: { stem: C('#1b4a50'), leaf: C('#3f9d93'), acc: C('#c3a8e6') },
+  grassGold: { stem: C('#2c3d5c'), leaf: C('#7484c2'), acc: C('#f4c2a0') },
+  grassTeal: { stem: C('#153f46'), leaf: C('#2f8a8c'), acc: C('#b6a6ea') },
+  flowers: { stem: C('#1b4a50'), leaf: C('#3f9d93'), acc: C('#ffc86a') },
   vine: { stem: C('#33502b'), leaf: C('#55803d'), acc: C('#b8d47a') },
   moss: { stem: C('#3a5530'), leaf: C('#5b7d3b'), acc: C('#a9b85a') },
 };

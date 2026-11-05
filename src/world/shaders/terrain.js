@@ -487,9 +487,11 @@ void main() {
     // greener, darker grass in the folds of the ground
     float mv = texture2D(uNoise, wp / 7.5 + 0.13).g;
     g *= 0.9 + 0.2 * mv;
-    g = mix(g, g * vec3(1.07, 1.01, 0.82), smoothstep(0.55, 0.85, mv) * 0.55);
-    g = mix(g, g * vec3(0.84, 1.0, 1.04), smoothstep(0.45, 0.15, mv) * 0.45);
+    g = mix(g, g * vec3(1.12, 0.98, 0.86), smoothstep(0.55, 0.85, mv) * 0.55);
+    g = mix(g, g * vec3(0.8, 0.94, 1.06), smoothstep(0.45, 0.15, mv) * 0.45);
     g *= mix(0.8, 1.0, smoothstep(0.35, 0.9, cav));
+    // toward the beach the turf leans lilac-violet (it never sits teal against turquoise shallows)
+    g = mix(g, uGrassDry * 0.92, smoothstep(0.04, 0.45, sandIn) * 0.6);
     // wind waves rolling over the meadow (whole multiples of the wrapping wave phase: no jump)
     vec2 wd = normalize(uWind.xz + vec2(1e-3));
     float wave = sin(dot(wp, wd) * 0.08 - uWavePhase + patchA * 5.0);
@@ -500,7 +502,7 @@ void main() {
       float h = hash12(cell);
       vec2 f = fract(wp / 1.3) - 0.5;
       float fl = step(1.0 - uFlowers * 0.1, h) * smoothstep(0.24, 0.1, length(f)) * detail;
-      vec3 fc = mix(vec3(0.62, 0.42, 0.85), vec3(1.0, 0.93, 0.78), hash12(cell + 7.0));
+      vec3 fc = mix(vec3(1.0, 0.76, 0.36), vec3(1.0, 0.93, 0.78), hash12(cell + 7.0));
       fc = mix(fc, vec3(1.0, 0.52, 0.42), step(0.8, hash12(cell + 3.0)));
       g = mix(g, fc, fl * smoothstep(0.3, 0.6, patchB));
     }

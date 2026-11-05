@@ -793,6 +793,8 @@ export class Story {
       return { target: tgt, speed: deep ? 7 : 6, arrive: 8, lookAt: calf.pos, maxPitch: deep ? 1 : 0.6 };
     };
     yield* until(() => phase === 3, 40);
+    // hunting jellies rise from the deep to the feast too (src/creatures/eco/Reef.js bloom)
+    this.eco?.reef?.bloom?.(school()?.pos || calf.pos, { count: 30, depth: 14 });
     // her invitation: a call, and again while the calf stays up in the air
     this.voiceCall(mom, 'answer');
     this.feastInvite = true;
@@ -883,6 +885,8 @@ export class Story {
     }, { rate: 0.4 });
     // singing to the plankton: each held note lights a wave across the black sea (src/game/life/Songs.js)
     if (this.songs && this.game.qte && !this.songs.recent('plankton')) yield* this.songs.planktonSong();
+    // a bloom of hunting jellies rising in the black water below, which the dive threads through
+    this.eco?.reef?.bloom?.(mom.pos, { count: 40, depth: 12, radius: 30 });
     // down into the glowing sea after her, and out under the galaxy: breach, loop, dash (src/game/Abilities.js)
     if (this.abilities) yield* this.abilities.scene('acro');
     yield () => herd.s > this.path.chapters[6].start;
@@ -1674,6 +1678,8 @@ export class Story {
       const sh = this.camHint && g.time < this.camHint.until ? this.camHint : null;
       const lh = sh || this.activities?.lessons?.camHint;
       if (lh && !opts.lookBias) { opts.lookBias = lh.pos; opts.lookBiasW = lh.w; opts.lookBiasMax = lh.max; }
+      // a friend playing along (local co-op): the view widens to keep both calves in frame
+      this.activities?.friends?.camera?.(opts);
       g.cameraRig.follow(dt, calf, this.player.aimYaw, this.player.aimPitch, opts);
     }
     if (this.state === 'intro' || this.state === 'menu') g.cameraRig.follow(dt, calf, calf.yaw, 0, {});

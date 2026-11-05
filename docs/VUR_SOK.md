@@ -303,6 +303,20 @@ and a better thumbnail with cool transitions in a really cool painted style."*
 - **Key art:** the itch.io cover and banner are painted. The cover is three scenes joined by brush-stroke
   wipes.
 
+### 0.15 Beautiful sky, new grass colour, no swallowing, hunting jellies, friends (newest)
+User: *"Make the sky absolutely beautiful ... the grass a new colour, remove 'you got swallowed', add hunting
+jellyfish, and play with friends too."*
+- **Sky:** absolutely beautiful at every time of day.
+- **Grass:** a new alien palette.
+- **Mother:** she never takes the calf into her mouth. In danger she shields it under her flippers and
+  drives the hunters off.
+- **Jellies:** they hunt fish and sting a careless calf.
+- **Friends:** playmate calves invite you to games, and a second player on the same machine can drop in as a
+  playmate.
+- **AI disclosure:** the jam rules require it, so the game's itch.io description states that it contains
+  AI-generated content and what was made with AI (see itch/ITCH.md). Nothing in the game or its history is
+  hidden or disguised.
+
 ## 1. Art direction (supersedes the earlier anime direction where they conflict)
 
 - **Cinematic stylized realism**, in the spirit of Avatar: The Way of Water (tulkun, Pandora's seas) and

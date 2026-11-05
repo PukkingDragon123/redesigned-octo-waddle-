@@ -3,15 +3,11 @@
 // skimmers wheel down out of the dawn and lanternjack lures rise from the deep under the calf.
 //  1. the mother calls; the calf must stick to her: steer cues into her lee as she swings through a
 //     tight turn (src/game/QTE.js steer). A miss: she swings back for it (softer, never a fail).
-//  2. she panics (fast breathing, wide eyes, frantic calls: drive.fear), and scoops the calf into her
-//     mouth, a mouthbrooder carrying its young.
-//  3. inside her mouth (a dark, wet cavity built here; light through her lips and the fringe of her
-//     baleen; the world outside muffled, her heartbeat): hold to stay calm while she fights and flees
-//     (thuds, the light swinging, her muffled roar).
-//  4. outside, safe: she opens her mouth, lets the calf out gently and checks it over (her eye, a
-//     nuzzle, a slow circle), then a coo.
-// Later in ACT I, if the calf strays far and something really goes for it, she may (rarely) fetch it
-// and carry it a short way in her mouth again (update()).
+//  2. she panics (fast breathing, wide eyes, frantic calls: drive.fear), sweeps down over the calf
+//     and wraps it under her flippers (a shield, never swallowing it: docs/VUR_SOK.md 0.15), then
+//     roars and slaps the sea until the hunters scatter.
+//  3. safe: she checks it over (her eye, a nuzzle, a slow circle), then a coo.
+// (The earlier mouth-carry and its cavity are no longer played.)
 // Story creates it (new Bonds(game, story)), calls update(dt), and runs danger() in the Dawn Lagoon.
 // Debug: ?debug&chapter=0&scene=mouth plays the scene at once.
 import {
@@ -207,12 +203,7 @@ export class Bonds {
     this.cd -= dt;
     const hunt = S.activities?.hunt;
     if (hunt) {
-      if (hunt.hits > this._hits && !this.carrying && this._lagoonDone && this.cd <= 0 && S.act === 1 && S.state === 'play' &&
-        !S.cine?.active && !S.script.running('bondsScene') && !S.script.running('abilityScene') && hunt.stray > 0.45 &&
-        !S.song?.active && (S.weather?.level ?? 0) < 0.3 && !herd.threat && herd.mode === 'travel') {
-        this.cd = 240;
-        S.script.run(this.rescue(), 'bondsScene');
-      }
+      // (no later mouth-carry: the user asked that the calf is never swallowed)
       this._hits = hunt.hits;
     }
   }
@@ -376,50 +367,34 @@ export class Bonds {
     S.voiceCall(calf, 'chirp');
     g.cameraRig?.addShake?.(0.35);
     S.audio?.sfx?.('splash', { position: calf.pos, gain: 0.6 });
-    // 3. her panic peaks: she scoops the calf into her mouth (slow motion, close)
+    // 3. her panic peaks: she sweeps down over the calf and wraps it under her flippers, then roars
+    //    and slaps the sea until the hunters scatter (a shield: she never takes it into her mouth)
     this._panic(mom, 1);
     S.life.autoGoal = null;
     C.begin({ focus: calf, rate: 1.4, lead: mom });
-    C.slowmo(0.45);
-    S.life.kin.add(calf);
-    const start = calf.pos.clone();
-    const f = this._frame(mom, {});
-    let tt = 0;
-    const mp = new Vector3();
-    const scoop = (k, tt2, s) => {
-      mp.copy(mom.pos).addScaledVector(mom.fwd, mom.L * 0.42);
-      s.pos.copy(mp).addScaledVector(mom.right, side * lerp(11, 8, k)).addScaledVector(mom.fwd, lerp(7, 5, k));
-      s.pos.y = Math.max(s.pos.y + 1, seaHeight(g, s.pos.x, s.pos.z) + 1.6);
-      s.look.copy(mp).lerp(calf.pos, 0.4);
-      s.fov = lerp(42, 34, k);
-      s.roll = 0.02 * side;
-    };
+    C.slowmo(0.5);
     S.audio.stinger?.('strike');
-    while (tt < 1.8 && !C.skipped) {
-      const dt = yield 0;
-      tt += g.dtReal ?? dt;
-      const u = smoothstep(0.15, 1.2, tt);
-      mom.drive.mouth = tt < 1.25 ? Math.min(1, tt * 2.2) : Math.max(0, 1 - (tt - 1.25) * 4);
-      this._frame(mom, f);
-      calf.pos.copy(start).lerp(f.c, u);
-      calf.vel.copy(mom.vel);
-      calf.yaw = lerp(calf.yaw, mom.yaw, u * 0.2);
-      calf._syncTransform?.();
-      scoop(clamp(tt / 1.8, 0, 1), tt, C.shot);
-      clearCam(S, C.shot);
-      if (tt > 1.2 && !this.carrying) { this.carrying = true; mom.anim.gulp?.(0.6); S.audio?.sfx?.('gulp', { position: mom.pos, gain: 0.7, pitch: 0.6 }); }
-    }
-    this.carrying = true;
-    mom.drive.mouth = 0;
+    const hugG = mom.anim.gesture?.('hug', { dur: 4.6 });
+    herd.motherScript = (m) => ({ target: _v2.copy(calf.pos).addScaledVector(calf.up, m.radius * 0.9 + calf.radius + 0.6).addScaledVector(m.fwd, -m.L * 0.08), speed: 9, arrive: 4, minSpeed: 1, lookAt: calf.pos });
+    calf.vel.multiplyScalar(0.4);
+    // low beneath them: her body closing over the calf against the sky
+    yield* this._play(C.rel({ subject: calf, side: [side * 13, side * 10], up: [-3.5, -2.5], back: [-4, -1], lookUp: [3, 5], fov: [44, 38], worldUp: true }), 2.4, {
+      onFrame: (k, tt) => { if (hugG) hugG.deep = Math.min(1, tt / 1.6); this._moveThreats(T, calf, 0.01); calf.drive.fear = Math.max(0.3, 1 - tt * 0.3); },
+    });
     C.slowmo(1);
-    // 4. inside her mouth: dark, wet, warm light through her lips and baleen, her heart; stay calm
-    yield* this._inside(T, side, { qte: true, fight: true });
-    // 5. outside: she flees through the lagoon, then slows in calm water
+    // she roars and slaps the sea: the wings wheel away, the lures sink back into the deep
+    S.voiceCall(mom, 'roar');
+    g.cameraRig?.addShake?.(0.45);
+    _v.copy(mom.pos).addScaledVector(mom.fwd, -mom.L * 0.45).setY(seaHeight(g, mom.pos.x, mom.pos.z));
+    g.ocean?.splash?.(_v, 1.3, mom.L * 0.25);
+    S.audio?.sfx?.('tailSlap', { position: _v, gain: 1 });
     S.eco && (S.eco.threat = null);
     this._releaseThreats(T, calf.pos);
-    herd.motherScript = (m) => ({ target: _v2.copy(m.pos).addScaledVector(m.fwd, 30).setY(seaHeight(g, m.pos.x, m.pos.z) + m.radius * 0.7), speed: lerp(4, 14, m.drive.fear), arrive: 10, lookAt: null });
-    yield* this._play(C.track({ subject: mom, side: [side * 30, side * 24], up: [12, 9], ahead: [14, 22], fov: [46, 50] }), 3.0, { onFrame: () => { mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.004); } });
-    yield* this._release(side);
+    S.eco?.fleeFrom?.(calf.pos, 90, 2.5);
+    yield* this._play(C.rel({ subject: mom, side: [side * 30, side * 26], up: [6, 9], back: [10, 16], ahead: 4, fov: [46, 50], worldUp: true }), 2.4, {
+      onFrame: (k, tt) => { if (hugG) hugG.deep = Math.max(0, 1 - tt * 0.5); mom.drive.fear = Math.max(0.2, mom.drive.fear - 0.006); },
+    });
+    yield* this._checkOver(side);
     calf.drive.fear = 0;
     S.audio.setMood?.('dawn', { fade: 6 });
     S.audio.setIntensity?.(0.35);
@@ -562,6 +537,12 @@ export class Bonds {
     calf.drive.sleep = 0;
     calf.vel.copy(mom.vel).addScaledVector(mom.fwd, 1.5);
     S.voiceCall(calf, 'chirp');
+    yield* this._checkOver(side);
+  }
+
+  /** She checks the calf over: her eye on it, a nuzzle, a slow look along its body. */
+  *_checkOver(side) {
+    const S = this.story, g = this.game, herd = this.herd, mom = herd.mother, calf = herd.calf, C = S.cine;
     // she checks it over: her eye on it, a nuzzle, a slow look along its body
     mom.drive.fear = 0.15;
     mom.anim.breatheRate = 1;

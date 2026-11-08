@@ -226,6 +226,7 @@ export class Story {
       if (m) {
         const { Ecosystem } = await m();
         this.eco = new Ecosystem(g);
+        this.eco.reef?.setDetail?.({ high: 1, medium: 0.6, low: 0.35 }[g.engine.qualityName] ?? 1);
         this.eco.roosts = [this.herd.elder, ...this.herd.adults.filter((w) => w.role === 'adult').slice(0, 3)];
         // adults lunging with open mouths really eat (the calf feeds through eat() below)
         this.eco.feeders = this.herd.adults;

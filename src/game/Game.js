@@ -26,7 +26,7 @@ export class Game {
     this.debug = this.params.has('debug');
     this.settings = loadSettings();
     // automatic quality starts every session from the default; step-downs only last for the session
-    if (this.settings.autoQuality) this.settings.quality = 'high';
+    if (this.settings.autoQuality) this.settings.quality = detectStartQuality();
     const quality = this.params.get('quality') || this.settings.quality;
     this.engine = new Engine(canvas, quality, { preserve: this.debug });
     this.input = new Input(canvas);
@@ -67,7 +67,13 @@ export class Game {
     this.devUpdate = null;
     this.fadeRate = 0;
     // automatic quality: measured once the world is built, until the player picks a quality
-    this.perf = { sum: 0, n: 0, cooldown: 3, calm: 0, ready: false };
+    this.perf = { sum: 0, cpu: 0, n: 0, cooldown: 3, calm: 0, slow: 0, ready: false };
+    this._cpuMs = 0;
+    // frame pacing: on a high-refresh monitor render every k-th refresh (~60 fps, perfectly even)
+    this._hz = 60;
+    this._frameEvery = 1;
+    this._tick = 0;
+    this._ticks = [];
     if (this.debug) {
       this.engine.post.grade.uFade.value = 0;
       this.veil?.remove();
@@ -87,32 +93,53 @@ export class Game {
     const k = { high: 1, medium: 0.6, low: 0.25 }[this.engine.qualityName] ?? 1;
     this.story?.world?.setQuality?.(k);
     this.story?.world?.flora?.setQuality?.(Math.max(0.4, k));
+    this.story?.eco?.reef?.setDetail?.({ high: 1, medium: 0.6, low: 0.35 }[this.engine.qualityName] ?? 1);
   }
 
-  /** Steps quality down while frames are slow (never in debug, never after a manual choice). */
+  /**
+   * Keeps the frame rate smooth without spoiling the picture. Resolution only drops (to 80% at
+   * most) when the GPU is the bottleneck; a slow CPU would gain nothing from a blurrier frame, so
+   * then a quality tier steps down instead. A tier only drops after two slow seconds in a row, so a
+   * single hitch never costs detail. Never in debug, never after a manual choice.
+   */
   governQuality(dtReal) {
     const p = this.perf;
     if (this.debug || !p.ready || !this.settings.autoQuality || document.hidden) return;
     if ((p.cooldown -= dtReal) > 0) return;
     p.sum += dtReal;
+    p.cpu += this._cpuMs / 1000;
     p.n++;
-    if (p.sum < 2.5) return;
+    if (p.sum < 1.0) return;
     const avg = p.sum / p.n;
+    const cpu = p.cpu / p.n;
     p.sum = 0;
+    p.cpu = 0;
     p.n = 0;
+    const e = this.engine;
+    const target = this._frameEvery / this._hz; // the paced frame interval (about 1/60 s)
     const order = ['high', 'medium', 'low'];
-    const i = order.indexOf(this.engine.qualityName);
-    if (avg > 1 / 40 && i >= 0 && i < order.length - 1) {
-      this.settings.quality = order[i + 1];
-      this.engine.setQuality(this.settings.quality);
-      this.applyQuality();
-      this.saveSettings();
-      p.cooldown = 3;
+    const i = order.indexOf(e.qualityName);
+    if (avg > target * 1.2) {
       p.calm = 0;
-    } else if (avg < 1 / 50 && ++p.calm >= 4) {
-      // smooth for a while: check less often, but keep watching for heavier chapters
-      p.calm = 0;
-      p.cooldown = 20;
+      const gpuBound = avg > cpu * 1.4 + 0.002;
+      if (gpuBound && e.resScale > 0.8) {
+        e.setResScale(e.resScale - 0.1);
+        p.cooldown = 1;
+      } else if (++p.slow >= 2 && i >= 0 && i < order.length - 1) {
+        p.slow = 0;
+        this.settings.quality = order[i + 1];
+        e.setQuality(this.settings.quality);
+        this.applyQuality();
+        this.saveSettings();
+        p.cooldown = 3;
+      }
+    } else {
+      p.slow = 0;
+      if (avg < target * 1.05 && ++p.calm >= 6 && e.resScale < 1) {
+        p.calm = 0;
+        e.setResScale(e.resScale + 0.1);
+        p.cooldown = 4;
+      }
     }
   }
 
@@ -147,14 +174,29 @@ export class Game {
 
   start() {
     const maxFrames = this.debug && this.params.has('frames') ? +this.params.get('frames') : Infinity;
+    const uncapped = this.params.has('uncapped') || this.settings.fpsCap === false;
+    let prevTick = 0;
     const loop = (now) => {
       if (this.frame >= maxFrames) { this.halted = true; return; }
       requestAnimationFrame(loop);
+      // measure the display's refresh rate from the first ticks, then pace to about 60 fps
+      if (prevTick && this._ticks.length < 90) {
+        this._ticks.push(now - prevTick);
+        if (this._ticks.length === 90) {
+          const t = this._ticks.slice().sort((x, y) => x - y)[45];
+          this._hz = Math.round(1000 / t);
+          this._frameEvery = uncapped || this._hz < 75 ? 1 : Math.max(1, Math.round(this._hz / 60));
+        }
+      }
+      prevTick = now;
+      if (++this._tick % this._frameEvery) return;
       const dt = Math.min(0.05, Math.max(0.0001, (now - this._last) / 1000));
       this._last = now;
       if (!this.ready) return;
       try {
+        const c0 = performance.now();
         this.update(dt);
+        this._cpuMs = performance.now() - c0;
       } catch (e) {
         // keep flying: report the first failure, then carry on with the next frame
         if (!this._frameError) console.error(e);
@@ -240,11 +282,26 @@ export class Game {
 }
 
 function loadSettings() {
-  const def = { quality: 'high', autoQuality: true, music: 0.8, sound: 1.0, invertY: false, sensitivity: 1.0 };
+  const def = { quality: 'high', autoQuality: true, fpsCap: true, music: 0.8, sound: 1.0, invertY: false, sensitivity: 1.0 };
   try {
     const s = JSON.parse(localStorage.getItem('skysong.settings') || 'null');
     return Object.assign(def, s || {});
   } catch (e) {
     return def;
   }
+}
+
+/** Start on High everywhere; only a software renderer (no GPU acceleration) starts on Low. */
+function detectStartQuality() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    if (/swiftshader|llvmpipe|software|basic render/i.test(name)) {
+      window.__skysongSoftwareGL = name;
+      return 'low';
+    }
+  } catch (e) { /* fall through */ }
+  return 'high';
 }

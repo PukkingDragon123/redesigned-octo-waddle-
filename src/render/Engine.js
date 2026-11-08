@@ -13,9 +13,11 @@ import { PainterlyPost } from './painterly/PainterlyPost.js';
 // paint: the painterly quality (PainterlyPost): >= 0.75 full 33-tap strokes and 3-slice AO, >= 0.4
 // 17-tap strokes and 2 slices, below that no strokes (painted grade, canvas, 1-slice AO only).
 export const QUALITY = {
-  high: { scale: 1.0, maxDpr: 1.5, samples: 4, shadow: 2048, fur: 1.0, cloudSteps: 1.0, clouds: 1.0, rays: true, paint: 1 },
-  medium: { scale: 0.85, maxDpr: 1.25, samples: 4, shadow: 2048, fur: 0.7, cloudSteps: 0.75, clouds: 0.8, rays: true, paint: 0.6 },
-  low: { scale: 0.7, maxDpr: 1.0, samples: 2, shadow: 1024, fur: 0.45, cloudSteps: 0.55, clouds: 0.55, rays: false, paint: 0.3 },
+  // pixels: the most pixels one frame may render at this tier (a 4K or large-window PC otherwise
+  // pays for 8M+ pixels through MSAA HDR, AO, strokes and bloom: the main cause of PC lag)
+  high: { scale: 1.0, maxDpr: 1.5, pixels: 3.7e6, samples: 4, shadow: 2048, fur: 1.0, cloudSteps: 1.0, clouds: 1.0, rays: true, paint: 1 },
+  medium: { scale: 0.85, maxDpr: 1.25, pixels: 2.4e6, samples: 4, shadow: 2048, fur: 0.7, cloudSteps: 0.75, clouds: 0.8, rays: true, paint: 0.6 },
+  low: { scale: 0.7, maxDpr: 1.0, pixels: 1.4e6, samples: 2, shadow: 1024, fur: 0.45, cloudSteps: 0.55, clouds: 0.55, rays: false, paint: 0.3 },
 };
 
 // The painted looks (engine.setLook): depth of field preset and paint strength.
@@ -51,6 +53,7 @@ export class Engine {
     this.shadowFocus = new Vector3();
     this.midPasses = [];
     this.beforeRender = [];
+    this.resScale = 1; // dynamic resolution, 0.8..1, driven by Game.governQuality
     this.qualityName = qualityName;
     this.quality = QUALITY[qualityName] || QUALITY.high;
     this.shadows = new Shadows(this.quality.shadow);
@@ -186,16 +189,29 @@ export class Engine {
     G.uDepthTex.value = depth;
   }
 
+  /** Dynamic resolution: 0.8..1 of the tier's pixel budget (never blurrier than that). */
+  setResScale(k) {
+    k = Math.min(1, Math.max(0.8, k));
+    if (Math.abs(k - this.resScale) < 0.01) return;
+    this.resScale = k;
+    this.resize();
+  }
+
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality.maxDpr);
+    const q = this.quality;
+    let dpr = Math.min(window.devicePixelRatio || 1, q.maxDpr) * q.scale * this.resScale;
     const w = Math.max(1, Math.floor(window.innerWidth));
     const h = Math.max(1, Math.floor(window.innerHeight));
-    this.renderer.setPixelRatio(dpr * this.quality.scale);
+    // cap the total pixel count so huge monitors and windows stay playable
+    const px = w * h * dpr * dpr;
+    const budget = q.pixels * this.resScale;
+    if (px > budget) dpr *= Math.sqrt(budget / px);
+    this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
     this.canvas.style.width = w + 'px';
     this.canvas.style.height = h + 'px';
-    const pw = Math.max(1, Math.floor(w * dpr * this.quality.scale));
-    const ph = Math.max(1, Math.floor(h * dpr * this.quality.scale));
+    const pw = Math.max(1, Math.floor(w * dpr));
+    const ph = Math.max(1, Math.floor(h * dpr));
     this.width = pw;
     this.height = ph;
     this.rt.setSize(pw, ph);

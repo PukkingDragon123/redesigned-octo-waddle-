@@ -32,6 +32,15 @@ try {
     game.engine.renderer.properties.get(game.engine.rt).__useRenderToTexture = false;
   });
   game.start();
+  if (window.__skysongSoftwareGL) {
+    // the #1 cause of a laggy PC: the browser is drawing without the graphics card
+    const n = document.createElement('p');
+    n.textContent = 'Your browser is not using your graphics card. Turn on hardware acceleration in its settings for smooth flight.';
+    n.style.cssText = 'position:fixed;left:16px;right:16px;bottom:24px;margin:0;text-align:center;color:#cfd6ea;font:300 18px "Cormorant Garamond",Georgia,serif;letter-spacing:.06em;z-index:2;transition:opacity 2s;pointer-events:none';
+    document.body.appendChild(n);
+    setTimeout(() => { n.style.opacity = '0'; }, 12000);
+    setTimeout(() => n.remove(), 14500);
+  }
 } catch (e) {
   fail(e);
 }

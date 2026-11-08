@@ -423,8 +423,8 @@ export class ReefLife {
       for (const I of this.instList) I.mesh.visible = show;
     }
     if (!show) return;
-    // critters seen from above the surface are only glimpsed through the water: draw about half
-    const eff = this.detail * (cam.y > sea + 2 ? 0.5 : 1);
+    // lower tiers: critters seen from above the surface are only glimpsed, draw about half
+    const eff = this.detail < 1 && cam.y > sea + 2 ? this.detail * 0.5 : this.detail;
     for (const I of this.instList) {
       const k = I.kind;
       if (k === 'puffer' || k === 'eel' || k === 'jelly') I.cap = Math.max(2, Math.ceil(I.max * eff));

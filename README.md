@@ -37,6 +37,15 @@ A browser with WebGL 2 is required (recent Chrome, Edge, Firefox or Safari). A d
 GPU is recommended. Quality steps down on its own if frames run slow; you can also pick it
 in **Settings**.
 
+### Windows 64-bit app
+
+`npm run dist:win` builds a portable `release/SKYSONG-win-x64.exe` (Electron, forced GPU path,
+F11 for fullscreen). The **Windows x64 build** GitHub Action produces it too (Actions tab, download
+the `SKYSONG-win-x64` artifact).
+
+Performance: each quality tier caps the pixels rendered per frame, and resolution scales
+dynamically (50 to 100 percent) to hold about 60 fps before any tier is dropped.
+
 ### Controls
 
 | | Keyboard and mouse | Gamepad |

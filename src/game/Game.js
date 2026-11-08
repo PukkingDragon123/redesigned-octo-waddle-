@@ -26,7 +26,7 @@ export class Game {
     this.debug = this.params.has('debug');
     this.settings = loadSettings();
     // automatic quality starts every session from the default; step-downs only last for the session
-    if (this.settings.autoQuality) this.settings.quality = 'high';
+    if (this.settings.autoQuality) this.settings.quality = detectStartQuality();
     const quality = this.params.get('quality') || this.settings.quality;
     this.engine = new Engine(canvas, quality, { preserve: this.debug });
     this.input = new Input(canvas);
@@ -89,30 +89,41 @@ export class Game {
     this.story?.world?.flora?.setQuality?.(Math.max(0.4, k));
   }
 
-  /** Steps quality down while frames are slow (never in debug, never after a manual choice). */
+  /**
+   * Keeps the frame rate smooth: dynamic resolution first (fast, invisible), then quality tiers.
+   * Never in debug, never after a manual choice. Steps back up slowly when frames are comfortable.
+   */
   governQuality(dtReal) {
     const p = this.perf;
     if (this.debug || !p.ready || !this.settings.autoQuality || document.hidden) return;
     if ((p.cooldown -= dtReal) > 0) return;
     p.sum += dtReal;
     p.n++;
-    if (p.sum < 2.5) return;
+    if (p.sum < 1.0) return;
     const avg = p.sum / p.n;
     p.sum = 0;
     p.n = 0;
+    const e = this.engine;
     const order = ['high', 'medium', 'low'];
-    const i = order.indexOf(this.engine.qualityName);
-    if (avg > 1 / 40 && i >= 0 && i < order.length - 1) {
-      this.settings.quality = order[i + 1];
-      this.engine.setQuality(this.settings.quality);
-      this.applyQuality();
-      this.saveSettings();
-      p.cooldown = 3;
+    const i = order.indexOf(e.qualityName);
+    if (avg > 1 / 50) {
       p.calm = 0;
-    } else if (avg < 1 / 50 && ++p.calm >= 4) {
-      // smooth for a while: check less often, but keep watching for heavier chapters
+      if (e.resScale > 0.55) {
+        e.setResScale(e.resScale - (avg > 1 / 30 ? 0.15 : 0.08));
+        p.cooldown = 0.6;
+      } else if (i >= 0 && i < order.length - 1) {
+        this.settings.quality = order[i + 1];
+        e.setQuality(this.settings.quality);
+        e.setResScale(0.85);
+        this.applyQuality();
+        this.saveSettings();
+        p.cooldown = 2;
+      }
+    } else if (avg < 1 / 57 && ++p.calm >= 8 && e.resScale < 1) {
+      // comfortably fast for a while: win a little resolution back
       p.calm = 0;
-      p.cooldown = 20;
+      e.setResScale(e.resScale + 0.05);
+      p.cooldown = 5;
     }
   }
 
@@ -247,4 +258,18 @@ function loadSettings() {
   } catch (e) {
     return def;
   }
+}
+
+/** Integrated GPUs and software renderers start lower; the governor still adapts from there. */
+function detectStartQuality() {
+  if (/android|iphone|ipad|mobile/i.test(navigator.userAgent)) return 'high'; // phones already run well
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    if (/swiftshader|llvmpipe|software|basic render/i.test(name)) return 'low';
+    if (/intel|uhd|iris|vega \d|radeon\(tm\) graphics|adreno|mali/i.test(name) && !/arc/i.test(name)) return 'medium';
+  } catch (e) { /* fall through */ }
+  return 'high';
 }

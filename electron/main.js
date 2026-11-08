@@ -4,6 +4,8 @@ const path = require('path');
 
 // Force the fast GPU path and keep rendering smooth (no vsync-throttling when unfocused, no FPS cap).
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+// laptops with two GPUs: always run on the dedicated one, never the integrated chip
+app.commandLine.appendSwitch('force_high_performance_gpu');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('use-angle', 'd3d11');

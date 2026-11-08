@@ -93,6 +93,7 @@ class Inst {
     C[k] = cx; C[k + 1] = cy; C[k + 2] = cz; C[k + 3] = cw;
   }
   commit(n) {
+    if (this.cap !== undefined && n > this.cap) n = this.cap;
     this.n = n;
     this.geo.instanceCount = n;
     for (const a of [this.aA, this.aB, this.aC]) {
@@ -150,6 +151,9 @@ export class ReefLife {
     /** Living radius around the camera (m). */
     this.radius = opts.radius ?? 78;
     this.density = opts.density ?? 1;
+    this._baseDensity = this.density;
+    /** Quality detail 0..1 (setDetail): thins the garden and caps the drawn critters. */
+    this.detail = 1;
     this.inst = {
       kelp: new Inst(this, 'kelp', buildKelp(), 380),
       tubes: new Inst(this, 'tubes', buildTubes(), 130),
@@ -191,6 +195,15 @@ export class ReefLife {
     this._stingCool = 0;
     this._warnT = -1e9;
     this.visible = true;
+  }
+
+  /** Quality: 1 full reef, lower values draw fewer critters and a sparser garden. */
+  setDetail(k) {
+    k = Math.max(0.2, Math.min(1, k));
+    if (k === this.detail) return;
+    this.detail = k;
+    this.density = this._baseDensity * (0.55 + 0.45 * k);
+    this._scatterAt.set(1e9, 0, 1e9); // re-scatter at the new density next frame
   }
 
   // ---- placement -----------------------------------------------------------------------------
@@ -410,6 +423,12 @@ export class ReefLife {
       for (const I of this.instList) I.mesh.visible = show;
     }
     if (!show) return;
+    // critters seen from above the surface are only glimpsed through the water: draw about half
+    const eff = this.detail * (cam.y > sea + 2 ? 0.5 : 1);
+    for (const I of this.instList) {
+      const k = I.kind;
+      if (k === 'puffer' || k === 'eel' || k === 'jelly') I.cap = Math.max(2, Math.ceil(I.max * eff));
+    }
     this.focus.copy(cam);
     const R = this.radius;
     for (const I of this.instList) {

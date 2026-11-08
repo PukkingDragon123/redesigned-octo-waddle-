@@ -87,6 +87,7 @@ export class Game {
     const k = { high: 1, medium: 0.6, low: 0.25 }[this.engine.qualityName] ?? 1;
     this.story?.world?.setQuality?.(k);
     this.story?.world?.flora?.setQuality?.(Math.max(0.4, k));
+    this.story?.eco?.reef?.setDetail?.({ high: 1, medium: 0.6, low: 0.35 }[this.engine.qualityName] ?? 1);
   }
 
   /**
